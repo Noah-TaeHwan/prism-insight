@@ -14,8 +14,19 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+FIRECRAWL_HTTP_TIMEOUT_SECONDS = 30
+FIRECRAWL_MAX_ATTEMPTS = 1
+
 # Singleton instance
 _firecrawl_app = None
+
+
+def is_firecrawl_configured() -> bool:
+    """Return whether a non-placeholder API key is set in the environment."""
+    key = os.getenv("FIRECRAWL_API_KEY", "").strip()
+    placeholders = {"example key", "your-api-key", "your_api_key"}
+    return bool(key) and key.casefold() not in placeholders
+
 
 def _get_api_key() -> str:
     """Resolve Firecrawl API key from environment or mcp_agent.config.yaml."""
@@ -44,12 +55,22 @@ def get_firecrawl_app():
     global _firecrawl_app
     if _firecrawl_app is None:
         from firecrawl import FirecrawlApp
-        _firecrawl_app = FirecrawlApp(api_key=_get_api_key())
+        _firecrawl_app = FirecrawlApp(
+            api_key=_get_api_key(),
+            timeout=FIRECRAWL_HTTP_TIMEOUT_SECONDS,
+            max_retries=FIRECRAWL_MAX_ATTEMPTS,
+        )
         logger.info("FirecrawlApp singleton initialized")
     return _firecrawl_app
 
 
-def firecrawl_search(query: str, limit: int = 10, with_content: bool = False):
+def firecrawl_search(
+    query: str,
+    limit: int = 10,
+    with_content: bool = False,
+    sources: list[str] | None = None,
+    tbs: str | None = None,
+):
     """
     Search the web via Firecrawl.
 
@@ -59,27 +80,81 @@ def firecrawl_search(query: str, limit: int = 10, with_content: bool = False):
         with_content: When True, scrape full markdown content for each result.
                       Each result item will have a .markdown attribute with the
                       article body (more credits used, but much richer data).
+        sources: Optional Firecrawl search source filters.
+        tbs: Optional Google time-based search filter.
 
     Returns:
         SearchData object with .web list of results, or None on error
     """
     try:
         app = get_firecrawl_app()
+        search_kwargs = {"limit": limit}
+        if sources is not None:
+            search_kwargs["sources"] = sources
+        if tbs is not None:
+            search_kwargs["tbs"] = tbs
+
         if with_content:
             try:
-                from firecrawl import ScrapeOptions  # available in firecrawl-py >= 1.0
-                scrape_opts = ScrapeOptions(formats=["markdown"])
-                result = app.search(query, limit=limit, scrape_options=scrape_opts)
-            except (ImportError, TypeError) as ie:
+                from firecrawl.v2.types import ScrapeOptions
+                scrape_opts = ScrapeOptions(
+                    formats=["markdown"],
+                    only_main_content=True,
+                )
+            except ImportError as exc:
                 # Fallback: SDK version doesn't support ScrapeOptions — use plain search
-                logger.warning(f"ScrapeOptions not available ({ie}), falling back to plain search")
-                result = app.search(query, limit=limit)
+                logger.warning(
+                    "ScrapeOptions unavailable: error_type=%s; falling back to plain search",
+                    type(exc).__name__,
+                )
+                result = app.search(query, **search_kwargs)
+            else:
+                result = app.search(
+                    query,
+                    **search_kwargs,
+                    scrape_options=scrape_opts,
+                )
         else:
-            result = app.search(query, limit=limit)
-        logger.info(f"Firecrawl search: query='{query[:50]}', results={len(result.web) if result and result.web else 0}, with_content={with_content}")
+            result = app.search(query, **search_kwargs)
+        logger.info(
+            "Firecrawl search completed: results=%s, with_content=%s",
+            len(result.web) if result and result.web else 0,
+            with_content,
+        )
         return result
-    except Exception as e:
-        logger.error(f"Firecrawl search failed: {e}")
+    except Exception as exc:
+        logger.error(
+            "Firecrawl search failed: error_type=%s, limit=%s, with_content=%s",
+            type(exc).__name__,
+            limit,
+            with_content,
+        )
+        return None
+
+
+def firecrawl_scrape(
+    url: str,
+    *,
+    max_age: int = 7_200_000,
+    timeout: int = 30_000,
+):
+    """Scrape a URL's main markdown content, returning None on error."""
+    try:
+        app = get_firecrawl_app()
+        return app.scrape(
+            url,
+            formats=["markdown"],
+            only_main_content=True,
+            max_age=max_age,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.error(
+            "Firecrawl scrape failed: error_type=%s, max_age=%s, timeout=%s",
+            type(exc).__name__,
+            max_age,
+            timeout,
+        )
         return None
 
 

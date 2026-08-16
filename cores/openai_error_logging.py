@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from collections.abc import Iterable
 from typing import Any
 
@@ -13,6 +14,13 @@ _STATUS_PATTERN = re.compile(r"Error code:\s*(\d{3})")
 _CODE_PATTERN = re.compile(r"""['"]code['"]\s*:\s*['"]([^'"]+)['"]""")
 _TYPE_PATTERN = re.compile(r"""['"]type['"]\s*:\s*['"]([^'"]+)['"]""")
 _REQUEST_ID_KEYS = ("x-request-id", "x-client-request-id")
+_SAFE_METADATA_CHARACTERS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:/-"
+)
+_MAX_CODE_OR_TYPE_CHARS = 64
+_MAX_REQUEST_ID_CHARS = 128
+_MAX_CONTEXT_CHARS = 160
+MAX_OPENAI_LOG_RECORD_CHARS = 512
 _OPENAI_CLASS_MARKERS = (
     "OpenAIError",
     "APIError",
@@ -22,6 +30,48 @@ _OPENAI_CLASS_MARKERS = (
     "AuthenticationError",
     "PermissionDeniedError",
 )
+
+
+def _sanitize_metadata_token(value: Any, max_length: int) -> str:
+    """Return a bounded safe-ASCII metadata token without coercing callers."""
+    if type(value) is not str or type(max_length) is not int or max_length < 1:
+        return "invalid"
+
+    trimmed = value.strip(" ")
+    if not trimmed or any(
+        character not in _SAFE_METADATA_CHARACTERS for character in trimmed
+    ):
+        return "invalid"
+
+    return trimmed[:max_length]
+
+
+def _sanitize_context(value: Any, max_length: int = _MAX_CONTEXT_CHARS) -> str:
+    """Return bounded printable single-line context without coercing callers."""
+    if type(value) is not str or type(max_length) is not int or max_length < 1:
+        return "invalid_context"
+    if "," in value or "=" in value:
+        return "invalid_context"
+    if value.splitlines() != [value]:
+        return "invalid_context"
+    if any(
+        unicodedata.category(character).startswith("C")
+        or unicodedata.category(character) in {"Zl", "Zp"}
+        for character in value
+    ):
+        return "invalid_context"
+
+    trimmed = value.strip()
+    if not trimmed:
+        return "invalid_context"
+    return trimmed[:max_length]
+
+
+def _sanitize_status_code(value: Any) -> int | None:
+    """Accept only exact built-in integers in the HTTP status-code range."""
+    if type(value) is int and 100 <= value <= 599:
+        return value
+    return None
 
 
 def _iter_exception_chain(error: BaseException) -> Iterable[BaseException]:
@@ -142,21 +192,31 @@ def extract_openai_error_details(error: BaseException) -> dict[str, Any]:
 
 def log_openai_error(logger: logging.Logger, error: BaseException, context: str) -> bool:
     details = extract_openai_error_details(error)
-    status_code = details["status_code"]
-    code = details["code"]
+    raw_code = details["code"]
+    raw_type = details["type"]
+    raw_request_id = details["request_id"]
+    status_code = _sanitize_status_code(details["status_code"])
+    code = _sanitize_metadata_token(raw_code, _MAX_CODE_OR_TYPE_CHARS)
 
     should_log = details["is_openai_error"] or status_code in {400, 429} or code == "insufficient_quota"
     if not should_log:
         return False
 
-    parts = [f"context={context}"]
+    parts = ["context=" + _sanitize_context(context)]
     if status_code is not None:
         parts.append(f"status={status_code}")
-    if code:
-        parts.append(f"code={code}")
-    if details["type"]:
-        parts.append(f"type={details['type']}")
-    parts.append(f"request_id={details['request_id'] or 'unavailable'}")
+    if raw_code is not None:
+        parts.append("code=" + code)
+    if raw_type is not None:
+        parts.append(
+            "type=" + _sanitize_metadata_token(raw_type, _MAX_CODE_OR_TYPE_CHARS)
+        )
+    request_id = (
+        "unavailable"
+        if raw_request_id is None
+        else _sanitize_metadata_token(raw_request_id, _MAX_REQUEST_ID_CHARS)
+    )
+    parts.append("request_id=" + request_id)
 
     logger.error("OpenAI API error metadata: %s", ", ".join(parts))
     return True

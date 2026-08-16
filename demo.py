@@ -34,22 +34,6 @@ _spec.loader.exec_module(us_analysis_module)
 analyze_us_stock = us_analysis_module.analyze_us_stock
 
 
-def check_perplexity_configured() -> bool:
-    """Check if Perplexity API key is configured."""
-    import yaml
-    config_path = project_root / "mcp_agent.config.yaml"
-    if not config_path.exists():
-        return False
-    try:
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-        perplexity_key = config.get("mcp", {}).get("servers", {}).get("perplexity", {}).get("env", {}).get("PERPLEXITY_API_KEY", "")
-        # Check if it's a real key (not placeholder)
-        return perplexity_key and perplexity_key not in ["example key", "", "your-api-key", "YOUR_API_KEY"]
-    except Exception:
-        return False
-
-
 def get_company_name(ticker: str) -> str:
     """Get company name from ticker using yfinance."""
     try:
@@ -73,10 +57,10 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
     Returns:
         tuple: (markdown_path, pdf_path)
     """
+    from firecrawl_client import is_firecrawl_configured
     from report_generator import save_us_report, save_us_pdf_report
 
-    # Check if Perplexity is configured for news analysis
-    include_news = check_perplexity_configured()
+    include_news = is_firecrawl_configured()
 
     print(f"\n{'='*60}")
     print("  PRISM-INSIGHT AI Stock Analysis")
@@ -84,7 +68,7 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
     print(f"  Company: {company_name}")
     print(f"  Language: {'English' if language == 'en' else 'Korean'}")
     if not include_news:
-        print("  Note: News analysis skipped (Perplexity API not configured)")
+        print("  Note: News analysis skipped (Firecrawl API key not configured)")
     print(f"{'='*60}\n")
 
     print("[1/3] Generating AI analysis report...")

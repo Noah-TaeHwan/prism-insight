@@ -122,7 +122,6 @@ def get_us_agent_directory(
             ticker,
             reference_date,
             language,
-            prefetched_social_sentiment=pf.get("social_sentiment"),
         ),
         "market_index_analysis": lambda: create_us_market_index_analysis_agent(
             reference_date, max_years_ago, max_years, language,

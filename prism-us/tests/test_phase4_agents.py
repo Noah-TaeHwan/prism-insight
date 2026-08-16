@@ -241,7 +241,7 @@ class TestAgentCreation:
 
         assert agent is not None
         assert hasattr(agent, 'name')
-        assert 'yfinance_us' in agent.server_names
+        assert 'yahoo_finance' in agent.server_names
 
     def test_institutional_agent_creation(self, sample_ticker, sample_reference_date):
         """Test institutional holdings analysis agent creation."""
@@ -260,7 +260,7 @@ class TestAgentCreation:
         )
 
         assert agent is not None
-        assert 'yfinance_us' in agent.server_names
+        assert 'yahoo_finance' in agent.server_names
 
     def test_company_status_agent_creation(self, sample_ticker, sample_reference_date):
         """Test company status agent creation."""
@@ -295,7 +295,7 @@ class TestAgentCreation:
         assert 'firecrawl' in agent.server_names
 
     def test_news_agent_creation(self, sample_ticker, sample_reference_date):
-        """Test news analysis agent creation."""
+        """Test grounded news analysis agent creation without tool servers."""
         from cores.agents.news_strategy_agents import create_us_news_analysis_agent
 
         agent = create_us_news_analysis_agent(
@@ -306,7 +306,7 @@ class TestAgentCreation:
         )
 
         assert agent is not None
-        assert 'perplexity' in agent.server_names
+        assert agent.server_names == []
 
     def test_market_index_agent_creation(self, sample_reference_date):
         """Test market index analysis agent creation."""
@@ -348,22 +348,22 @@ class TestAgentServerAssignments:
     """Tests for correct MCP server assignments."""
 
     def test_price_volume_uses_yfinance(self, sample_ticker, sample_reference_date, agent_sections):
-        """Test price/volume agent uses yfinance_us server."""
+        """Test price/volume agent uses the current Yahoo Finance server."""
         agents = get_us_agent_directory(
             "Apple Inc.", sample_ticker, sample_reference_date,
             ['price_volume_analysis'], "en"
         )
         agent = agents['price_volume_analysis']
-        assert 'yfinance_us' in agent.server_names
+        assert 'yahoo_finance' in agent.server_names
 
     def test_institutional_uses_yfinance(self, sample_ticker, sample_reference_date):
-        """Test institutional holdings agent uses yfinance_us server."""
+        """Test institutional agent uses the current Yahoo Finance server."""
         agents = get_us_agent_directory(
             "Apple Inc.", sample_ticker, sample_reference_date,
             ['institutional_holdings_analysis'], "en"
         )
         agent = agents['institutional_holdings_analysis']
-        assert 'yfinance_us' in agent.server_names
+        assert 'yahoo_finance' in agent.server_names
 
     def test_company_status_uses_firecrawl(self, sample_ticker, sample_reference_date):
         """Test company status agent uses firecrawl server."""
@@ -374,11 +374,11 @@ class TestAgentServerAssignments:
         agent = agents['company_status']
         assert 'firecrawl' in agent.server_names
 
-    def test_news_uses_perplexity(self, sample_ticker, sample_reference_date):
-        """Test news agent uses perplexity server."""
+    def test_news_uses_no_mcp_servers(self, sample_ticker, sample_reference_date):
+        """Grounded news agent must not have implicit search or scraping tools."""
         agents = get_us_agent_directory(
             "Apple Inc.", sample_ticker, sample_reference_date,
             ['news_analysis'], "en"
         )
         agent = agents['news_analysis']
-        assert 'perplexity' in agent.server_names
+        assert agent.server_names == []
