@@ -682,6 +682,12 @@ def _capture_entry_quality_context(
 # US Stock Tracking Agent
 # =============================================================================
 
+def _reentry_rule_approved(scenario):
+    """Rule-approved re-entry: the final gate skips its score floor and the T1 (50-day line) block."""
+    from prism_core.reentry_v3_live import deterministic_approval
+    return deterministic_approval(scenario)
+
+
 def _micro_split_gate_score(scenario):
     """Relaxed required score of a verified micro-split entry (None keeps the regime floor)."""
     try:
@@ -1313,15 +1319,15 @@ class USStockTrackingAgent:
 
             lines = [
                 "### 📉 개별 추세 팩트 (추세 게이트용 · as-of 오늘)",
-                f"- 종가: {close:,.2f}",
+                f"- 현재가(판단 시점 · 장중이면 오늘 미완성 봉): {close:,.2f}",
                 f"- vs MA20: {_above(close, ma20)} ({_fmt(_pct(close, ma20), '%')}), MA20 기울기: {_dir(ma20_up)}",
                 f"- vs MA50: {_above(close, ma50)} ({_fmt(_pct(close, ma50), '%')}), MA50 기울기: {_dir(ma50_up)}",
                 f"- vs MA60: {_above(close, ma60)} ({_fmt(_pct(close, ma60), '%')}), MA60 기울기: {_dir(ma60_up)}",
                 _ma200_line(),
                 f"- RS(60일, 종목-S&P500): {_fmt(rs, '%p')} (종목 {_fmt(stock_ret, '%')} / 지수 {_fmt(idx_ret, '%')})",
                 f"- Volatility: ATR20={_fmt(atr20_pct, '%')} / ADR20={_fmt(adr20_pct, '%')} (stop-width shadow check)",
-                f"- T1_hit(종가<{ma_mid_label}, 오닐 10주선 이탈): {t1_hit} / "
-                f"T2_hit(MA20 하락 and 종가 MA20 대비 -5%↓): {t2_hit}",
+                f"- T1_hit(현재가<{ma_mid_label}, 오닐 10주선 이탈): {t1_hit} / "
+                f"T2_hit(MA20 하락 and 현재가 MA20 대비 -5%↓): {t2_hit}",
             ]
             # Momentum signal 1 volume facts. Today's bar is always open during
             # US batches; a partial bar that already reaches 200% proves it.
@@ -1579,6 +1585,7 @@ class USStockTrackingAgent:
                 "PRISM_US_CODEX_FAST_TRADING", "0"
             ).strip().lower() in {"1", "true", "yes", "on"}
             if codex_enabled:
+                settings = None
                 try:
                     instruction = str(
                         getattr(self.trading_agent, "instruction", "") or ""
@@ -1619,6 +1626,9 @@ class USStockTrackingAgent:
                             "[%s] Codex Fast parse failed; falling back to mcp-agent",
                             ticker_tag,
                         )
+                        from observability.fallbacks import note_codex_fallback
+                        await note_codex_fallback("US", "buy", ticker, "parse_failed",
+                                                  timeout_s=settings.timeout)
                     if scenario_json is not None:
                         schedule_buy_model_shadow(
                             market="US", ticker=ticker or "?",
@@ -1637,6 +1647,9 @@ class USStockTrackingAgent:
                         ticker_tag,
                         type(codex_err).__name__,
                     )
+                    from observability.fallbacks import note_codex_fallback
+                    await note_codex_fallback("US", "buy", ticker, codex_err,
+                                              timeout_s=settings.timeout if settings else None)
                     scenario_json = None
 
             # LLM scenario generation with retry+backoff. Transient API/parse
@@ -2784,6 +2797,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                 trend_facts=str(scenario.get("_deterministic_trend_facts") or ""),
                 is_add=is_add,
                 required_score_override=_micro_split_gate_score(scenario),
+                score_exempt=_reentry_rule_approved(scenario),
+                t1_exempt=_reentry_rule_approved(scenario),
             )
             if result.get("score_policy"):
                 logger.info("[ENTRY_SCORE_POLICY][US] regime=%s pulse=%s policy=%s", computed_regime, pulse, result["score_policy"])
@@ -4327,10 +4342,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     entry_cash_amount = None
                     _rp = None
 
-                    # 레짐 적응 하한선(env-gated REGIME_MIN_SCORE_FLOOR, 기본 off). 플래그 ON 시
+                    # 레짐 적응 하한선(env-gated REGIME_MIN_SCORE_FLOOR, 기본 on: entry_score_policy). 플래그 ON 시
                     # 약세장 하한(strong_bear 9 / bear·sideways 8)을 강제해 min_score 를 끌어올린다.
                     # 진입 게이트(아래 adjusted_score >= min_score)가 그대로 차단을 수행한다.
-                    # 기본 off = 현행 유지. fail-open: 레짐/모듈 로드 실패 시 LLM min_score 유지.
+                    # 플래그 false = LLM min_score 그대로. fail-open: 레짐/모듈 로드 실패 시 LLM min_score 유지.
                     # prism-us/cores 섀도잉 회피: root cores/regime_policy.py 를 파일경로로 로드.
                     try:
                         _rp = self._regime_policy_mod()
@@ -5016,9 +5031,11 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             if not await self._check_sector_diversity(sector, is_pyramiding_add=False):
                 return {"bought": False, "reason": "sector_limit"}
             min_score = _safe_number(scenario.get("min_score", 0))
+            # A rule-approved re-entry has no AI score: the score floors do not apply, every other check does.
+            rule_approved = live.deterministic_approval(scenario)
             try:
                 _rp = self._regime_policy_mod()
-                if _rp is not None and _rp.regime_min_score_floor_enabled():
+                if not rule_approved and _rp is not None and _rp.regime_min_score_floor_enabled():
                     pulse = effects.market_pulse() if effects is not None else _rp.get_market_pulse_state("us")
                     min_score = max(min_score, _rp.effective_min_score(min_score, self._buy_floor_regime(), pulse))
             except EffectsFailure:
@@ -5031,11 +5048,11 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             if self.enable_journal and ticker:
                 score_adjustment, _ = self.get_score_adjustment(ticker, sector, trigger_type=trigger_type)
             adjusted_score = _effective_buy_score(scenario, journal_adjustment=score_adjustment)["effective_score"]
-            if getattr(self, "_no_order_effects", None) is None:
+            if getattr(self, "_no_order_effects", None) is None and not rule_approved:
                 min_score, scenario = micro_split_live.relaxed_min_score(
                     self, market="US", ticker=ticker, current_price=current_price, scenario=scenario,
                     min_score=min_score, is_add=False, rebound_pilot=False, logger=logger)
-            if adjusted_score < min_score:
+            if not rule_approved and adjusted_score < min_score:
                 return {"bought": False, "reason": f"score_below_min({adjusted_score:g}<{min_score:g})"}
             buy_gate = self._evaluate_production_buy_gate(scenario, current_price, score_override=adjusted_score,
                                                           is_add=False)

@@ -77,9 +77,13 @@ def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
     # no-entry scores at most 4 with no positive macro bonus; R/R stays out of the score). JSON unchanged.
     # 2026-10-03 reviewed: rules hash only — rubric consistency (zero-momentum 3~4 is a no-entry zone; the
     # Step 1 bull-regime compensation path scores by the bands, capped at 6). JSON unchanged.
+    # 2026-10-10 reviewed: rules hash only — Step 1.5 T1/T2 judged at the current price from the facts block
+    # (as the final gate does); the exception is the current price back above the 50-day MA. JSON unchanged.
+    # 2026-10-10 reviewed: rules + JSON — text aligned with executed rules (distribution-day step-down ladder,
+    # min_score source: micro-split appendix else matrix with the system regime floor). No rule change.
     expected = {
-        "ko": ("16f2eea5fe4f69f6635064967ae222c00ce8f8b9d6d0b18191c1a378ddf0de8b", "013c4c4bdc5cb32e71c714048ca0feb9a534d9c5acbedab4e8b3d3ca643e8741"),
-        "en": ("4554e6bf8ac11ae69963d5eb6e9aac75025ba541cd64874a128d3fc6cd6d062c", "a76e0b453cf782a0115938eb4d606cd8a06e964b477f2e17eaac3336e20ef6cb"),
+        "ko": ("6f47e5079640519e674e710dd16f54136f0294524fa1b8f3a70d8cfe5c47cc38", "b3d868ed9d55e5b9c39d717204f52252e7c0a8549996117f08ccaa026b32a290"),
+        "en": ("9c5f26f07a2bf5e3d66cb1e19406deac5397086deb2688591609290781a9f69d", "42167974db3b0e53d09409c02f9df89ae798fd7dce0b7b50b7b922fdfb266c37"),
     }
     assert hashlib.sha256(text.split(heading)[0].encode()).hexdigest() == expected[language][0]
     assert hashlib.sha256(text[text.index(json_heading):].encode()).hexdigest() == expected[language][1]
@@ -93,6 +97,12 @@ def test_sell_factory_matches_reviewed_volume_prompt():
     # 2026-10-08 reviewed: Core-0 counts only control/delisting tender offers confirmed by an
     # official filing (Official filing check block); buybacks, debt tenders and mini-tenders are
     # not corporate events (MRVL sold on a 0.06% press-release mini-tender, 2026-10-07).
+    # 2026-10-10 reviewed (contradiction sweep, tests/test_sell_prompt_consistency.py): sells are all-or-nothing
+    # but micro-split adds exist; Step 0 defers to the system regime; the system trailing stop stays
+    # close-confirmed while a raised stop_loss runs on the intraday hard stop; the dead -5~-7% grace
+    # exception and -7.1% wording removed. Trailing bands and discretionary-sell wording unchanged.
+    # 2026-10-10 reviewed: "close" wording matches operations — the AI sell run is before the close
+    # (14:46 KST) and the trailing stop is confirmed by the pre-close trend-exit check (15:10~15:25 KST).
     source = SOURCE.read_text(encoding="utf-8")
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "create_sell_decision_agent")
-    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "7686f185e659135717f6a4dc8b664a2ce030f39fd646a6169dc9e255670b3898"
+    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "00f948f9bf409f84cc07040705cf12a3f325f452076a757b1e8f158038a54bbf"
