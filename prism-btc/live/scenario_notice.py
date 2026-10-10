@@ -236,9 +236,13 @@ def _position_lines(event, after):
     exposure_changed = changed and any(before.get(k) != after.get(k) for k in ("quantity", "average_entry_price", "side"))
     if stop is not None and stop > 0:
         protected_gain = (stop-after["average_entry_price"]) * (1 if after["side"] == "LONG" else -1) >= 0
-        label = "수익 보호 SL" if protected_gain else "손절 SL"
+        label = "가격이익 구간 SL" if protected_gain else "손절 SL"
         prior = _number(before.get("hard_stop")) if changed and before.get("hard_stop") != stop else None
         price = f"{_decimal(prior)} → {_decimal(stop)} USDT" if prior is not None else _money(stop)
+        if prior is not None:
+            widened = stop < prior if after["side"] == "LONG" else stop > prior
+            if widened:
+                lines.append("⚠️ SL 완화 확인 · 손절까지의 가격 위험 증가")
         lines.extend(["", f"🛡 {label} {price} · 남은 전량",
                       "• 예상 손익: " + _target_text(after, stop, qty, equity)])
         realized = _number(after.get("scenario_realized_net_pnl"))

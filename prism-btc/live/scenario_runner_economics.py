@@ -52,6 +52,7 @@ def runner_economics(*, accounting, side, mark_price, hard_stop, observed_at, no
             at_mark += sign*(mark-price)*qty
             at_stop += sign*(stop-price)*qty
         allowance = quantity*stop*(rate+slip/10000)
+        mark_allowance = quantity*mark*(rate+slip/10000)
         values = dict(observed_at=stamp, remaining_quantity=quantity,
             realized_gross=gross, recorded_fees=fees, recorded_funding_net=funding,
             realized_net_including_recorded_costs=net,
@@ -59,9 +60,14 @@ def runner_economics(*, accounting, side, mark_price, hard_stop, observed_at, no
             scenario_net_at_mark_before_future_costs=net+at_mark,
             scenario_net_at_stop_before_future_costs=net+at_stop,
             estimated_future_cost_allowance_at_stop=allowance,
+            estimated_future_cost_allowance_at_mark=mark_allowance,
+            scenario_net_at_mark_after_estimated_costs=net+at_mark-mark_allowance,
+            scenario_net_at_mark_pct_of_start_equity=(net+at_mark-mark_allowance)/equity*100,
             scenario_net_at_stop_after_estimated_costs=net+at_stop-allowance,
             scenario_net_at_stop_pct_of_start_equity=(net+at_stop-allowance)/equity*100,
-            giveback_from_mark_to_stop_before_future_costs=max(Decimal(0),at_mark-at_stop))
+            giveback_from_mark_to_stop_before_future_costs=max(Decimal(0),at_mark-at_stop),
+            giveback_from_mark_to_stop_after_estimated_costs=max(
+                Decimal(0), at_mark-mark_allowance-at_stop+allowance))
         values = {k: float(v) for k,v in values.items()}
         if not all(math.isfinite(v) for v in values.values()):
             return unavailable
@@ -69,6 +75,9 @@ def runner_economics(*, accounting, side, mark_price, hard_stop, observed_at, no
                     future_funding_included=False, budget_replenishment_allowed=False,
                     estimates_not_guaranteed=True,
                     future_cost_basis='existing_conservative_cost_rate_plus_stop_slippage_allowance',
+                    mark_and_stop_cost_basis='same_conservative_rate_plus_slippage_at_each_price',
+                    future_cost_interpretation='stress_allowance_not_observed_execution_fee',
+                    expected_execution_fee_status='unavailable_no_verified_fee_tier',
                     cost_positive_stop=_cost_positive_stop(net=net, quantity=quantity,
                         entry_value=entry_value, sign=sign, cost_rate=rate+slip/10000,
                         tick=price_tick, mark=mark, stop=stop),

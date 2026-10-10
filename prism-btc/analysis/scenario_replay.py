@@ -218,6 +218,13 @@ class Decisions:
             try:record=self.tape.lookup(snapshot,context)
             except TapeMismatch as exc:
                 self.fatal=str(exc);raise
+            # propose() loads the wire contract lazily, after its snapshot checks.
+            # Reproduce that lifecycle, not its model call: the next recovery
+            # context attests which modules are loaded. Preloading before lookup
+            # changes the first context; skipping it leaves later ones UNKNOWN.
+            if (self.tape.contract["decision_origin"] == "luna" and record["error"] not in {
+                    "ScenarioModelError:snapshot_unavailable", "ScenarioModelError:snapshot_stale"}):
+                from live import scenario_contract  # noqa: F401
             audit=record.get("raw_response")
             if isinstance(audit,dict) and audit.get("request"):
                 if scenario_recovery.digest(audit["request"]) != audit.get("request_hash"):

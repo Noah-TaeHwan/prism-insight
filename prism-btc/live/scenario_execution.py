@@ -417,7 +417,102 @@ class ScenarioExecution:
             self._fail("native_protection_not_confirmed")
         return fresh
 
-    def _preflight(self, payload, observed, instrument, children):
+    def _stop_revision_evidence(self, kind, intent_id):
+        row = self.conn.execute(
+            "SELECT body FROM llm_scenario_broker_evidence WHERE kind=? "
+            "AND json_extract(body,'$.intent_id')=? ORDER BY rowid DESC LIMIT 1", (kind, intent_id)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def _revise_stop(self, payload, intent_id, observed, instrument):
+        """One-shot weakening: fresh proof, durable attempt, exact readback.
+
+        An ambiguous write leaves the old stronger stored stop untouched. Normal
+        reconciliation therefore restores protection instead of retrying risk.
+        """
+        from core.scenario_stop_policy import build_stop_policy, validate_stop_revision
+        from live.scenario_recovery import managed_permit
+        if self._stop_revision_evidence("stop_revision_attempt", intent_id):
+            self._fail("stop_revision_already_attempted")
+        state = self._recovery_state()
+        active = state["active"]
+        own = self.children(active["scenario_id"])
+        initial = self.conn.execute(
+            "SELECT payload FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid LIMIT 1",
+            (active["scenario_id"],)).fetchone()
+        anchor = active.get("stop_policy", {})
+        first = json.loads(initial[0]) if initial else {}
+        if (first.get("action") != "OPEN" or first.get("action_id") != anchor.get("initial_action_id")
+                or first.get("hard_stop") != anchor.get("initial_hard_stop")):
+            self._fail("stop_revision_anchor_unverified")
+        decisions = self.conn.execute(
+            "SELECT context,proposal FROM llm_scenario_decisions WHERE context IS NOT NULL "
+            "AND json_extract(proposal,'$.action_id')=? AND json_extract(proposal,'$.scenario_id')=? LIMIT 2",
+            (payload["action_id"], payload["scenario_id"])).fetchall()
+        if len(decisions) != 1 or json.loads(decisions[0][1]).get("stop_revision") != payload.get("stop_revision"):
+            self._fail("stop_revision_input_unverified")
+        decision = json.loads(decisions[0][0])
+        if (decision.get("account_version") != observed["account_version"]
+                or not isinstance(decision.get("input_captured_at"), (int, float))
+                or not 0 <= self.clock() - decision["input_captured_at"] <= 120
+                or decimal(observed["position"].get("stopLoss", 0)) != decimal(active["hard_stop"])):
+            self._fail("stop_revision_stale_input_or_protection")
+        accounting = self._risk_accounting(observed, active, own)
+        pending = [self._pending_entry(c) for c in own if c["kind"] == "entry" and c["status"] != "TERMINAL"]
+        unknown = any(c["status"] == "UNKNOWN" or not c["evidence"] for c in own) or bool(self.conn.execute(
+            "SELECT 1 FROM llm_scenario_intents WHERE id!=? AND status='PENDING' LIMIT 1", (intent_id,)).fetchone())
+        hard_blocked = not self._new_risk_enabled() or not self._daily(observed).get("new_risk_allowed", False)
+        breaker = state.get("breaker", {})
+        permit_valid = not breaker.get("blocked", False) or bool(
+            set(breaker.get("reasons", [])) == {"three_losses"} and managed_permit(state, active))
+        policy = build_stop_policy(active, hard_blocked=hard_blocked, permit_valid=permit_valid,
+            accounting_status="confirmed", protection_ok=self._verify_protection(observed, active["hard_stop"], active["side"]),
+            legacy_fenced=observed["legacy_fenced"], pending_entries=pending,
+            positions=accounting["positions"], unknown_intents=unknown)
+        validate_stop_revision(payload, dict(stop_policy=policy, input_id=decision.get("input_id"),
+            previous_hard_stop=active["hard_stop"], side=active["side"], mark_price=observed["mark_price"],
+            positions=accounting["positions"], pending_entries=pending))
+        after_risk = self._preflight(payload, observed, instrument, own, stop_revision=True)
+        before_risk = self._preflight(dict(payload, hard_stop=active["hard_stop"]),
+            observed, instrument, own, stop_revision=True)
+        before = encoded(state)
+        attempt = dict(intent_id=intent_id, scenario_id=active["scenario_id"],
+            old_stop=active["hard_stop"], new_stop=payload["hard_stop"],
+            input_id=decision.get("input_id"), quantity=observed["position"]["size"],
+            account_version=observed["account_version"], stop_policy=anchor,
+            captured_at=observed["captured_at"], stop_revision=payload["stop_revision"],
+            risk_before=before_risk, risk_after=after_risk,
+            consumed_costs={k: accounting[k] for k in ("realized_loss", "fees_paid", "funding_paid")})
+        self._save("stop_revision_attempt", attempt)
+        self._write("set_trading_stop", category="linear", symbol="BTCUSDT", positionIdx=0,
+            tpslMode="Full", stopLoss=text_number(payload["hard_stop"]), slTriggerBy="MarkPrice", slOrderType="Market")
+        fresh = self.capture_account()
+        if (decimal(fresh["position"].get("stopLoss", 0)) != decimal(payload["hard_stop"])
+                or decimal(fresh["position"]["size"]) != decimal(observed["position"]["size"])
+                or fresh["legacy_fenced"]
+                or not self._verify_protection(fresh, payload["hard_stop"], active["side"])
+                or not any(order.get("stopOrderType") == "StopLoss"
+                    and order.get("triggerBy") == "MarkPrice" and order.get("orderType") == "Market"
+                    and order.get("reduceOnly") is True
+                    and order.get("side") == ("Sell" if active["side"] == "LONG" else "Buy")
+                    and decimal(order.get("triggerPrice", 0)) == decimal(payload["hard_stop"])
+                    and decimal(order.get("qty", 0)) == decimal(fresh["position"]["size"])
+                    for order in fresh["open_orders"])):
+            self._fail("stop_revision_readback_unconfirmed")
+        if encoded(self._recovery_state()) != before:
+            self._fail("stop_revision_state_changed")
+        state["active"]["hard_stop"] = payload["hard_stop"]
+        state["version"] = state.get("version", 0) + 1
+        try:
+            self.conn.execute("UPDATE llm_scenario_state SET body=? WHERE id=1", (encoded(state),))
+            self.conn.execute("INSERT INTO llm_scenario_broker_evidence VALUES(?,?,?)", (
+                "stop_revision_confirmed", self.clock(), encoded(dict(attempt, confirmed_at=fresh["captured_at"]))))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return fresh
+
+    def _preflight(self, payload, observed, instrument, children, *, stop_revision=False):
         from core.llm_scenario import risk_snapshot
         stop = decimal(payload["hard_stop"])
         self._aligned(stop,instrument["tick"])
@@ -463,7 +558,7 @@ class ScenarioExecution:
         hard_blocked = not self._new_risk_enabled() or not self._daily(observed).get("new_risk_allowed",False)
         if hard_blocked:
             self._fail("new_risk_halted")
-        if (side=="LONG" and stop<decimal(active["hard_stop"])) or (side=="SHORT" and stop>decimal(active["hard_stop"])):
+        if not stop_revision and ((side=="LONG" and stop<decimal(active["hard_stop"])) or (side=="SHORT" and stop>decimal(active["hard_stop"]))):
             self._fail("stale_parent_stop")
         existing=[c for c in children if c["kind"]=="entry" and c["status"]!="TERMINAL"]
         if any(c["request"]["side"] != ("Buy" if side == "LONG" else "Sell") for c in existing):
@@ -478,7 +573,7 @@ class ScenarioExecution:
             positions=accounting["positions"]
         from live.scenario_recovery import authorize_entry, managed_permit, risk_fraction
         fraction = risk_fraction(state, active["scenario_id"])
-        if state.get("breaker", {}).get("blocked", False) or managed_permit(state, active) or fraction < .02:
+        if not stop_revision and (state.get("breaker", {}).get("blocked", False) or managed_permit(state, active) or fraction < .02):
             allowed = authorize_entry(state, payload, dict(
                 initial_equity=active["initial_equity"], new_risk_blocked=hard_blocked,
                 protection_ok=not size or self._verify_protection(observed, active["hard_stop"], side),
@@ -512,6 +607,7 @@ class ScenarioExecution:
             self._fail("fresh_margin_insufficient")
         if not 0<=self.clock()-observed["captured_at"]<=10:
             self._fail("pre_submit_snapshot_stale")
+        return risk
 
     def execute(self,payload,intent_id):
         from live.shared_entry_coordinator import mutation_lock
@@ -521,6 +617,8 @@ class ScenarioExecution:
             batch=self.conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id=?",(intent_id,)).fetchone()
             if batch and batch[0]=="INTERRUPTED":
                 self._fail("interrupted_execution_requires_reconciliation")
+            if batch and batch[0]=="ABORTED_RESTORED":
+                self._fail("stop_revision_aborted_restored")
             self.conn.execute("INSERT OR IGNORE INTO llm_scenario_execution_batches VALUES(?,'EXECUTING')",(intent_id,))
             self.conn.commit()
             try:
@@ -564,6 +662,11 @@ class ScenarioExecution:
             for c in own:
                 self._query_child(c)
             own=self.children(active["scenario_id"])
+            if payload.get("stop_revision") and payload.get("action") == "ADJUST":
+                from core.scenario_stop_policy import is_widening
+                if is_widening(active["side"], payload["hard_stop"], active["hard_stop"]) and any(
+                        c["kind"] == "entry" and c["status"] != "TERMINAL" for c in own):
+                    self._fail("stop_revision_pending_entry")
             selected=set(payload.get("cancel_entry_ids",[]))
             if payload["action"]=="EXIT":
                 selected={c["local_id"] for c in own if c["kind"]=="entry"}
@@ -592,9 +695,10 @@ class ScenarioExecution:
             instrument=self._instrument()
             desired=payload["hard_stop"]
             old=active["hard_stop"]
-            if (active["side"]=="LONG" and desired<old) or (active["side"]=="SHORT" and desired>old):
-                self._fail("stop_widening_forbidden")
-            if desired!=old:
+            widening = (active["side"]=="LONG" and desired<old) or (active["side"]=="SHORT" and desired>old)
+            if widening:
+                observed=self._revise_stop(payload,intent_id,self.capture_account(),instrument)
+            elif desired!=old:
                 # Pending old SL attachments cannot later overwrite a tighter SL.
                 for c in own:
                     if c["kind"]=="entry" and c["status"]!="TERMINAL":

@@ -38,6 +38,13 @@ def test_symmetric_signs_and_conservative_allowance(side, mark, stop):
     assert r['remaining_gross_at_mark'] == 10
     assert r['remaining_gross_at_stop'] == -4
     assert r['giveback_from_mark_to_stop_before_future_costs'] == 14
+    assert r['estimated_future_cost_allowance_at_mark'] == pytest.approx(2*mark*.004)
+    assert r['scenario_net_at_mark_after_estimated_costs'] == pytest.approx(11.8-2*mark*.004)
+    assert r['giveback_from_mark_to_stop_after_estimated_costs'] == pytest.approx(
+        r['scenario_net_at_mark_after_estimated_costs']-r['scenario_net_at_stop_after_estimated_costs'])
+    assert r['future_cost_interpretation'] == 'stress_allowance_not_observed_execution_fee'
+    assert r['expected_execution_fee_status'] == 'unavailable_no_verified_fee_tier'
+    assert r['budget_replenishment_allowed'] is False
 
 
 @pytest.mark.parametrize('field,value', [('gross_pnl',None),('fees',float('nan')),

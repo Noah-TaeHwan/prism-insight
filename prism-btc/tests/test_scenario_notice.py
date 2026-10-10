@@ -241,7 +241,7 @@ def test_add_uses_whole_position_average_not_last_fill():
 def test_short_and_profitable_stop():
     out = render_notice(filled(position(side="SHORT", average_entry_price=100, hard_stop=90,
         take_profits=[dict(price=80, quantity=.06)]), side="SHORT"))
-    assert "수익 보호" in out and "+10.00%" in out and "+100.00%" in out
+    assert "가격이익 구간 SL" in out and "+10.00%" in out and "+100.00%" in out
     assert "+1.20 USDT" in out
 
 
