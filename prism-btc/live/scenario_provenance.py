@@ -130,7 +130,8 @@ def _manifest():
                     'engine/scenario_ma_context.py',
                     'engine/indicators.py']
     execution_files = ['live/scenario_execution.py', 'live/scenario_accounting.py',
-                       'core/scenario_limit_prices.py', 'core/llm_scenario.py']
+                       'core/scenario_limit_prices.py', 'core/llm_scenario.py',
+                       'core/scenario_stop_policy.py']
     sources, policy, execution, parity = {}, {}, {}, {}
     judgment_parity, execution_parity = {}, {}
     for name in policy_files + execution_files + ['live/scenario_runtime.py', 'live/scenario_broker.py']:

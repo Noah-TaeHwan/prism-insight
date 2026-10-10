@@ -42,6 +42,47 @@ def test_full_runtime_record_and_frozen_replay_same_hash(tmp_path):
     assert first['economic']['halted_field_basis']=='HISTORICAL_BREAKER_LATCH_NOT_EFFECTIVE_ENTRY_PERMISSION'
 
 
+def test_fresh_and_frozen_separate_processes_preserve_lazy_contract_provenance(tmp_path):
+    """Same-process tests hide the contract import performed only by propose()."""
+    import json
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    package = Path(__file__).resolve().parents[1]
+    script = '''
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from test_scenario_replay import inputs
+from analysis.scenario_replay import network_boundary, run_replay
+assert 'live.scenario_contract' not in sys.modules
+root = Path(sys.argv[1])
+mode = sys.argv[2]
+bundle, market = inputs()
+with network_boundary('frozen') as blocked:
+    run_replay(bundle, market, root / mode, mode=mode,
+        tape_path=root / 'tape.jsonl', initial_state='recovery-stage0',
+        model_generator=lambda **kw: SimpleNamespace(text='{}'))
+assert not blocked
+'''
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(package), str(package / 'tests')]))
+    for mode in ('fresh', 'frozen'):
+        result = subprocess.run([sys.executable, '-c', script, str(tmp_path), mode],
+                                env=env, capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stderr
+    import sqlite3
+    observations = []
+    for mode in ('fresh', 'frozen'):
+        with sqlite3.connect(tmp_path / mode / 'replay.sqlite') as conn:
+            observations.append([(json.loads(c)['recovery']['loaded_code_status'], json.loads(o))
+                                 for c, o in conn.execute(
+                                     'SELECT context, outcome FROM llm_scenario_decisions ORDER BY slot')])
+    assert observations[0] == observations[1]
+    assert [status for status, _ in observations[0]] == ['UNKNOWN', 'VERIFIED']
+
+
 def test_assembled_prompt_hashes_use_actual_wire_utf8_basis():
     import hashlib
     from analysis.scenario_replay import contract_for
@@ -528,7 +569,7 @@ def test_actual_winning_cycles_offer_then_commit_both_normalization_promotions(t
         assert decisions[int(c['now']//300)+1]['action']=='OPEN'
     opened=[p for p in plans if p['action']=='OPEN']
     for index,p in enumerate(opened):
-        fraction=(.005,.01,.02)[min(index//3,2)]
+        fraction=(.005,.01,.02)[min(index//2,2)]
         matching=next(c for c in calls if c['input_id']==p['input_id'])
         assert p['risk']['budget']==pytest.approx(matching['initial_equity']*fraction)
         held=next(c for c in calls if c['scenario_id']==p['scenario_id'])

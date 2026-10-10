@@ -293,6 +293,7 @@ class ScenarioRuntime:
 
     def _context(self, state):
         ctx = dict(self.broker.context())
+        hard_risk_blocked = ctx.get("new_risk_blocked")
         for flag in ("legacy_fenced", "protection_ok", "new_risk_blocked"):
             if type(ctx.get(flag)) is not bool:
                 raise ValueError("unconfirmed_account_context")
@@ -374,6 +375,16 @@ class ScenarioRuntime:
         ctx["new_risk_blocked"] = bool(ctx["new_risk_blocked"] or (
             state["breaker"].get("blocked") and not ctx.get("recovery_observing")
             and not ctx.get("recovery_normal_permission")))
+        from core.scenario_stop_policy import build_stop_policy
+        ctx.setdefault("stop_policy", build_stop_policy(active,
+            hard_blocked=hard_risk_blocked,
+            permit_valid=not state["breaker"].get("blocked") or bool(
+                set(state["breaker"].get("reasons", [])) == {"three_losses"}
+                and recovery.managed_permit(state, active)),
+            accounting_status=ctx.get("accounting_status"), protection_ok=ctx.get("protection_ok"),
+            legacy_fenced=ctx.get("legacy_fenced"), pending_entries=ctx.get("pending_entries"),
+            positions=ctx.get("positions"), unknown_intents=bool(self.conn.execute(
+                "SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' OR status IS NULL").fetchone())))
         if state["breaker"].get("blocked") and not state.get("halt_notified"):
             stamp=state.setdefault("halted_at",self.clock())
             reasons=set(state["breaker"].get("reasons",[]))
@@ -507,7 +518,9 @@ class ScenarioRuntime:
                         recovery.consume(self.conn, state, validated, fresh, slot, self.clock())
                     state["active"] = {"scenario_id": validated["scenario_id"], "initial_equity": fresh["initial_equity"],
                         "side": validated["side"], "hard_stop": validated["hard_stop"], "revision": 0,
-                        "created_at": self.clock(), "expires_at": validated["expires_at"]}
+                        "created_at": self.clock(), "expires_at": validated["expires_at"],
+                        "stop_policy": {"version": 1, "initial_hard_stop": validated["hard_stop"],
+                                        "initial_action_id": validated["action_id"]}}
                 receipt = self._apply_review(state["active"], payload, validated,
                                              ctx["review_memory"], input_id, slot)
                 state["active"]["revision"] = validated["revision"]
@@ -603,7 +616,9 @@ class ScenarioRuntime:
                          "stale input or invalid expiry": "scenario_stale_input_or_expiry",
                          "invalid or opposite side": "scenario_opposite_side",
                          "conditional entry expiry exceeds next decision": "scenario_entry_expiry_invalid"}
-                outcome["failure_code"] = fixed.get(str(exc), "scenario_contract_invalid")
+                outcome["failure_code"] = ("scenario_stop_widening_forbidden"
+                    if str(exc).startswith("stop widening forbidden") else
+                    fixed.get(str(exc), "scenario_contract_invalid"))
             return outcome
 
     def tick(self):

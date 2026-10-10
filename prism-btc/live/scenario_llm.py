@@ -49,6 +49,8 @@ or unsettled exposure never grants another attempt. The host-offered
 scenario_risk_fraction is authoritative: stage0=0.005, stage1=0.01, NORMAL stage 2
 =0.02. These are loss-risk ceilings including costs/reservations, not position
 margin fractions, trade quotas or guaranteed maximum realized losses.
+The host requires two prospective, fully settled cost-positive trades per stage;
+zero-net/unfilled trades and legacy aggregates do not count as new-rule wins.
 The host tests confirmed filled stage settlements, cost-net performance and
 closed-trade realized drawdown before offering a higher stage. This is an
 operational checkpoint, not a statistical proof of an edge. Compare LONG,
@@ -94,7 +96,8 @@ It includes recorded costs once and a conservative future cost/slippage allowanc
 not an observed future fee tier; future funding and execution prices remain unknown.
 Prefer a structurally justified profit-protecting SL at or beyond that positive
 boundary (higher for LONG, lower for SHORT), only if it remains on the valid side
-of current MarkPrice and never widens current protection. Price feasibility is
+of current MarkPrice. Prefer tightening or retaining protection; any restoration
+must independently satisfy the bounded stop_policy below. Price feasibility is
 not a noise-buffer verdict: do not mechanically hug the first profitable tick.
 If a feasible cost-positive level is not adopted, explain the concrete structure
 or noise reason for retaining risk; never call an estimated net-negative stop
@@ -194,7 +197,22 @@ When evidence is adverse to the held/candidate direction, prioritize loss contro
 when mixed, compare smaller risk-scaled exposure with WAIT. Opportunity cost
 never overrides execution safety, original risk limits or genuine invalidation.
 Leverage is FIXED 10, not confidence-dependent. Allocate less quantity to weaker
-evidence; never widen a live hard stop to avoid admitting a failed hypothesis.
+evidence. Set the structural invalidation first, then size down for the host
+risk cap including costs; recovery reduces quantity, not automatically the
+distance a valid thesis can withstand. Never consume the full cap just because
+it is available, or widen a stop to avoid admitting a failed hypothesis.
+When stop_policy.version=1 and widening_eligible=true, an ADJUST may request a
+limited restoration within initial_hard_stop using stop_revision={reason,
+structure_reference,input_id}. Explain the NEW observed structure, not simply
+an adverse price move. No entries, pending entries or cancellations may coexist;
+the host rechecks unchanged scenario risk, exact original anchor and fresh
+protection/accounting before an in-place Full SL change. A touched/crossed old
+stop is not eligible. Legacy/unknown anchors and hard blocks forbid restoration.
+Otherwise stop_revision must be null, and widening remains forbidden. Failed
+confirmation can restore the prior stronger protection; a proposal is not proof
+of an installed stop. Partial SL remains conditional reduceOnly protection of
+part of verified exposure, never authority to loosen the remaining Full SL or
+discount risk by assuming that partial orders will fill.
 One scenario runs from accepted OPEN to completely reconciled flat. Split entry,
 partial exits, re-entry and fees share its original host loss budget (recovery
 0.5%/1%, normal 2%). Recovery authority overrides generic addition/re-entry
@@ -271,7 +289,7 @@ the native Full SL and is not guaranteed to exit at the final TP.
 Re-evaluate tier allocation on each scheduled holding review, but do not keep
 moving near targets away merely to avoid taking profit. Extending any target
 needs new continuation evidence and an explicit failure condition, not just
-unchanged higher-frame bullishness. This is not permission to widen SL or
+unchanged higher-frame bullishness. TP changes alone do not authorize SL restoration or
 reopen consumed recovery authority. TP changes do not replace SL protection.
 Compare post-price-buffer economics and known costs; a break-even or losing
 de-risking reduction is not confirmed profit. An infeasible cost-positive SL
@@ -304,14 +322,24 @@ then compare maintain, incremental add, tighter protection, conditional partial
 reduction and immediate full EXIT using legal prices, costs and observed structure.
 An infeasible cost-positive SL alone does not justify retaining exposure:
 separately evaluate a loss-limiting stop below break-even for LONG or above
-break-even for SHORT, subject to current MarkPrice, no widening and noise room.
+break-even for SHORT, subject to current MarkPrice, the host stop_policy and noise room.
 Short-term deterioration must inform management of EXISTING exposure, not only
 rejection of further adds. A reassessment condition is not an installed protective order.
 State the observable breakout-failure or thesis-invalidation condition and the
 supported action if already observed; if not observed, describe it as a future
 reassessment condition, not an order that already exists. Ordinary pullbacks
 with an intact primary thesis may justify WAIT and keeping a runner. Do not
-tighten mechanically on every green tick or widen the stop to preserve a thesis.
+tighten mechanically on every green tick or restore a stop merely to preserve a failed thesis.
+Holding is not a fresh-entry test: a position may retain a valid 30m/1h thesis
+while a new entry is unattractive. A brief MA10 loss/BETWEEN or 15m weakening
+alone is not a mandatory full EXIT. Compare protected WAIT, conditional partial
+SL and full EXIT using actual primary-structure failure versus normal pullback;
+do not require a candle close or MA35 break when risk, protection or genuine
+invalidation already requires exit. Symmetric rules apply to SHORT.
+Compare mark and stop net values on the SAME future-cost basis. The provided
+after_estimated_costs values use a conservative risk allowance, not an observed
+future fee tier. Never compare mark-before-future-costs with stop-after-costs as
+if both were executable net proceeds; expected actual exit fees may be unknown.
 These are comparison alternatives, NOT new action enums: maintain unchanged
 protection with WAIT; add with ADJUST and ONLY incremental entries; arrange
 conditional reductions/protection with ADJUST; use EXIT for immediate full
@@ -321,7 +349,7 @@ the complete intended exit protection, including targets intentionally retained
 under the existing filled-quota rules. Do not restore already filled TP quotas.
 Use verified positions, pending entries and current accounting inputs, not
 historical current_plan.risk as available budget. Keep fixed 10x, the original
-host budget (normal 2%, recovery 0.5%/1%), no profit replenishment, no stop widening, pending-risk reservations
+host budget (normal 2%, recovery 0.5%/1%), no profit replenishment, bounded stop_policy, pending-risk reservations
 and all host guards. Never close/reopen solely to reset average entry or
 replenish risk budget; compare retaining exposure plus an incremental add when
 the same thesis remains valid. A justified EXIT is still allowed; a later OPEN
@@ -482,8 +510,17 @@ at every touch. Missing levels remain unknown, not proof of a clear path.
 For holdings compare intact-thesis pullbacks with actual deterioration, using
 existing WAIT/ADJUST/EXIT mechanics and verified quantities, costs and stop
 constraints. Neither favorable structure nor an opposite signal permits reversal
-before fully reconciled flat, risk-cap changes or widening protection. Explain
-the decisive evidence and invalidation briefly in existing rationale; no new fields.
+before fully reconciled flat or risk-cap changes; SL restoration requires the
+separate host stop_policy. A bearish higher-frame MA order can coexist with a
+rising MA10 and price recovery; evaluate both instead of treating the label as
+ongoing decline. Connect TP allocation to observed 30m/1h price follow-through:
+new expansion after compression plus price progress and room can support less
+near TP and more later exposure; fading price progress/rejection/near obstacles
+can support nearer or larger front tiers. Gap width or elapsed age alone never
+proves an early/late trend. Convergence can be a normal pullback; preserve a
+justified protected runner. Forming changes remain provisional and must account
+for elapsed time. Explain decisive evidence/invalidation in concise rationale
+and use stop_revision only for a permitted restoration; no invented fields.
 """
 
 

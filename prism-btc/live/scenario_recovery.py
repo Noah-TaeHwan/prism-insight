@@ -146,7 +146,8 @@ def _confirmed(settlement, scenario_id):
 
 def _stage_evidence(equity):
     return {"filled_count": 0, "net_pnl": 0., "peak_net_pnl": 0.,
-            "max_realized_drawdown": 0., "stage_start_equity": equity}
+            "max_realized_drawdown": 0., "stage_start_equity": equity,
+            "promotion_rule_version": 2, "positive_count": 0}
 
 
 def migrate(conn, state, ctx, now):
@@ -201,8 +202,18 @@ def offered_stage(recovery):
                 (not _number(equity) or equity <= 0))
                 or (evidence["filled_count"] == 0 and not empty)):
             raise ValueError("normalization_state_invalid")
+        rule = evidence.get("promotion_rule_version")
+        if "promotion_rule_version" in evidence:
+            count = evidence.get("positive_count")
+            if (type(rule) is not int or rule != 2 or type(count) is not int
+                    or not 0 <= count <= evidence["filled_count"]
+                    or (count > 0 and evidence["net_pnl"] <= 0)):
+                raise ValueError("normalization_state_invalid")
+        elif "positive_count" in evidence:
+            raise ValueError("normalization_state_invalid")
     if (recovery.get("policy_version") == 2 and stage < 2
-            and evidence.get("filled_count", 0) >= 3 and evidence.get("net_pnl", 0) > 0
+            and evidence.get("promotion_rule_version") == 2
+            and evidence.get("positive_count", 0) >= 2 and evidence.get("net_pnl", 0) > 0
             and evidence.get("max_realized_drawdown", float("inf")) <=
                 STAGE_FRACTIONS[stage] * evidence.get("stage_start_equity", 0)):
         return stage + 1
@@ -307,6 +318,8 @@ def prepare_input(conn, state, context, snapshot, slot, now):
     if recovery.get("policy_version") == 2:
         metadata.update(current_stage=recovery["stage"], offered_stage=offered_stage(recovery),
                         promotion_evidence=recovery["stage_evidence"],
+                        required_positive_settlements=2,
+                        promotion_basis="prospective_filled_closed_confirmed_net_pnl_positive",
                         risk_fraction=offered_fraction(state), one_attempt_only=False,
                         automatic_normal_resume=True, policy_version=2)
     context["recovery"] = metadata
@@ -375,6 +388,16 @@ def consume(conn, state, payload, context, slot, now):
             or not payload.get("entries") or now >= (slot + 1) * 300):
         raise ValueError("recovery_probe_risk_invalid")
     if recovery.get("policy_version") == 2:
+        evidence = recovery["stage_evidence"]
+        if "promotion_rule_version" not in evidence:
+            # Old aggregates include zero-net trades. Preserve them for audit,
+            # but never reinterpret them as two new-rule profitable trades.
+            upgraded = dict(evidence, promotion_rule_version=2, positive_count=0)
+            journal(conn, "PROMOTION_RULE_MIGRATION", {
+                "before": evidence, "after": upgraded,
+                "input_id": context["input_id"], "effective_new_scenario": payload["scenario_id"]},
+                now, slot=slot, scenario_id=payload["scenario_id"])
+            recovery["stage_evidence"] = upgraded
         if recovery["stage_evidence"].get("stage_start_equity") is None:
             recovery["stage_evidence"]["stage_start_equity"] = context["initial_equity"]
         offered = offered_stage(recovery)
@@ -512,6 +535,8 @@ def settled(conn, state, settlement, now):
                         now, scenario_id=settlement["scenario_id"])
             else:
                 evidence["filled_count"] += 1
+                if evidence.get("promotion_rule_version") == 2 and pnl > 0:
+                    evidence["positive_count"] += 1
                 evidence["net_pnl"] += pnl
                 evidence["peak_net_pnl"] = max(evidence["peak_net_pnl"], evidence["net_pnl"])
                 evidence["max_realized_drawdown"] = max(evidence["max_realized_drawdown"],

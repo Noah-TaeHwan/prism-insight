@@ -59,7 +59,7 @@ def test_repeated_cycles_promote_each_level_only_on_fresh_accepted_open(automati
     seen = set()
     for i in range(7):
         p = open_probe(automatic, first=i == 0)
-        assert p["stage"] == min(i // 3, 2)
+        assert p["stage"] == min(i // 2, 2)
         assert p["risk_fraction"] == recovery.STAGE_FRACTIONS[p["stage"]]
         assert p["budget"] == 10000 * p["risk_fraction"]
         assert p["permit_id"] not in seen
@@ -81,6 +81,7 @@ def test_loss_demotes_and_resets_but_does_not_require_operator(automatic):
         finish(automatic, net=-10 if i == 3 else 10)
     rec = r.state()["recovery"]
     assert rec["stage"] == 0 and rec["stage_evidence"]["filled_count"] == 0
+    assert rec["stage_evidence"]["positive_count"] == 0
     assert rec["phase"] == "OBSERVING"
     assert rec["stage_evidence"]["stage_start_equity"] is None
     b.ctx["initial_equity"] = 9876
@@ -94,9 +95,61 @@ def test_nofill_has_no_performance_credit_and_new_baseline_required(automatic):
     open_probe(automatic)
     finish(automatic, nofill=True)
     assert r.state()["recovery"]["stage_evidence"]["filled_count"] == 0
+    assert r.state()["recovery"]["stage_evidence"]["positive_count"] == 0
     assert r.tick()["status"] == "duplicate_slot"
     now[0] += 300
     assert r.tick()["failure_code"] == "recovery_no_changed_evidence"
+
+
+def test_zero_settlements_never_count_as_positive_wins(automatic):
+    r, _, _, _ = automatic
+    for i, pnl in enumerate([10, 0, 0, 0, 10]):
+        permit = open_probe(automatic, first=i == 0)
+        assert permit["stage"] == 0
+        finish(automatic, net=pnl)
+    rec = r.state()["recovery"]
+    assert rec["stage_evidence"]["filled_count"] == 5
+    assert rec["stage_evidence"]["positive_count"] == 2
+    assert rec["stage"] == 0
+    assert open_probe(automatic, first=False)["stage"] == 1
+
+
+def test_legacy_active_win_excluded_then_migrate_only_on_new_open(automatic):
+    r, _, _, _ = automatic
+    permit = open_probe(automatic)
+    state = r.state()
+    evidence = state["recovery"]["stage_evidence"]
+    del evidence["promotion_rule_version"]
+    del evidence["positive_count"]
+    evidence.update(filled_count=3, net_pnl=10, peak_net_pnl=10)
+    r._save(state)
+    assert recovery.offered_fraction(state) == .005
+    assert recovery.managed_permit(state, state["active"])["budget"] == permit["budget"]
+    finish(automatic, net=10)
+    old = r.state()["recovery"]["stage_evidence"]
+    assert old["filled_count"] == 4 and "positive_count" not in old
+    new = open_probe(automatic, first=False)
+    assert new["stage"] == 0 and new["budget"] == permit["budget"]
+    assert new["stage_evidence"] == dict(old, promotion_rule_version=2, positive_count=0)
+    finish(automatic, net=10)
+    assert r.state()["recovery"]["stage_evidence"]["positive_count"] == 1
+    assert open_probe(automatic, first=False)["stage"] == 0
+    finish(automatic, net=10)
+    assert open_probe(automatic, first=False)["stage"] == 1
+    rows = list(r.conn.execute("SELECT body FROM llm_scenario_recovery_events WHERE kind='PROMOTION_RULE_MIGRATION'"))
+    assert len(rows) == 1
+    assert json.loads(rows[0][0])["before"] == old
+
+
+@pytest.mark.parametrize('updates', [
+    {'positive_count': True}, {'positive_count': -1}, {'positive_count': 1},
+    {'promotion_rule_version': True}, {'promotion_rule_version': None},
+    {'promotion_rule_version': 3}])
+def test_corrupt_prospective_win_counter_fails_closed(updates):
+    evidence = recovery._stage_evidence(10000)
+    evidence.update(updates)
+    with pytest.raises(ValueError, match='normalization_state_invalid'):
+        recovery.offered_stage(dict(policy_version=2, stage=0, stage_evidence=evidence))
 
 
 def test_settlement_is_idempotent_and_unknown_does_not_rearm(automatic):
@@ -156,7 +209,7 @@ def test_stage_offer_does_not_change_active_permit_cap(automatic):
     r, _, _, _ = automatic
     open_probe(automatic)
     state = r.state()
-    state["recovery"]["stage_evidence"].update(filled_count=3, net_pnl=100, peak_net_pnl=100)
+    state["recovery"]["stage_evidence"].update(filled_count=3, positive_count=2, net_pnl=100, peak_net_pnl=100)
     assert recovery.offered_fraction(state) == .01
     assert recovery.risk_fraction(state, state["active"]["scenario_id"]) == .005
     state["recovery"]["risk_fraction"] = .03
@@ -243,7 +296,7 @@ def test_nonfinite_performance_cannot_offer_stage(value):
 
 def test_offered_promotion_wait_does_not_change_committed_stage(automatic):
     r, _, now, price = automatic
-    for i in range(3):
+    for i in range(2):
         open_probe(automatic, first=i == 0)
         finish(automatic)
     assert r.state()["recovery"]["stage"] == 0

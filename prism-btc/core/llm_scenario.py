@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from decimal import Decimal
 from copy import deepcopy
+from core.scenario_stop_policy import validate_stop_revision
 
 LEVERAGE = 10
 RISK_FRACTION = 0.02
@@ -172,7 +173,7 @@ the caller must first reconcile cancellations before dropping pending risk.
     allowed = {"schema_version", "scenario_id", "revision", "input_id", "action_id",
                "action", "side", "confidence", "expires_at", "hard_stop", "entries",
                "take_profits", "partial_stops", "chase", "rationale", "leverage",
-               "cancel_entry_ids"}
+               "cancel_entry_ids", "stop_revision"}
     if set(payload) - allowed:
         raise ScenarioValidationError("unknown scenario fields")
     p = deepcopy(payload)
@@ -219,6 +220,7 @@ the caller must first reconcile cancellations before dropping pending risk.
         if not set(cancellations) <= pending_ids:
             raise ScenarioValidationError("unknown cancellation id")
         if action in ("WAIT", "EXIT"):
+            p.pop("stop_revision", None)
             if {"hard_stop", "side", "chase"} & p.keys():
                 raise ScenarioValidationError("WAIT/EXIT cannot change protection or side")
             if entries or tps or stops:
@@ -238,13 +240,20 @@ the caller must first reconcile cancellations before dropping pending risk.
             raise ScenarioValidationError("invalid risk latch")
         if entries and context["new_risk_blocked"]:
             raise ScenarioValidationError("new risk blocked")
+        widening = False
         if active:
             old = _number(context["previous_hard_stop"], "previous_hard_stop", positive=True)
             if (side == "LONG" and stop < old) or (side == "SHORT" and stop > old):
-                raise ScenarioValidationError("stop widening forbidden")
+                try:
+                    validate_stop_revision(p, context)
+                except ValueError as exc:
+                    raise ScenarioValidationError("stop widening forbidden: " + str(exc)) from None
+                widening = True
             mark = _number(context["mark_price"], "mark_price", positive=True)
             if (side == "LONG" and stop >= mark) or (side == "SHORT" and stop <= mark):
                 raise ScenarioValidationError("stop crossed market; use EXIT")
+        if not widening:
+            p.pop("stop_revision", None)
         identifiers = set()
         # Cancellation intent never releases risk before exchange confirmation.
         for name, rows in (("entries", entries), ("take_profits", tps), ("partial_stops", stops)):
@@ -299,7 +308,8 @@ the caller must first reconcile cancellations before dropping pending risk.
                                  "realized_loss", "fees_paid", "funding_paid",
                                  "estimated_cost_rate", "slippage_bps")})
         # Never block pure protection improvement when a prior fill exceeded budget.
-        if entries and (not risk["within_budget"] or risk["proposed_risk"] > risk["budget"] * confidence):
+        if (widening and not risk["within_budget"]) or (entries and (
+                not risk["within_budget"] or risk["proposed_risk"] > risk["budget"] * confidence)):
             raise ScenarioValidationError("risk budget exceeded")
         p["leverage"] = LEVERAGE
         p["risk"] = risk

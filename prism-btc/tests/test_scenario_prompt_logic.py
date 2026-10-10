@@ -11,13 +11,13 @@ from live.scenario_preview import response_contract
 from live.scenario_contract import identity_fields
 
 
-def test_review_evidence_release_preserves_existing_decision_instructions():
+def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # The instruction candidate was not promoted after inconclusive comparison.
+    # Oct11 explicit policy approval; this is not the rejected Oct10 candidate.
     expected = {
-        'SYSTEM_PROMPT': '672c4abe03c199b722cfb974d0372655ea4a07da24d04a83de443740efe6db59',
-        'MA_STRUCTURE_PROMPT': '2c99c38d6861326014f8c57e7f5616fa00b07f9ffa5ed4c36af6c80434e2023f',
+        'SYSTEM_PROMPT': '8ed185f09ac98b1ac1740a0707c363ab5c279fb39ba310e069317a3a7adde1a9',
+        'MA_STRUCTURE_PROMPT': 'faf00999ccf62b09488fe00ef27c866f691e79d1600ec04d184ae2a6657e18eb',
         'FLAT_ENTRY_PROMPT': 'e91e9cd77eed733610a9c51b8f78238e6e33e202124353dcd423b000f255b959',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),

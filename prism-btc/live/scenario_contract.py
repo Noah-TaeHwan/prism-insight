@@ -59,6 +59,10 @@ def response_schema(context):
                                                "max_reprices": {"type": "integer"}}),
                                        {"type": "null"}]},
                       rationale={"type": "string"}, leverage={"type": "integer", "enum": [10]})
+    if (context.get("stop_policy") or {}).get("version") == 1:
+        properties["stop_revision"] = {"anyOf": [_object({
+            "reason": {"type": "string"}, "structure_reference": {"type": "string"},
+            "input_id": {"type": "string", "enum": [context["input_id"]]}}), {"type": "null"}]}
     if context.get("review_contract_version") == 1:
         properties["review"] = {"anyOf": [_object({
             "conditions": {"type": "array", "maxItems": 3, "items": _object({
@@ -119,6 +123,14 @@ def validate_wire_proposal(payload, context):
         # require an explicit nullable trigger field.
         payload = dict(payload, entries=[dict(row, trigger_price=row.get("trigger_price"))
                        if isinstance(row, dict) else row for row in payload["entries"]])
+    # Stop restoration authority is checked by the economic validator only for
+    # an actual widening. Bad unused metadata must not veto EXIT or tightening.
+    has_stop_policy = (context.get("stop_policy") or {}).get("version") == 1
+    stop_revision = payload.get("stop_revision") if has_stop_policy else None
+    if has_stop_policy:
+        payload = {key: value for key, value in payload.items() if key != "stop_revision"}
+        schema = dict(schema, properties={key: value for key, value in schema["properties"].items() if key != "stop_revision"},
+                      required=[key for key in schema["required"] if key != "stop_revision"])
     # Advisory metadata must never veto otherwise valid protective actions.
     # Keep its original value for the decision audit; the runtime ignores invalid
     # metadata and strips it before all economic validation / execution.
@@ -158,6 +170,8 @@ def validate_wire_proposal(payload, context):
             del normalized[key]
     elif any(payload[key] is None for key in ("side", "hard_stop", "chase")):
         raise ValueError("response_contract_missing_protection")
+    if has_stop_policy and payload["action"] == "ADJUST" and stop_revision is not None:
+        normalized["stop_revision"] = stop_revision
     if has_review:
         normalized["review"] = review
     if has_recovery:
