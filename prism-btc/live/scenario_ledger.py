@@ -22,8 +22,8 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 SERVICE = "prism-btc-scenario"
-# accounting_observation is a large per-run snapshot; positions already ship as
-# btc.exit.snapshot, so it stays in SQLite only.
+# Full accounting snapshots remain in SQLite. The asynchronous btc.research
+# exporter supplies bounded facts; legacy btc.exit.snapshot is not this strategy.
 FORWARDED_KINDS = frozenset({"decision_input", "intent_committed", "exchange_call", "settlement_recorded"})
 _NUMERIC = (int, float, bool)
 
@@ -50,7 +50,10 @@ def summarize(kind, body):
     if kind == "decision_input":
         context = body.get("context") or {}
         snapshot = body.get("snapshot") or {}
-        return {"day": context.get("day"), "accounting_status": context.get("accounting_status"),
+        status = context.get("accounting_status")
+        return {"day": context.get("day"),
+                "ledger_status": status if isinstance(status, str) and status in {
+                    "available", "pending", "unknown", "unavailable", "confirmed"} else None,
                 "daily_net_pnl": context.get("daily_net_pnl"),
                 "day_start_equity": context.get("day_start_equity"),
                 "has_current_plan": context.get("current_plan") is not None,
@@ -108,7 +111,7 @@ def forward_audit(event, *, run_scenario=None):
                 event_id=_hex(f"audit:{event_id}"),
                 trace_id=_hex(f"scenario:{scenario_id}") if scenario_id else None,
                 event_time=datetime.fromtimestamp(float(observed_at), timezone.utc),
-                attributes={"run_ref": _hex(run_id, 16), "decision_slot": slot,
+                attributes={"summary_schema_version": 2, "run_ref": _hex(run_id, 16), "decision_slot": slot,
                             "scenario_ref": _hex(scenario_id, 16) if scenario_id else None,
                             "intent_ref": _hex(intent_id, 16) if intent_id else None,
                             "manifest_ref": _hex(manifest_id, 16) if manifest_id else None,
@@ -119,14 +122,16 @@ def forward_audit(event, *, run_scenario=None):
 
 
 def forward_notice(event_id, event, body):
-    """Operator/Telegram notices (HALTED, MODEL_ERROR, FILLED, …) as queued."""
+    """An enqueue attempt, not a commit or delivery receipt (see btc.research)."""
     try:
         scenario_id = event.get("scenario_id") if isinstance(event, dict) else None
         _emit()("btc.scenario.notice", service=SERVICE, market="CRYPTO", ticker="BTCUSDT",
                 event_id=_hex(f"notice:{event_id}"),
                 trace_id=_hex(f"scenario:{scenario_id}") if scenario_id else None,
                 severity="WARNING" if event.get("kind") in {"HALTED", "MODEL_ERROR"} else "INFO",
-                attributes={"kind": event.get("kind"), "stage": "queued", "text": str(body)[:600],
+                attributes={"summary_schema_version": 2, "kind": event.get("kind"),
+                            "stage": "enqueue_attempt", "commit_confirmed": False,
+                            "delivery_confirmed": False, "text": str(body)[:600],
                             "scenario_ref": _hex(scenario_id, 16) if scenario_id else None})
     except Exception:
         log.debug("scenario notice forward skipped")

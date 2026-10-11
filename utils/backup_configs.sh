@@ -1,4 +1,8 @@
 #!/bin/bash
+# On backup failure, preserve older backups; retention runs only after success.
+# Low-space recovery is an operator decision, not permission to delete the last good copy.
+set -euo pipefail
+umask 077
 
 ################################################################################
 # PRISM-INSIGHT 정기 백업 스크립트
@@ -44,10 +48,13 @@ done
 
 # stock_tracking_db.sqlite
 if [ -f stock_tracking_db.sqlite ]; then
-    cp stock_tracking_db.sqlite $BACKUP_DIR/
-    log "✓ stock_tracking_db.sqlite 백업 완료"
+    python3 "$PROJECT_DIR/utils/sqlite_snapshot.py" \
+        --source "$PROJECT_DIR/stock_tracking_db.sqlite" \
+        --destination "$BACKUP_DIR/stock_tracking_db.sqlite.gz"
+    log "✓ SQLite 온라인 스냅샷·압축·복원 해시 검증 완료"
 else
-    log "⚠ stock_tracking_db.sqlite 파일 없음"
+    log "오류: stock_tracking_db.sqlite 없음; 기존 DB 백업을 보존하고 종료"
+    exit 1
 fi
 
 # 2. trading 디렉토리 백업
