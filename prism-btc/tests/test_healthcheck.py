@@ -206,6 +206,147 @@ def test_health_alert_history_never_counts_as_primary_errors():
     assert healthcheck._check_error_burst(conn, "demo", _NOW) is None
 
 
+_INPUT_SIZE_ERROR = ('scenario tick blocked: llm_input_preparation_failed; '
+                     'failure_stage=model_input_preparation; failure_code=input_size')
+
+
+def _recovered_input_size_conn():
+    """13:15 check: last input error 12:15, real WAITs 13:05/13:10, protection13:14."""
+    import hashlib
+    conn = _healthy_conn()
+    for minute in (85, 80, 75, 70, 65, 60):
+        tracking.log_event(conn, 'scenario', _INPUT_SIZE_ERROR, level='error', mode='demo',
+                           ts=_iso(_NOW-timedelta(minutes=minute)))
+    conn.executescript('CREATE TABLE llm_scenario_model_incident(id INTEGER,active INTEGER); '
+                      'INSERT INTO llm_scenario_model_incident VALUES(1,0); '
+                      'CREATE TABLE llm_scenario_decisions(slot INTEGER PRIMARY KEY,context TEXT,proposal TEXT,outcome TEXT); '
+                      'CREATE TABLE llm_scenario_recovery_events(event_id TEXT,slot INTEGER,kind TEXT,observed_at REAL,body TEXT);')
+    for minute in (10, 5):
+        stamp = _NOW.timestamp()-minute*60
+        slot = int(stamp//300)
+        ctx = {'now': stamp, 'input_id': f'input-{slot}'}
+        proposal = {'action':'WAIT', 'input_id':ctx['input_id']}
+        raw = json.dumps(proposal)
+        request = dict(system_prompt='policy', user_prompt=json.dumps({'contract_context':ctx}),
+                       response_schema={}, model='gpt-6-luna', effort='high', fast=True)
+        request['request_hash'] = hashlib.sha256(json.dumps(request, sort_keys=True,
+            ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        request['input_id'] = ctx['input_id']
+        response = {'raw':raw, 'sha256':hashlib.sha256(raw.encode()).hexdigest(), 'input_id':ctx['input_id']}
+        conn.execute('INSERT INTO llm_scenario_decisions VALUES(?,?,?,?)',
+                     (slot,json.dumps(ctx),raw,json.dumps({'status':'wait'})))
+        for kind,body,delta in (('MODEL_REQUEST',request,1),('MODEL_RAW',response,2)):
+            conn.execute('INSERT INTO llm_scenario_recovery_events VALUES(?,?,?,?,?)',
+                         (f'{kind}-{slot}',slot,kind,stamp+delta,json.dumps(body)))
+    for lane,status,ago in (('decision','wait',298),('protection','protection_checked',60)):
+        tracking.set_meta(conn, 'scenario_health_'+lane, json.dumps({'at':_NOW.timestamp()-ago,'status':status}), 'demo')
+    conn.commit()
+    return conn
+
+
+def test_exact_recovered_input_size_history_stops_burst_without_deleting_history():
+    conn = _recovered_input_size_conn()
+    before = list(conn.iterdump())
+    assert healthcheck._check_error_burst(conn, 'demo', _NOW) is None
+    assert list(conn.iterdump()) == before
+
+
+@pytest.mark.parametrize('fault', ['one_wait', 'blocked', 'incident_active', 'incident_missing',
+    'request_missing', 'raw_missing', 'request_wrong_input', 'raw_wrong_input', 'raw_hash_wrong',
+    'mixed_error', 'new_error', 'future_error', 'bad_error_time', 'decision_stale', 'protection_stale',
+    'decision_future', 'protection_future', 'decision_bool', 'protection_nan', 'decision_missing',
+    'protection_only', 'duplicate_time', 'future_context', 'context_bool', 'db_error', 'wire_future'])
+def test_recovered_burst_exception_fails_closed(fault):
+    conn = _recovered_input_size_conn()
+    if fault == 'one_wait':
+        conn.execute('DELETE FROM llm_scenario_decisions WHERE slot=(SELECT min(slot) FROM llm_scenario_decisions)')
+    elif fault == 'blocked':
+        conn.execute('UPDATE llm_scenario_decisions SET outcome=? WHERE slot=(SELECT max(slot) FROM llm_scenario_decisions)', (json.dumps({'status':'blocked'}),))
+    elif fault.startswith('incident_'):
+        conn.execute('DELETE FROM llm_scenario_model_incident' if fault=='incident_missing' else 'UPDATE llm_scenario_model_incident SET active=1')
+    elif fault in ('request_missing','raw_missing'):
+        conn.execute('DELETE FROM llm_scenario_recovery_events WHERE kind=?', ('MODEL_REQUEST' if fault=='request_missing' else 'MODEL_RAW',))
+    elif fault in ('request_wrong_input','raw_wrong_input','raw_hash_wrong'):
+        kind = 'MODEL_REQUEST' if fault=='request_wrong_input' else 'MODEL_RAW'
+        row = conn.execute('SELECT rowid,body FROM llm_scenario_recovery_events WHERE kind=? LIMIT 1',(kind,)).fetchone()
+        body = json.loads(row['body'])
+        body['sha256' if fault=='raw_hash_wrong' else 'input_id'] = 'wrong'
+        conn.execute('UPDATE llm_scenario_recovery_events SET body=? WHERE rowid=?',(json.dumps(body),row['rowid']))
+    elif fault in ('mixed_error','new_error','future_error','bad_error_time'):
+        stamp = _iso(_NOW+timedelta(minutes=1)) if fault=='future_error' else 'bad-time' if fault=='bad_error_time' else _iso(_NOW-timedelta(seconds=30 if fault=='new_error' else 3600))
+        tracking.log_event(conn,'scenario', 'unknown failure' if fault=='mixed_error' else _INPUT_SIZE_ERROR,
+                           level='error',mode='demo',ts=stamp)
+    elif fault in ('duplicate_time','future_context','context_bool'):
+        rows=conn.execute('SELECT slot,context FROM llm_scenario_decisions ORDER BY slot').fetchall()
+        ctx=json.loads(rows[1]['context'])
+        ctx['now']=json.loads(rows[0]['context'])['now'] if fault=='duplicate_time' else True if fault=='context_bool' else _NOW.timestamp()+1
+        conn.execute('UPDATE llm_scenario_decisions SET context=? WHERE slot=?',(json.dumps(ctx),rows[1]['slot']))
+    elif fault=='db_error':
+        conn.execute('DROP TABLE llm_scenario_recovery_events')
+    elif fault=='wire_future':
+        conn.execute('UPDATE llm_scenario_recovery_events SET observed_at=?',(_NOW.timestamp()+1,))
+    else:
+        lane='protection' if fault.startswith('protection_') and fault!='protection_only' else 'decision'
+        value=json.loads(tracking.get_meta(conn,'scenario_health_'+lane,'demo'))
+        if fault.endswith('_stale'):
+            value['at']=_NOW.timestamp()-(181 if lane=='protection' else 601)
+        elif fault.endswith('_future'):
+            value['at']=_NOW.timestamp()+1
+        elif fault.endswith('_bool'):
+            value['at']=True
+        elif fault.endswith('_nan'):
+            value['at']=float('nan')
+        elif fault=='decision_missing':
+            value.pop('at')
+        else:
+            value['status']='blocked'
+        tracking.set_meta(conn,'scenario_health_'+lane,json.dumps(value),'demo')
+    assert healthcheck._check_error_burst(conn,'demo',_NOW)['code']=='error_burst'
+
+
+@pytest.mark.parametrize('mode', ['live','shadow'])
+def test_input_size_recovery_does_not_clear_other_scopes(mode):
+    conn=_recovered_input_size_conn()
+    conn.execute("UPDATE btc_events SET mode=? WHERE level='error'",(mode,))
+    assert healthcheck._check_error_burst(conn,mode,_NOW)['code']=='error_burst'
+
+
+def test_recovery_wire_lookup_is_bounded_and_missing_tail_keeps_alert():
+    conn = _recovered_input_size_conn()
+    for index in range(128):
+        conn.execute('INSERT INTO llm_scenario_recovery_events VALUES(?,?,?,?,?)',
+                     (f'unrelated-{index}',0,'OTHER',_NOW.timestamp()-10,'{}'))
+    statements=[]
+    conn.set_trace_callback(statements.append)
+    assert healthcheck._check_error_burst(conn,'demo',_NOW)['code']=='error_burst'
+    reads=[s for s in statements if 'FROM llm_scenario_recovery_events' in s]
+    assert len(reads)==1 and 'ORDER BY rowid DESC LIMIT 128' in reads[0]
+
+
+@pytest.mark.parametrize('age,clears', [(180,True),(180.001,False)])
+def test_recovery_protection_freshness_boundary(age, clears):
+    conn=_recovered_input_size_conn()
+    tracking.set_meta(conn,'scenario_health_protection',json.dumps({
+        'at':_NOW.timestamp()-age,'status':'protection_checked'}),'demo')
+    assert (healthcheck._check_error_burst(conn,'demo',_NOW) is None) is clears
+
+
+def test_ambiguous_or_missing_request_data_keeps_alert():
+    conn=_recovered_input_size_conn()
+    row=conn.execute("SELECT * FROM llm_scenario_recovery_events WHERE kind='MODEL_REQUEST' LIMIT 1").fetchone()
+    conn.execute('INSERT INTO llm_scenario_recovery_events VALUES(?,?,?,?,?)',
+                 ('duplicate',row['slot'],row['kind'],row['observed_at'],row['body']))
+    assert healthcheck._check_error_burst(conn,'demo',_NOW)['code']=='error_burst'
+
+
+def test_truncated_error_window_is_not_treated_as_complete_recovery():
+    conn=_recovered_input_size_conn()
+    for _ in range(201):
+        tracking.log_event(conn,'scenario',_INPUT_SIZE_ERROR,level='error',mode='demo',
+                           ts=_iso(_NOW-timedelta(minutes=60)))
+    assert healthcheck._check_error_burst(conn,'demo',_NOW)['code']=='error_burst'
+
+
 @pytest.mark.parametrize("state", ["completed", "skipped", "recurred", "future", "stale"])
 def test_error_history_context_does_not_clear_alert_severity(state):
     conn = _healthy_conn()
