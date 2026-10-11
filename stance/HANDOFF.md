@@ -39,7 +39,7 @@ com.prism.stance-mark   평일 15:40 KST · 하루 마감 + 리더보드 JSON �
 
 | 항목 | 값 |
 |---|---|
-| 원장 | `/Users/rocky/prism-stance/ledger.db` (`durable: true`) |
+| 원장 | `~/prism-stance/ledger.db` (`durable: true`) |
 | 로그 | `~/prism-stance/server.log` · `mark.log` |
 | 인증키 | `~/prism-stance/strategy.env` (600, **저장소 밖**) |
 | venv | `.venv-stance` — 저장소 `venv/` 가 깨져 있어 새로 만들었다 |

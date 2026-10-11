@@ -161,7 +161,7 @@ v2(`docs/REENTRY_V2_DESIGN_20260927_ko.md`) 코드는 그대로 두고 cron만 v
 ## 5. LLM 재점검 (신호 시점, LIVE 매수의 승인 단계)
 
 - v2 장치 재사용: 운영 BUY 지시문 + 재점검 절, **BUY Codex 설정**(`resolve_buy_codex_settings`, 현재 gpt-6.1-sol, effort는
-  활성 OAuth 계정 따라 munsangrok=xhigh·fast, dragon1086=medium), **MCP 도구 없음**, 보고서는 신호 전날까지의 최신본을
+  활성 OAuth 계정 따라 매매 계정=xhigh·fast, 리포트 계정=medium), **MCP 도구 없음**, 보고서는 신호 전날까지의 최신본을
   참조+sha256로 동결, 실패는 한 번만 재시도.
 - 동결 입력 계약 `reentry_v3_recheck_input_v1`: 기준 가격과 근거, 신호 종류, 판단가·판단 시각·저가, 추정 거래량과 비중
   출처, 목표(규칙·저항·증액 조건·2a 여부)·손절(규칙·최대 손절폭)·손익비·floor, 기준별 시도 번호와 이전 시도, 시작선·
