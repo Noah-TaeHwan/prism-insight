@@ -1,12 +1,18 @@
 """Ship PRISM JSONL events to an OTLP/HTTP logs endpoint.
 
-The checkpoint advances only after a successful batch. Invalid local lines are
-skipped so one corrupt record cannot stop later trading telemetry.
+The checkpoint advances after full acceptance or durable terminal-response
+quarantine. OTLP forbids retrying partial success or oversized responses: the
+rejected subset (or even acceptance for oversized responses) is unknown.
+Quarantine is NOT delivery success and requires operator review. Invalid local
+lines are skipped so one corrupt record cannot stop later trading telemetry.
+An unresolved durable SENDING receipt holds its batch for manual review rather
+than guessing whether a request was sent. This is not exactly-once delivery.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -19,11 +25,192 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .events import DEFAULT_SPOOL_PATH
+from .events import DEFAULT_SPOOL_PATH, _sanitize
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:14318/v1/logs"
 DEFAULT_CHECKPOINT = DEFAULT_SPOOL_PATH.with_suffix(".checkpoint.json")
 MAX_LINE_BYTES = 1024 * 1024
+MAX_RESPONSE_BYTES = 64 * 1024
+
+
+class TerminalDeliveryError(RuntimeError):
+    """A response that must not be retried, without assuming delivery success."""
+
+    delivery_status = "DELIVERY_UNKNOWN"
+    rejected = None
+    error_hash = None
+
+    def __init__(self, reason: str, request_hash: str):
+        super().__init__(reason)
+        self.reason = reason
+        self.request_hash = request_hash
+
+
+class PartialSuccessError(TerminalDeliveryError):
+    """Validated partial acceptance, retaining only safe diagnostic metadata."""
+
+    delivery_status = "PARTIAL_UNKNOWN"
+
+    def __init__(self, rejected: int, request_hash: str, error_hash: str):
+        super().__init__("partial_success", request_hash)
+        self.rejected = rejected
+        self.error_hash = error_hash
+
+
+class _ResponseObject(dict):
+    """Retain duplicate names so only known message fields are validated."""
+
+    def __init__(self, pairs):
+        super().__init__(pairs)
+        seen = set()
+        self.duplicates = set()
+        for key, _value in pairs:
+            if key in seen:
+                self.duplicates.add(key)
+            seen.add(key)
+
+
+def _validate_response(raw: bytes, content_type: str, request_hash: str, count: int) -> None:
+    # Empty binary protobuf is a valid empty ExportLogsServiceResponse. For
+    # legacy endpoints only, an untyped empty body remains compatible; empty
+    # application/json is NOT a valid JSON response (the valid form is {}).
+    if raw == b"" and content_type in ("", "application/x-protobuf"):
+        return
+    if len(raw) > MAX_RESPONSE_BYTES:
+        # OTLP response-size limits are non-retryable. No accepted/rejected
+        # count can be inferred from a truncated response.
+        raise TerminalDeliveryError("response_size_limit", request_hash)
+    try:
+        body = json.loads(raw, object_pairs_hook=_ResponseObject)
+        if not isinstance(body, dict):
+            raise ValueError("response object required")
+        if "partialSuccess" in body.duplicates:
+            raise ValueError("duplicate partial success")
+        # OTLP requires ignoring unknown JSON message fields. Only lowerCamel
+        # known names participate; future fields do not cause retry loops.
+        partial = body.get("partialSuccess", _ResponseObject([]))
+        if not isinstance(partial, dict):
+            raise ValueError("partial success object required")
+        if partial.duplicates & {"rejectedLogRecords", "errorMessage"}:
+            raise ValueError("duplicate partial success field")
+        rejected = partial.get("rejectedLogRecords", 0)
+        if isinstance(rejected, str) and rejected.isascii() and rejected.isdecimal():
+            rejected = int(rejected)
+        if type(rejected) is not int or not 0 <= rejected <= count:
+            raise ValueError("invalid rejected count")
+        message = partial.get("errorMessage", "")
+        if not isinstance(message, str):
+            raise ValueError("invalid error message")
+        error_hash = hashlib.sha256(message.encode()).hexdigest()
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        raise RuntimeError("invalid OTLP response") from None
+    if rejected:
+        raise PartialSuccessError(rejected, request_hash, error_hash)
+
+
+def _batch_hash(events: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(json.dumps(events, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":")).encode()).hexdigest()
+
+
+def _quarantine_path(checkpoint_path: Path, start: Checkpoint) -> Path:
+    return checkpoint_path.with_suffix(".quarantine") / f"{start.inode}-{start.offset}.json"
+
+
+def _already_quarantined(path: Path, events: list[dict[str, Any]]) -> tuple[Checkpoint, str] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (ValueError, UnicodeError):
+        raise RuntimeError("invalid OTLP quarantine receipt") from None
+    retained = value.get("events", []) if isinstance(value, dict) else []
+    original = events[:len(retained)] if isinstance(retained, list) else []
+    if (not isinstance(value, dict) or not original or value.get("batch_sha256") != _batch_hash(original)
+            or value.get("delivery_status") not in ("PARTIAL_UNKNOWN", "DELIVERY_UNKNOWN")
+            or retained != [_sanitize(event) for event in original]):
+        raise RuntimeError("invalid OTLP quarantine receipt")
+    try:
+        checkpoint = Checkpoint(**value["checkpoint"])
+        if type(checkpoint.inode) is not int or type(checkpoint.offset) is not int or checkpoint.offset < 0:
+            raise ValueError("invalid checkpoint")
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("invalid OTLP quarantine receipt") from None
+    # A prior fsync or checkpoint write may have failed after rename. Reconfirm
+    # durability before acknowledging; new appended events are not swallowed.
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())
+    descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return checkpoint, value["delivery_status"]
+
+
+def _quarantine(path: Path, events: list[dict[str, Any]], error: TerminalDeliveryError, checkpoint: Checkpoint) -> None:
+    """Atomic fsynced receipt; replay of this batch must never resend it."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    value = dict(delivery_status=error.delivery_status, terminal_reason=error.reason, automatic_retry=False,
+        batch_sha256=_batch_hash(events), request_sha256=error.request_hash,
+        rejected_log_records=error.rejected, collector_error_sha256=error.error_hash,
+        checkpoint=dict(inode=checkpoint.inode, offset=checkpoint.offset),
+        event_ids=[event.get("event_id") for event in events],
+        events=[_sanitize(event) for event in events])
+    _write_receipt(path, value)
+
+
+def _write_receipt(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_suffix(".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+    descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _attempt_receipt(path: Path, events: list[dict[str, Any]], checkpoint: Checkpoint, status: str) -> None:
+    _write_receipt(path, dict(status=status, batch_sha256=_batch_hash(events),
+        checkpoint=dict(inode=checkpoint.inode, offset=checkpoint.offset),
+        events=[_sanitize(event) for event in events], event_ids=[event.get("event_id") for event in events]))
+
+
+def _load_attempt(path: Path, events: list[dict[str, Any]], start_offset: int,
+                  next_checkpoint: Checkpoint) -> tuple[str, list[dict[str, Any]], Checkpoint] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (ValueError, UnicodeError):
+        raise RuntimeError("invalid OTLP attempt receipt") from None
+    try:
+        retained = value["events"]
+        original = events[:len(retained)]
+        checkpoint = Checkpoint(**value["checkpoint"])
+        valid = (isinstance(retained, list) and bool(original)
+            and value["batch_sha256"] == _batch_hash(original)
+            and retained == [_sanitize(event) for event in original]
+            and value["status"] in ("SENDING", "ACCEPTED", "RETRY_ALLOWED")
+            and type(checkpoint.inode) is int and type(checkpoint.offset) is int
+            and checkpoint.inode == next_checkpoint.inode
+            and start_offset < checkpoint.offset <= next_checkpoint.offset)
+        if not valid:
+            raise ValueError("invalid attempt")
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("invalid OTLP attempt receipt") from None
+    if value["status"] == "SENDING":
+        # This may mean never submitted, accepted, or partially accepted. No
+        # automatic inference/retry is safe; preserve source for operator review.
+        raise RuntimeError("delivery=UNKNOWN pending_attempt=1 automatic_retry=0 operator_review_required=1")
+    return value["status"], original, checkpoint
 
 
 @dataclass(frozen=True)
@@ -41,14 +228,7 @@ def load_checkpoint(path: Path) -> Checkpoint | None:
 
 
 def save_checkpoint(path: Path, checkpoint: Checkpoint) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps({"inode": checkpoint.inode, "offset": checkpoint.offset}),
-        encoding="utf-8",
-    )
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, path)
+    _write_receipt(path, {"inode": checkpoint.inode, "offset": checkpoint.offset})
 
 
 def read_batch(
@@ -146,6 +326,12 @@ def build_otlp_payload(events: Iterable[dict[str, Any]]) -> dict[str, Any]:
                         "prism.config_hash": event.get("config_hash"),
                         "prism.decision_id": event.get("decision_id"),
                         "prism.position_id": event.get("position_id"),
+                        "prism.scenario_ref": payload_attributes.get("scenario_ref", payload_attributes.get("scenario_id_ref")),
+                        "prism.intent_ref": payload_attributes.get("intent_ref", payload_attributes.get("intent_id_ref")),
+                        "prism.decision_slot": payload_attributes.get("decision_slot"),
+                        "prism.source_kind": payload_attributes.get("source_kind"),
+                        "prism.ledger_status": payload_attributes.get("ledger_status"),
+                        "prism.notice_status": payload_attributes.get("notice_status"),
                         "prism.trigger_type": payload_attributes.get("trigger_type"),
                         "prism.regime": payload_attributes.get("regime"),
                         "prism.primary_trend_regime": payload_attributes.get("primary_trend_regime"),
@@ -201,9 +387,17 @@ def send_batch(
         # Authorization value to OTLP_AUTH_TOKEN (without a "Bearer " prefix).
         headers["Authorization"] = auth_token
     request = urllib.request.Request(endpoint, data=encoded, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        if not 200 <= response.status < 300:
-            raise RuntimeError(f"OTLP endpoint returned HTTP {response.status}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            if not 200 <= response.status < 300:
+                raise RuntimeError(f"OTLP endpoint returned HTTP {response.status}")
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            _validate_response(raw, content_type, hashlib.sha256(encoded).hexdigest(), len(events))
+    except urllib.error.HTTPError as error:
+        # Never print untrusted reason text, response bodies, URL or credentials.
+        error.close()
+        raise RuntimeError(f"OTLP endpoint returned HTTP {error.code}") from None
 
 
 def run_once(
@@ -220,8 +414,43 @@ def run_once(
     if next_checkpoint is None:
         return 0
     if events:
-        send_batch(events, endpoint=endpoint, timeout=timeout, auth_token=auth_token)
+        start_offset = checkpoint.offset if checkpoint and checkpoint.inode == next_checkpoint.inode else 0
+        if start_offset > spool_path.stat().st_size:
+            start_offset = 0
+        quarantine = _quarantine_path(checkpoint_path, Checkpoint(next_checkpoint.inode, start_offset))
+        attempt = quarantine.with_suffix(".attempt.json")
+        partial = _already_quarantined(quarantine, events)
+        if not partial:
+            prior = _load_attempt(attempt, events, start_offset, next_checkpoint)
+            if prior:
+                status, events, next_checkpoint = prior
+            else:
+                status = "NEW"
+            if status != "ACCEPTED":
+                # This durable pre-submit record survives a terminal response
+                # followed by disk/quarantine failure, or a process crash.
+                _attempt_receipt(attempt, events, next_checkpoint, "SENDING")
+                try:
+                    send_batch(events, endpoint=endpoint, timeout=timeout, auth_token=auth_token)
+                except TerminalDeliveryError as error:
+                    _quarantine(quarantine, events, error, next_checkpoint)
+                    partial = next_checkpoint, error.delivery_status
+                except (OSError, RuntimeError, urllib.error.URLError):
+                    _attempt_receipt(attempt, events, next_checkpoint, "RETRY_ALLOWED")
+                    raise
+                else:
+                    _attempt_receipt(attempt, events, next_checkpoint, "ACCEPTED")
+        if partial:
+            terminal_checkpoint, delivery_status = partial
+            if terminal_checkpoint.inode != next_checkpoint.inode or not start_offset < terminal_checkpoint.offset <= next_checkpoint.offset:
+                raise RuntimeError("invalid OTLP quarantine checkpoint")
+            save_checkpoint(checkpoint_path, terminal_checkpoint)
+            attempt.unlink(missing_ok=True)
+            print(f"delivery={delivery_status} quarantined=1 automatic_retry=0", file=sys.stderr, flush=True)
+            return 0
     save_checkpoint(checkpoint_path, next_checkpoint)
+    if events:
+        attempt.unlink(missing_ok=True)
     return len(events)
 
 
@@ -247,7 +476,28 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--interval", type=float, default=5.0)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--btc-source", type=Path,
+                        default=Path(os.getenv("PRISM_BTC_OBSERVABILITY_DB",
+                                     str(DEFAULT_SPOOL_PATH.parent.parent / "stock_tracking_db.sqlite"))))
+    parser.add_argument("--btc-state", type=Path)
+    parser.add_argument("--no-btc-export", action="store_true")
     return parser
+
+
+def _export_btc(args):
+    """Independent read-only source capture; failure must not stop other shipping."""
+    if args.no_btc_export or not args.btc_source.is_file():
+        return {"status": "DISABLED"}
+    try:
+        from .btc_scenario_export import export_once
+        state = args.btc_state or args.checkpoint.with_name("btc-research-export.sqlite")
+        result = export_once(args.btc_source, state, args.spool, limit=32)
+        if result.get("emitted") or result.get("status") != "OK" or result.get("backlog"):
+            print("btc_export=" + json.dumps(result, sort_keys=True), flush=True)
+        return result
+    except Exception as error:  # no raw source data or arbitrary exception message
+        print(f"btc_export_failed={type(error).__name__}", file=sys.stderr, flush=True)
+        return {"status": "UNAVAILABLE", "error_type": type(error).__name__}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, stop)
 
     while True:
+        _export_btc(args)
         try:
             shipped = run_once(
                 spool_path=args.spool,
