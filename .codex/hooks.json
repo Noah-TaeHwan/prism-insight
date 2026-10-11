@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'python3 \"$(git rev-parse --show-toplevel)/tools/harness/hook.py\" prompt || true'",
+            "timeout": 10,
+            "statusMessage": "PRISM harness"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'python3 \"$(git rev-parse --show-toplevel)/tools/harness/hook.py\" edit || true'",
+            "timeout": 10,
+            "statusMessage": "PRISM harness"
+          }
+        ]
+      }
+    ]
+  }
+}
