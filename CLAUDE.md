@@ -11,6 +11,13 @@ Stack: Python 3.10+, mcp-agent, GPT-5.x (per-agent models in docs/CLAUDE_AGENTS.
 Scale: ~265,000+ LOC, 13+ AI agents, KR/US dual market support, BTC (demo)
 ```
 
+## Harness (read first)
+
+The shared Claude·Codex harness charter is imported below. Path rules live in `.claude/rules/`,
+skills in `.claude/skills/` (linked to `skills/`), hooks in `.claude/settings.json`.
+
+@docs/HARNESS_CORE_ko.md
+
 ## Project Structure
 
 ```
