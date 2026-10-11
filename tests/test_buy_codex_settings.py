@@ -117,12 +117,12 @@ def _auth_file(tmp_path, email):
     return str(path)
 
 
-MAPPING = "dragon1086@naver.com=medium,munsangrok@gmail.com=xhigh"
+MAPPING = "reporter@example.com=medium,trader@example.com=xhigh"
 
 
 def test_active_account_picks_the_effort_for_buy_and_sell(tmp_path):
     from prism_core.codex_config import resolve_buy_codex_settings, resolve_sell_codex_settings
-    for email, expected in (("dragon1086@naver.com", "medium"), ("MunSangRok@gmail.com", "xhigh")):
+    for email, expected in (("reporter@example.com", "medium"), ("Trader@Example.com", "xhigh")):
         env = {"PRISM_BUY_CODEX_MODEL": "gpt-6-astra", "PRISM_BUY_CODEX_EFFORT": "high",
                "PRISM_SELL_CODEX_MODEL": "gpt-6-astra", "PRISM_SELL_CODEX_EFFORT": "high",
                "PRISM_CODEX_EFFORT_BY_ACCOUNT": MAPPING, "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, email)}
@@ -143,7 +143,7 @@ def test_unknown_or_unreadable_account_keeps_the_configured_effort(tmp_path):
 def test_mapping_to_an_unsupported_effort_is_rejected(tmp_path):
     import pytest
     from prism_core.codex_config import CodexFastError, resolve_buy_codex_settings
-    env = {"PRISM_BUY_CODEX_MODEL": "gpt-6-astra", "PRISM_CODEX_EFFORT_BY_ACCOUNT": "dragon1086@naver.com=turbo",
-           "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "dragon1086@naver.com")}
+    env = {"PRISM_BUY_CODEX_MODEL": "gpt-6-astra", "PRISM_CODEX_EFFORT_BY_ACCOUNT": "reporter@example.com=turbo",
+           "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "reporter@example.com")}
     with pytest.raises(CodexFastError):
         resolve_buy_codex_settings(env)
