@@ -31,6 +31,9 @@ def test_committed_audit_rows_reach_the_ledger_without_raw_ids(tmp_path, spool):
     decision, call = (e["attributes"] for e in events)
     assert decision["daily_net_pnl"] == -19.9 and decision["has_current_plan"] is False
     assert decision["decision_slot"] == 7
+    assert decision['ledger_status'] == 'confirmed'
+    assert decision['summary_schema_version'] == 2
+    assert 'accounting_status' not in decision
     assert call["method"] == "cancel_order" and call["status"] == "ACK_ONLY" and call["ret_code"] == 0
     assert call["order_id_hash"] and call["symbol"] == "BTCUSDT"
     text = json.dumps(events)
@@ -61,6 +64,9 @@ def test_notice_and_runner_heartbeat(spool):
     notice, halted, failed, busy = spool()
     assert notice["event_type"] == "btc.scenario.notice" and notice["severity"] == "WARNING"
     assert notice["attributes"]["kind"] == "HALTED"
+    assert notice['attributes']['stage'] == 'enqueue_attempt'
+    assert notice['attributes']['commit_confirmed'] is False
+    assert notice['attributes']['delivery_confirmed'] is False
     assert (halted["attributes"]["status"], halted["severity"]) == ("BLOCKED", "INFO")
     assert halted["attributes"]["reason"] == "new_risk_halted"
     assert (failed["attributes"]["status"], failed["severity"]) == ("ERROR", "ERROR")
@@ -72,6 +78,10 @@ def test_bridge_failures_never_escape(spool):
     ledger.forward_notice("x", None, "body")
     ledger.forward_run(None, loop="decision", started=None)
     assert [e["attributes"]["status"] for e in spool()] == ["UNKNOWN"]
+
+
+def test_safe_status_alias_never_exports_arbitrary_sensitive_value():
+    assert ledger.summarize('decision_input',{'context':{'accounting_status':'secret-account-123'}})['ledger_status'] is None
 
 
 def test_decision_input_joins_the_runs_single_scenario(spool):
