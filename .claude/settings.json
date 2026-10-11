@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/harness/hook.py\" prompt",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/harness/hook.py\" prompt || true",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/harness/hook.py\" edit",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/harness/hook.py\" edit || true",
             "timeout": 10
           }
         ]

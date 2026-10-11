@@ -5,7 +5,7 @@ This file governs the repository rooted here.
 ## Harness charter (read first)
 
 Shared with Claude Code. Repo skills are in `.agents/skills/` (linked to `skills/`), project hooks
-in `.codex/hooks.json` (trust them once with `/hooks`), BTC folder notes in `prism-btc/AGENTS.md`.
+in `.codex/hooks.json` (trust them once with `/hooks`).
 
 <!-- HARNESS_CORE:BEGIN (generated from docs/HARNESS_CORE_ko.md; edit that file) -->
 # PRISM 하네스 헌장 (Claude·Codex 공통)
@@ -15,17 +15,21 @@ in `.codex/hooks.json` (trust them once with `/hooks`), BTC folder notes in `pri
 보수적인 쪽을 따른다. 이 블록은 `AGENTS.md`에 그대로 복사되며, `tests/test_harness_layers.py`가
 두 사본이 같은지 검사한다(고칠 때는 이 파일을 고치고 `python tools/harness/sync_agents_core.py` 실행).
 
-## 북극성 (사용자 정의, 2026-10-04)
+## 북극성 — KR·US 주식 (사용자 정의, 2026-10-04)
 
 - 오닐식 추세추종이다. 손익비를 관리하면서 **크게 가는 소수 종목**으로 계단식 성장을 한다.
 - 초분할·재진입은 낙폭을 관리하면서 가는 종목을 놓치지 않고 올라타기 위한 수단이다.
 - 핵심은 스크리닝과 좋은 종목을 사는 눈의 정확도다. 손절만 반복되는 빈도는 계좌를 녹인다.
+- 단타 기준은 쓰지 않는다. 털린 종목은 다시 강해지면 재진입해 큰 흐름을 탄다. 다음 개선의 중심은 재진입이다(2026-10-07).
 - 모든 변경·검증·보고는 큰 수익 종목 포착과 비중 확대, 손실·낙폭, 손절 비용, 스크리닝 정확도로 판단한다.
+- BTC의 목표는 따로 있다: 실행·측정을 믿을 수 있고 비용 차감 후 개선을 입증하는 시스템(`docs/BTC_ROADMAP_ko.md` 1절).
 
 ## 함께 일하는 방식
 
 - 방향이 갈리는 결정(가설 정의·대상 종목·시간축·성공 기준·적용 방식, 완화 vs 강화)은 실행 전에 사용자에게 묻는다.
-- "비교해봐"는 지금 몇 건으로 하는 일회성 비교다. SHADOW·배포로 넓히려면 먼저 한 줄로 확인받는다.
+- "비교해봐"는 지금 몇 건으로 하는 일회성 비교다. 비교 요청을 SHADOW·운영 코드로 넓히려면 먼저 한 줄로 확인받는다.
+- 전략 실험은 `tasks/lessons.md`의 실험 설계 교훈을 따른다: 재현 도구가 실제 성과를 맞추는지 먼저 확인, 최소 검출 효과를
+  표본으로 사전 계산, 후보를 넓게 비교, 과거 재현 → 소액 실전 2단계로 판정. 성과는 고정 7·14·30일 종가가 아니라 최고·최저 수익률도 본다.
 - 매매 규칙은 KR·US를 같은 방향으로 바꾼다. 한쪽에서 정한 결정을 다른 쪽에서 다시 묻지 않는다.
 - 사용자 보고는 한국어, 쉬운 투자자 용어로 짧게(결론·핵심 숫자·다음 행동) 한다. 내부 약어는 풀어 쓴다.
 
@@ -34,7 +38,7 @@ in `.codex/hooks.json` (trust them once with `/hooks`), BTC folder notes in `pri
 1. SHADOW·LIVE를 자동으로 켜지 않는다. LIVE는 사용자의 명시적 승인이 필요하다. BTC는 Bybit 데모이며 실자금은 별도 승인이다.
 2. `MISSING`(모름)을 0·실패·통과로 채우지 않는다. 판단 당시 없던 값으로 과거를 복원해 일치했다고 말하지 않는다.
 3. 한 거래·한 트리거의 결과를 반례 검증 없이 전역 차단 규칙이나 프롬프트 벌점으로 올리지 않는다.
-4. 한 번에 한 결정 계층만 바꾼다. 같은 근거를 스크리닝·게이트·프롬프트에 중복으로 넣지 않는다.
+4. 한 번에 한 결정 계층만 바꾼다. 같은 근거를 스크리닝·게이트·프롬프트에 중복으로 넣지 않는다(각 층에 측정된 별도 역할이 있을 때만 예외).
 5. 운영에서 LLM이 승인하는 규칙을 결정론 재생만으로 채택·기각하지 않는다.
 6. 뉴스·테마는 참고 자료다. 매수·보유·매도 규칙의 근거로 쓰지 않는다.
 7. 매매 프롬프트를 바꾸면 형제 프롬프트(BUY·SELL·재진입 × KR·US × ko·en)와 실제 코드를 대조한다. 방향이 갈리는 모순은 사용자와 정한다.
@@ -47,16 +51,17 @@ in `.codex/hooks.json` (trust them once with `/hooks`), BTC folder notes in `pri
 | KR·US 스크리닝·국면·진입·청산·비중 변경, 새 전략·트리거 | `docs/TRADING_CHANGE_REVIEW_HARNESS.md`(전략 도입 검토·최소 검토 기록 6항목), `docs/RESEARCH_LESSONS_ko.md` | `prism-trading-change-review` |
 | BUY·SELL·보유·재진입 프롬프트 변경 | 위 하네스의 "Prompt framing and logical-consistency review" 절 | `tests/test_sell_prompt_consistency.py` 방식 |
 | 매수품질·트리거 비교·재생·승격 검토 | `docs/ENTRY_QUALITY_EVOLUTION_ko.md`, `docs/ENTRY_QUALITY_DATA_ANALYSIS_HARNESS.md` | `prism-entry-quality-analysis` |
-| BTC 전략·실행·백테스트·위험·배포 | `docs/BTC_ROADMAP_ko.md`(마일스톤 ID), `docs/BTC_PROOF_GATES_20261010_ko.md` | `prism-btc-change-review` |
+| BTC 전략·실행·백테스트·위험·배포 | `docs/BTC_ROADMAP_ko.md`(마일스톤 ID, 5절 개발 규칙, M5 최소 게이트) | `prism-btc-change-review` |
 | 뉴스·테마 작업 | `docs/THEME_NEWS_ROADMAP_ko.md` | |
 | 배포·장애 수리 | `docs/SERVER_GIT_OPERATIONS_ko.md`의 변경 범위별 검증 게이트 | |
 | 2주 정기 점검 | `docs/TWO_WEEK_REVIEW_ko.md`, 하네스의 프롬프트 주기 점검 | `tools/two_week_review.py` |
 
 ## 이 헌장이 들어오는 길
 
-`CLAUDE.md`는 `@`로 가져오고 `AGENTS.md`는 사본을 둔다. 매매 관련 질문이나 매매 파일 수정 때는 훅이 요약을
-다시 넣는다(`tools/harness/hook.py`). 경로별 룰은 `.claude/rules/`, 스킬은 `skills/`에 있다. 전체 구조는
-`docs/HARNESS_STRUCTURE_ko.md`를 본다.
+`CLAUDE.md`는 `@`로 가져오고 `AGENTS.md`는 사본을 둔다. 매매·BTC·분석 관련 질문이나 매매·BTC 파일 수정 때는
+훅이 요약을 다시 넣는다(`tools/harness/hook.py`, 막지 않음). 스킬은 `skills/`에 있고 `.claude/skills/`와
+`.agents/skills/`가 같은 폴더를 가리킨다. 규칙 내용은 원문 문서에서만 고치고, 이 헌장을 고치면
+`tools/harness/sync_agents_core.py`를 실행한다. 감지 단어·매매 파일 목록은 `hook.py`에서 조정한다.
 <!-- HARNESS_CORE:END -->
 
 ## Project Summary
@@ -155,11 +160,7 @@ Avoid broad production-like runs unless the task requires them.
 
 ### Trading and data safety
 
-- PRISM's north star (user-defined): O'Neil-style trend following with staircase equity growth from a few big
-  winners; micro-split and re-entry control losses and drawdowns while riding runners; screening and buy-decision
-  precision is the core. Judge and report every trading change by this — see the North star section of
-  `docs/TRADING_CHANGE_REVIEW_HARNESS.md`.
-
+- Judge and report every trading change by the north star in the harness charter above.
 - Default trading behavior should remain safe (`demo` unless explicitly required otherwise).
 - Preserve portfolio constraints and stop-loss logic unless the task explicitly changes trading rules.
 - When parsing KIS API numeric fields, prefer existing safe conversion helpers over direct casts.
@@ -183,13 +184,9 @@ Avoid broad production-like runs unless the task requires them.
 
 ### BTC roadmap governance
 
-- Before BTC strategy, execution, backtest, risk, observability, or deployment work,
-  read `docs/BTC_ROADMAP_ko.md` and identify the milestone/task ID and prerequisites.
-- Follow its evidence gates; keep execution-safety fixes separate from strategy experiments.
-- At completion, update roadmap status only with verified evidence and distinguish
-  implementation, tests, deployment, forward observation, and profitability proof.
-- Agentmemory is a pointer/reminder, not the authoritative roadmap or status ledger.
-- Roadmap review is development-time only; do not add it to the live trading loop.
+- Before BTC strategy, execution, backtest, risk, observability, or deployment work, follow
+  `skills/prism-btc-change-review/SKILL.md` (roadmap milestone ID, safety before optimization,
+  evidence gates, status updates only with verified evidence; development-time only).
 
 ### News/theme roadmap governance
 

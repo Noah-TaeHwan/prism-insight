@@ -18,8 +18,8 @@ read the sections named below. Development-time only; never add a runtime compon
 
 ## 1. Before touching code
 
-1. Read `docs/HARNESS_CORE_ko.md` (north star, lines not to cross) and `docs/RESEARCH_LESSONS_ko.md`.
-   If the question was already answered there, say so instead of re-testing it.
+1. Read `docs/HARNESS_CORE_ko.md` (north star, lines not to cross), `docs/RESEARCH_LESSONS_ko.md`
+   and `tasks/lessons.md`. If the question was already answered there, say so instead of re-testing it.
 2. Read the harness sections "Strategy adoption and fit gate" and "Required sequence".
 3. **Ask the user** about anything that sets direction: the hypothesis definition, target
    population (e.g. stocks PRISM already analyzed vs the whole market), time axis, success
@@ -34,8 +34,9 @@ Follow one candidate end to end and note file:line and the final authority at ea
 |---|---|---|
 | Screening / trigger | `trigger_batch.py` | `prism-us/us_trigger_batch.py` |
 | BUY decision prompt | `cores/agents/trading_agents.py` | `prism-us/cores/agents/trading_agents.py` |
-| Deterministic gates | `cores/buy_gate.py`, `cores/regime_policy.py`, `prism_core/entry_score_policy.py`, `prism_core/sector_cap.py` | same shared modules |
-| Order / sizing | `prism_core/order_budget.py`, `prism_core/slot_weight.py`, `prism_core/micro_split*.py`, `prism_core/add_plan*.py` | same |
+| Regime | `cores/market_pulse.py` → `cores/regime_policy.py` | same shared modules |
+| Deterministic gates | `cores/buy_gate.py`, `prism_core/entry_score_policy.py`, `prism_core/sector_cap.py`, `prism_core/trading_scenario_contract.py` | same shared modules |
+| Order / sizing | `prism_core/order_budget.py`, `prism_core/slot_weight.py`, `prism_core/micro_split*.py`, `prism_core/add_plan*.py`, `prism_core/b3_ae_*.py`, `tools/run_b3_ae_shadow.py`, `tools/run_micro_split_add.py` | same |
 | Hold / sell | `stock_tracking_agent.py`, `tools/trend_exit_seller.py`, `tools/hardstop_seller.py`, `prism_core/sell_regime_context.py`, `prism_core/runner_hold*.py` | `prism-us/us_stock_tracking_agent.py` + shared |
 | Re-entry | `prism_core/reentry_v3_live.py`, `prism_core/stopout_reentry.py`, `prism_core/pivot_reentry.py` | same |
 
@@ -62,6 +63,11 @@ review / LIVE review).
 
 ## 5. Validate
 
+- Before any strategy experiment: confirm the replay tool reproduces actual live performance,
+  compute the minimum detectable effect from the sample size, collect a wide candidate list and
+  test only the top of it, and judge in two stages (past replay, then small live money).
+- Judge outcomes by max/min excursion and big-winner capture, keeping average win and loss
+  separate; fixed 7/14/30-day closes alone distort the picture.
 - If the rule is approved by an LLM in production, judge it with an LLM replay, not a
   deterministic replay alone.
 - Deduplicate virtual samples by (market, ticker, rule, date) before aggregating.

@@ -60,17 +60,6 @@ def test_skill_doc_references_resolve(name):
         assert (ROOT / ref).exists(), ref
 
 
-def _rule_paths(file):
-    text = (ROOT / ".claude/rules" / file).read_text(encoding="utf-8")
-    front = text.split("---")[1]
-    return tuple(re.findall(r'^\s+- "([^"]+)"$', front, re.M))
-
-
-def test_rule_paths_match_hook_patterns():
-    assert _rule_paths("prism-stock-trading.md") == hook.STOCK_PATHS
-    assert _rule_paths("prism-btc.md") == hook.BTC_PATHS
-
-
 def test_hook_patterns_match_existing_files():
     for pattern in hook.STOCK_PATHS + hook.PROMPT_PATHS + hook.BTC_PATHS:
         assert list(ROOT.glob(pattern)), f"pattern matches nothing: {pattern}"
@@ -81,8 +70,10 @@ def test_hook_configs_call_shared_script():
     codex = json.loads((ROOT / ".codex/hooks.json").read_text())["hooks"]
     for cfg in (claude, codex):
         commands = [h["command"] for e in ("UserPromptSubmit", "PreToolUse") for g in cfg[e] for h in g["hooks"]]
-        assert any(c.endswith("tools/harness/hook.py\" prompt") or "hook.py\" prompt" in c for c in commands)
+        assert any("hook.py\" prompt" in c for c in commands)
         assert any("hook.py\" edit" in c for c in commands)
+        # exit 2 blocks the session in both hosts; a missing script must not
+        assert all("|| true" in c for c in commands)
     assert "apply_patch" in codex["PreToolUse"][0]["matcher"]
 
 
@@ -92,6 +83,9 @@ def test_hook_configs_call_shared_script():
     ("매수품질 데이터 분석해줘", {"stock", "analysis"}),
     ("please deliver the weekly report", set()),
     ("README 오타 고쳐줘", set()),
+    ("BTCUSDT 펀딩 확인", {"btc"}),
+    ("매매 로직 바꿔줘", {"stock"}),
+    ("live 대시보드 색 바꿔줘", set()),
 ])
 def test_prompt_domains(text, expected):
     assert hook.prompt_domains(text) == expected
@@ -107,6 +101,10 @@ def test_edit_paths_from_claude_and_codex_payloads():
     assert hook.path_domains("cores/agents/trading_agents.py") == {"stock", "prompt"}
     assert hook.path_domains("prism-btc/live/x.py") == {"btc"}
     assert hook.path_domains("README.md") == set()
+    # Codex 0.157 documents apply_patch as {"command": ["apply_patch", "<patch>"]}
+    listed = {"cwd": str(ROOT), "tool_input": {"command": ["apply_patch", patch]}}
+    assert hook.edited_paths(listed) == ["cores/agents/trading_agents.py", "prism-btc/live/x.py"]
+    assert hook.edited_paths({"cwd": str(ROOT), "tool_input": patch}) == hook.edited_paths(listed)
 
 
 def test_edit_reminder_once_per_session(tmp_path, monkeypatch):

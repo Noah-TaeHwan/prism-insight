@@ -11,8 +11,8 @@ extra resident harness or LLM trading batch is added.
 
 ## 1. Locate the work
 
-1. Read `docs/HARNESS_CORE_ko.md`, then the "현재 위치" and milestone sections of
-   `docs/BTC_ROADMAP_ko.md`. Name the milestone/task ID (M0–M5…) and its prerequisites.
+1. Read `docs/HARNESS_CORE_ko.md`, then the "현재 위치", milestone and "5. 매번 확인하는 개발 규칙"
+   sections of `docs/BTC_ROADMAP_ko.md`. Name the milestone/task ID (M0–M6) and its prerequisites.
 2. Read the current design `docs/BTC_SYSTEM_BLUEPRINT_20261005_ko.md` for the part you touch,
    and any contract the roadmap links for that milestone.
 3. Agent memory and old chats are pointers only, never status evidence.
@@ -27,13 +27,17 @@ extra resident harness or LLM trading batch is added.
   `docs/TRADING_CHANGE_REVIEW_HARNESS.md` (BTC: follow its own signal → execution → holding path;
   do not assume stock screening exists).
 
-## 3. Evidence rules (`docs/BTC_PROOF_GATES_20261010_ko.md`)
+## 3. Evidence rules
 
 - Fix the verdict criteria before implementing. Test normal cases and tampering/missing/boundary
   counterexamples. Synthetic case counts are not trade counts.
-- Profitability uses the existing `prism-btc/analysis/profitability_gate.py`. Passing a trade
-  count alone is not REVIEW_READY: costs, funding, execution, MTM, holdout, multiple testing,
-  paired CI, drawdown and 2× cost expectancy must all pass. No automatic deployment.
+- Never create samples with test orders or forced closes; open trades end naturally (roadmap §4).
+- Profitability: the roadmap M5 minimum gate evaluated with `prism-btc/analysis/profitability_gate.py`.
+  A trade count alone is not REVIEW_READY: costs, funding, execution, MTM, holdout, multiple
+  testing, paired CI, drawdown and 2× cost expectancy must all pass. If the criteria change after
+  seeing results, re-register as a new experiment version; never relax them. REVIEW_READY is not
+  execution approval and nothing deploys automatically. For M3–M5 proof work also follow the
+  dated contract `docs/BTC_PROOF_GATES_20261010_ko.md`.
 - Missing data, failed checks and unassessed items are never merged into success.
   Already-reviewed losses and A/B inputs are development samples, not holdout.
 - Use read-only SQLite snapshots and the code manifest of that time for post-deploy evidence.

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'python3 \"$(git rev-parse --show-toplevel)/tools/harness/hook.py\" prompt'",
+            "command": "sh -c 'python3 \"$(git rev-parse --show-toplevel)/tools/harness/hook.py\" prompt || true'",
             "timeout": 10,
             "statusMessage": "PRISM harness"
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'python3 \"$(git rev-parse --show-toplevel)/tools/harness/hook.py\" edit'",
+            "command": "sh -c 'python3 \"$(git rev-parse --show-toplevel)/tools/harness/hook.py\" edit || true'",
             "timeout": 10,
             "statusMessage": "PRISM harness"
           }
