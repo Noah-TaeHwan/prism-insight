@@ -220,3 +220,30 @@ def test_reason_free_text_is_hashed_not_exported():
     assert facts['reason_sha256'] == export._hash('English private free text')
     assert facts['failure_code'] == 'input_size'
     assert 'English private free text' not in json.dumps(facts)
+
+
+@pytest.mark.parametrize('name', ['SELECT 1', 'unknown',
+    ('llm_scenario_outbox; DROP TABLE outbox;--', 0), ('llm_scenario_outbox', -1),
+    ('llm_scenario_outbox', True), ('llm_scenario_outbox', 3)])
+def test_sql_registry_rejects_unregistered_statements(name):
+    with sqlite3.connect(':memory:') as conn:
+        with pytest.raises((KeyError, ValueError)):
+            export._query(conn, name)
+
+
+def test_bound_malicious_value_is_literal_data_not_sql():
+    malicious = "x'); DROP TABLE outbox; --"
+    with sqlite3.connect(':memory:') as conn:
+        conn.execute('CREATE TABLE outbox(id PRIMARY KEY,body)')
+        export._query(conn, 'queue', parameters=(malicious, malicious))
+        assert export._query(conn, 'queued', parameters=(10,)).fetchall() == [(malicious, malicious)]
+        export._query(conn, 'delete_queued', parameters=(malicious,))
+        assert conn.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] == 0
+
+
+def test_stream_query_text_is_fixed_for_exact_four_sources():
+    assert set(export.STREAM_SQL) == set(export.STREAMS)
+    for statements in export.STREAM_SQL.values():
+        assert len(statements) == 3 and all(type(s) is str for s in statements)
+        assert statements[1].endswith('WHERE rowid=?')
+        assert statements[2].endswith('WHERE rowid>? ORDER BY rowid LIMIT ?')

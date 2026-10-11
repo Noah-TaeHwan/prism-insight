@@ -19,6 +19,64 @@ from .events import build_event
 
 STREAMS = ('llm_scenario_audit_events', 'llm_scenario_recovery_events',
            'llm_scenario_broker_evidence', 'llm_scenario_outbox')
+# All SQL text is literal. Source keys select a statement, never a table-name splice.
+STREAM_SQL = {
+    'llm_scenario_audit_events': (
+        'SELECT MAX(rowid) FROM llm_scenario_audit_events',
+        'SELECT body FROM llm_scenario_audit_events WHERE rowid=?',
+        'SELECT rowid AS source_rowid,* FROM llm_scenario_audit_events WHERE rowid>? ORDER BY rowid LIMIT ?'),
+    'llm_scenario_recovery_events': (
+        'SELECT MAX(rowid) FROM llm_scenario_recovery_events',
+        'SELECT body FROM llm_scenario_recovery_events WHERE rowid=?',
+        'SELECT rowid AS source_rowid,* FROM llm_scenario_recovery_events WHERE rowid>? ORDER BY rowid LIMIT ?'),
+    'llm_scenario_broker_evidence': (
+        'SELECT MAX(rowid) FROM llm_scenario_broker_evidence',
+        'SELECT body FROM llm_scenario_broker_evidence WHERE rowid=?',
+        'SELECT rowid AS source_rowid,* FROM llm_scenario_broker_evidence WHERE rowid>? ORDER BY rowid LIMIT ?'),
+    'llm_scenario_outbox': (
+        'SELECT MAX(rowid) FROM llm_scenario_outbox',
+        'SELECT body FROM llm_scenario_outbox WHERE rowid=?',
+        'SELECT rowid AS source_rowid,* FROM llm_scenario_outbox WHERE rowid>? ORDER BY rowid LIMIT ?'),
+}
+QUERY_SQL = {
+    'queue': 'INSERT OR IGNORE INTO outbox VALUES(?,?)',
+    'manifest': 'SELECT body FROM llm_scenario_audit_manifests WHERE manifest_id=?',
+    'notice_status': 'SELECT status FROM notices WHERE id=?',
+    'notice_save': 'INSERT OR REPLACE INTO notices VALUES(?,?,?)',
+    'model_ref_save': 'INSERT OR REPLACE INTO model_refs VALUES(?,?,?)',
+    'model_meta_save': 'INSERT OR REPLACE INTO model_metadata VALUES(?,?,?)',
+    'decision': 'SELECT snapshot,context,proposal,outcome FROM llm_scenario_decisions WHERE slot=?',
+    'model_refs': 'SELECT kind,ref FROM model_refs WHERE slot=?',
+    'model_metadata': 'SELECT kind,body FROM model_metadata WHERE slot=?',
+    'delete_refs': 'DELETE FROM model_refs WHERE slot=?',
+    'delete_metadata': 'DELETE FROM model_metadata WHERE slot=?',
+    'save_identity': "INSERT INTO meta VALUES('source_identity',?)",
+    'cursor': 'SELECT seq FROM cursors WHERE stream=?',
+    'save_cursor': 'INSERT INTO cursors VALUES(?,?)',
+    'save_anchor': 'INSERT INTO anchors VALUES(?,?)',
+    'anchor': 'SELECT ref FROM anchors WHERE stream=?',
+    'update_cursor': 'UPDATE cursors SET seq=? WHERE stream=?',
+    'update_anchor': 'UPDATE anchors SET ref=? WHERE stream=?',
+    'watches': "SELECT id FROM notices WHERE status IN ('QUEUED','SENDING') ORDER BY checked LIMIT ?",
+    'notice': 'SELECT * FROM llm_scenario_outbox WHERE event_id=?',
+    'checked': 'UPDATE notices SET checked=? WHERE id=?',
+    'queued': 'SELECT id,body FROM outbox ORDER BY rowid LIMIT ?',
+    'delete_queued': 'DELETE FROM outbox WHERE id=?',
+}
+
+
+def _query(connection, name, *, parameters=()):
+    """Closed statement registry; values are exclusively SQLite bound parameters."""
+    if isinstance(name, tuple):
+        stream, operation = name
+        if type(operation) is not int or operation not in (0, 1, 2):
+            raise ValueError('unknown_statement')
+        statement = STREAM_SQL[stream][operation]
+    else:
+        statement = QUERY_SQL[name]
+    return connection.execute(statement, parameters)
+
+
 NUMBERS = {'quantity', 'price', 'mark_price', 'hard_stop', 'previous_hard_stop', 'initial_equity',
            'realized_loss', 'fees_paid', 'funding_paid', 'net_pnl', 'gross_pnl', 'fees', 'funding',
            'budget', 'total_risk', 'available', 'proposed_risk', 'reserved_risk', 'confidence',
@@ -137,13 +195,13 @@ def _queue(state, identity, key, kind, attributes, stamp):
     built['attributes']['exporter_git_revision'] = built.pop('git_sha', None)
     built['git_sha'] = built['attributes'].get('source_git_revision')
     built['policy_version'] = built['attributes'].get('source_policy_hash')
-    state.execute('INSERT OR IGNORE INTO outbox VALUES(?,?)', (event_id, _json(built)))
+    _query(state, 'queue', parameters=(event_id, _json(built)))
 
 
 def _manifest(source, manifest_id):
     if not manifest_id:
         return {'policy_evidence': 'UNKNOWN'}
-    row = source.execute('SELECT body FROM llm_scenario_audit_manifests WHERE manifest_id=?', (manifest_id,)).fetchone()
+    row = _query(source, 'manifest', parameters=(manifest_id,)).fetchone()
     if not row:
         return {'policy_evidence': 'MISSING_MANIFEST'}
     body = json.loads(row[0])
@@ -161,7 +219,7 @@ def _manifest(source, manifest_id):
 def _notice(state, identity, row, now):
     event = row['event_id']
     status = row['status']
-    previous = state.execute('SELECT status FROM notices WHERE id=?', (event,)).fetchone()
+    previous = _query(state, 'notice_status', parameters=(event,)).fetchone()
     if previous and previous[0] == status:
         return
     attrs = {'notice_ref': _hash(event), 'body_sha256': _hash(row['body']),
@@ -171,7 +229,7 @@ def _notice(state, identity, row, now):
     if row['message_id'] is not None:
         attrs['receipt_ref'] = _hash(str(row['message_id']))
     _queue(state, identity, 'notice:' + event + ':' + str(status), 'notice', attrs, now)
-    state.execute('INSERT OR REPLACE INTO notices VALUES(?,?,?)', (event, status, now))
+    _query(state, 'notice_save', parameters=(event, status, now))
 
 
 def _references(*values):
@@ -246,13 +304,13 @@ def _capture(source, state, identity, stream, row):
     refs_sources = [dict(row), body]
     attrs.update(_references(*refs_sources))
     if stream == 'llm_scenario_recovery_events' and kind in {'MODEL_REQUEST', 'MODEL_RAW'}:
-        state.execute('INSERT OR REPLACE INTO model_refs VALUES(?,?,?)', (slot, kind, _hash(raw)))
+        _query(state, 'model_ref_save', parameters=(slot, kind, _hash(raw)))
         metadata = dict(_model_metadata(body), source_event_time=stamp)
-        state.execute('INSERT OR REPLACE INTO model_metadata VALUES(?,?,?)', (slot, kind, _json(metadata)))
+        _query(state, 'model_meta_save', parameters=(slot, kind, _json(metadata)))
         attrs['model_metadata'] = metadata
         attrs['raw_manifest_only'] = True
     if stream == 'llm_scenario_recovery_events' and kind == 'OUTCOME' and slot is not None:
-        decision = source.execute('SELECT snapshot,context,proposal,outcome FROM llm_scenario_decisions WHERE slot=?', (slot,)).fetchone()
+        decision = _query(source, 'decision', parameters=(slot,)).fetchone()
         if decision:
             for key in decision.keys():
                 value = decision[key]
@@ -270,16 +328,16 @@ def _capture(source, state, identity, stream, row):
             attrs.update(_references(*refs_sources))
             attrs['proposal_semantics'] = 'PROPOSED_NOT_INSTALLED_PROTECTION'
             attrs['context_semantics'] = 'DECISION_INPUT_OBSERVATION_NOT_LATER_EXECUTION'
-            attrs['model_evidence_refs'] = dict(state.execute('SELECT kind,ref FROM model_refs WHERE slot=?', (slot,)).fetchall())
-            metadata = {kind: json.loads(text) for kind, text in state.execute('SELECT kind,body FROM model_metadata WHERE slot=?', (slot,))}
+            attrs['model_evidence_refs'] = dict(_query(state, 'model_refs', parameters=(slot,)).fetchall())
+            metadata = {kind: json.loads(text) for kind, text in _query(state, 'model_metadata', parameters=(slot,))}
             attrs['model_metadata'] = metadata
             if 'MODEL_REQUEST' in metadata and 'MODEL_RAW' in metadata:
                 duration = metadata['MODEL_RAW']['source_event_time'] - metadata['MODEL_REQUEST']['source_event_time']
                 if duration >= 0:
                     attrs['request_to_raw_observed_seconds'] = duration
                     attrs['latency_basis'] = 'JOURNAL_TIMESTAMPS_NOT_PROVIDER_LATENCY'
-            state.execute('DELETE FROM model_refs WHERE slot=?', (slot,))
-            state.execute('DELETE FROM model_metadata WHERE slot=?', (slot,))
+            _query(state, 'delete_refs', parameters=(slot,))
+            _query(state, 'delete_metadata', parameters=(slot,))
         else:
             attrs['decision_evidence'] = 'MISSING_EXACT_SLOT'
     _queue(state, identity, stream + ':' + str(row['source_rowid']), 'source', attrs, stamp)
@@ -333,29 +391,29 @@ def export_once(db_path, state_path, spool_path, limit=100):
         if previous and previous[0] != identity:
             raise ValueError('source_identity_changed')
         if not previous:
-            state.execute("INSERT INTO meta VALUES('source_identity',?)", (identity,))
+            _query(state, 'save_identity', parameters=(identity,))
         for stream in STREAMS:
             if stream not in tables:
                 continue
-            cursor = state.execute('SELECT seq FROM cursors WHERE stream=?', (stream,)).fetchone()
-            maximum = source.execute(f'SELECT MAX(rowid) FROM {stream}').fetchone()[0] or 0
+            cursor = _query(state, 'cursor', parameters=(stream,)).fetchone()
+            maximum = _query(source, (stream, 0)).fetchone()[0] or 0
             if cursor is None:
-                state.execute('INSERT INTO cursors VALUES(?,?)', (stream, maximum))
-                anchor = source.execute(f'SELECT body FROM {stream} WHERE rowid=?', (maximum,)).fetchone()
-                state.execute('INSERT INTO anchors VALUES(?,?)', (stream, _hash(anchor[0]) if anchor else None))
+                _query(state, 'save_cursor', parameters=(stream, maximum))
+                anchor = _query(source, (stream, 1), parameters=(maximum,)).fetchone()
+                _query(state, 'save_anchor', parameters=(stream, _hash(anchor[0]) if anchor else None))
                 _queue(state, identity, 'coverage:' + stream, 'coverage',
                        {'stream': stream, 'coverage_start_after_rowid': maximum,
                         'historical_backfill': False}, time.time())
                 continue
             if maximum < cursor[0]:
                 raise ValueError('source_rowid_regressed')
-            anchor = source.execute(f'SELECT body FROM {stream} WHERE rowid=?', (cursor[0],)).fetchone()
-            expected = state.execute('SELECT ref FROM anchors WHERE stream=?', (stream,)).fetchone()
+            anchor = _query(source, (stream, 1), parameters=(cursor[0],)).fetchone()
+            expected = _query(state, 'anchor', parameters=(stream,)).fetchone()
             if not expected or expected[0] != (_hash(anchor[0]) if anchor else None):
                 raise ValueError('source_anchor_changed')
             if state.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] >= 1000:
                 break
-            for row in source.execute(f'SELECT rowid AS source_rowid,* FROM {stream} WHERE rowid>? ORDER BY rowid LIMIT ?', (cursor[0], max(0, limit-counts['captured']))):
+            for row in _query(source, (stream, 2), parameters=(cursor[0], max(0, limit-counts['captured']))):
                 if state.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] >= 1000:
                     counts['backlog'] = True
                     break
@@ -367,8 +425,8 @@ def export_once(db_path, state_path, spool_path, limit=100):
                 state.execute('SAVEPOINT source_row')
                 try:
                     _capture(source, state, identity, stream, row)
-                    state.execute('UPDATE cursors SET seq=? WHERE stream=?', (row['source_rowid'], stream))
-                    state.execute('UPDATE anchors SET ref=? WHERE stream=?', (_hash(row['body']), stream))
+                    _query(state, 'update_cursor', parameters=(row['source_rowid'], stream))
+                    _query(state, 'update_anchor', parameters=(_hash(row['body']), stream))
                     state.execute('RELEASE source_row')
                     counts['captured'] += 1
                     counts['source_bytes'] += size
@@ -379,26 +437,26 @@ def export_once(db_path, state_path, spool_path, limit=100):
                                                     'error_type': type(exc).__name__})
                     counts['backlog'] = True
                     break
-            current = state.execute('SELECT seq FROM cursors WHERE stream=?', (stream,)).fetchone()[0]
+            current = _query(state, 'cursor', parameters=(stream,)).fetchone()[0]
             counts['backlog'] |= current < maximum
         if 'llm_scenario_outbox' in tables:
-            watches = state.execute("SELECT id FROM notices WHERE status IN ('QUEUED','SENDING') ORDER BY checked LIMIT ?", (limit,)).fetchall()
+            watches = _query(state, 'watches', parameters=(limit,)).fetchall()
             for (event_id,) in watches:
                 if state.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] >= 1000:
                     counts['backlog'] = True
                     break
-                row = source.execute('SELECT * FROM llm_scenario_outbox WHERE event_id=?', (event_id,)).fetchone()
+                row = _query(source, 'notice', parameters=(event_id,)).fetchone()
                 if row:
                     _notice(state, identity, row, time.time())
-                    state.execute('UPDATE notices SET checked=? WHERE id=?', (time.time(), event_id))
+                    _query(state, 'checked', parameters=(time.time(), event_id))
         source.rollback()
         if _identity(db_path) != identity:
             raise ValueError('source_identity_changed')
         state.commit()
-        for event_id, body in state.execute('SELECT id,body FROM outbox ORDER BY rowid LIMIT ?', (limit,)).fetchall():
+        for event_id, body in _query(state, 'queued', parameters=(limit,)).fetchall():
             event = json.loads(body)
             _append(event, spool_path)
-            state.execute('DELETE FROM outbox WHERE id=?', (event_id,))
+            _query(state, 'delete_queued', parameters=(event_id,))
             state.commit()
             counts['emitted'] += 1
         counts['pending'] = state.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]
