@@ -588,6 +588,15 @@ def test_ma_structure_actual_request_all_contexts_bounded_and_audited(mode, monk
     assert MA_STRUCTURE_PROMPT in calls[0]['system_prompt']
     assert len(calls[0]['user_prompt'].encode()) < 100000
     payload = json.loads(calls[0]['user_prompt'])
+    from live.scenario_model_input import restore_model_input
+    raw_points = payload['contract_context']['ma_structure']['primary']['30m']['points']
+    assert set(raw_points) == {'$row_table'}
+    table = raw_points['$row_table']
+    assert len(table['rows']) == 4
+    assert all(len(row) == len(table['columns']) for row in table['rows'])
+    payload = restore_model_input(payload)
+    assert payload['contract_context']['ma_structure']['primary']['30m']['points'] == [
+        dict(zip(table['columns'], row)) for row in table['rows']]
     assert len(payload['contract_context']['ma_structure']['primary']['30m']['points']) == 4
     assert ('current_primary_frame_facts' in payload['contract_context']) == (mode == 'flat')
 

@@ -19,6 +19,72 @@ def encoded(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
 
 
+def row_payload(rows):
+    return {'market_snapshot': {'timeframes': {'30m': {'recent_confirmed_bars': rows}}},
+            'contract_context': {}, 'response_contract': {}}
+
+
+def table_payload():
+    return row_payload([{'long_observation_name': True, 'second_observation_name': 1,
+                         'third_observation_name': 1.0, 'unicode_observation_name': '관측😀'} for _ in range(30)])
+
+
+def test_v2_tables_preserve_numeric_types_order_and_unicode():
+    source = table_payload()
+    result, audit = project_model_input(source)
+    assert result['model_input_projection']['version'] == 2
+    assert audit['projected_utf8_bytes'] < audit['original_utf8_bytes']
+    assert encoded(restore_model_input(result)) == encoded(source)
+    assert result['response_contract'] == source['response_contract']
+
+
+@pytest.mark.parametrize('rows', [[], [1, 2], [{'a': 1}, {'b': 2}],
+                                 [{'a': 1, 'b': 2}, {'b': 2, 'a': 1}], [{}], [{'a': 1}]])
+def test_ineligible_or_unprofitable_tables_never_inflate(rows):
+    source = row_payload(rows)
+    projected, audit = project_model_input(source)
+    assert encoded(projected) == encoded(source)
+    assert audit['projected_utf8_bytes'] <= audit['original_utf8_bytes']
+
+
+@pytest.mark.parametrize('fault', ['duplicate_columns', 'missing_value', 'extra_value',
+                                   'nonlist_row', 'unknown_path', 'duplicate_path', 'missing_marker', 'nested_marker'])
+def test_malformed_tables_fail_closed(fault):
+    projected, _ = project_model_input(table_payload())
+    table = projected['market_snapshot']['timeframes']['30m']['recent_confirmed_bars']['$row_table']
+    metadata = projected['model_input_projection']
+    if fault == 'duplicate_columns':
+        table['columns'][1] = table['columns'][0]
+    elif fault == 'missing_value':
+        table['rows'][0].pop()
+    elif fault == 'extra_value':
+        table['rows'][0].append(None)
+    elif fault == 'nonlist_row':
+        table['rows'][0] = {}
+    elif fault == 'unknown_path':
+        metadata['row_table_paths'] = ['contract_context.positions']
+    elif fault == 'duplicate_path':
+        metadata['row_table_paths'] *= 2
+    elif fault == 'missing_marker':
+        projected['market_snapshot']['timeframes']['30m']['recent_confirmed_bars'] = []
+    else:
+        table['rows'][0][0] = {'$row_table': {}}
+    with pytest.raises(ValueError):
+        restore_model_input(projected)
+
+
+def test_reserved_marker_rejected_and_v1_definition_reference_still_restores():
+    with pytest.raises(ValueError, match='reserved_projection_field'):
+        project_model_input({'contract_context': {'nested': {'$row_table': {}}}})
+    with pytest.raises(ValueError, match='unregistered_row_table'):
+        restore_model_input({'contract_context': {'nested': {'$row_table': {}}}})
+    old = {'market_snapshot': {'timeframes': {'30m': {'confirmed': {
+        'compression_definition': {'$feature_definition': 'compression_definition'}}}}},
+        'model_input_projection': {'version': 1, 'numeric_market_references': [],
+            'feature_definitions': {'compression_definition': 'old definition'}}}
+    assert restore_model_input(old)['market_snapshot']['timeframes']['30m']['confirmed']['compression_definition'] == 'old definition'
+
+
 def payload():
     market = snapshot()
     ctx = context()
