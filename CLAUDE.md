@@ -11,6 +11,16 @@ Stack: Python 3.10+, mcp-agent, GPT-5.x (per-agent models in docs/CLAUDE_AGENTS.
 Scale: ~265,000+ LOC, 13+ AI agents, KR/US dual market support, BTC (demo)
 ```
 
+## Harness (read first)
+
+The shared Claude·Codex harness charter is imported below. Skills live in `.claude/skills/`
+(linked to `skills/`), hooks in `.claude/settings.json`. `AGENTS.md` sections "Authorized PR merge
+and deployment workflow", "Trading and data safety", "Report output" and "Before Finishing" apply to
+Claude too: read them before merging/deploying, changing trading code, editing BTC notifications,
+or finishing a screening/provider change.
+
+@docs/HARNESS_CORE_ko.md
+
 ## Project Structure
 
 ```

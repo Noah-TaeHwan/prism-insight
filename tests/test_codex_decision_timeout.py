@@ -37,8 +37,8 @@ def _auth_file(tmp_path, email):
 
 def test_account_raised_xhigh_lifts_buy_timeout_only(tmp_path):
     env = {**CRON, "PRISM_BUY_CODEX_EFFORT": "medium", "PRISM_SELL_CODEX_EFFORT": "medium",
-           "PRISM_CODEX_EFFORT_BY_ACCOUNT": "dragon1086@naver.com=medium,munsangrok@gmail.com=xhigh",
-           "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "munsangrok@gmail.com")}
+           "PRISM_CODEX_EFFORT_BY_ACCOUNT": "reporter@example.com=medium,trader@example.com=xhigh",
+           "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "trader@example.com")}
     buy, sell = resolve_buy_codex_settings(env), resolve_sell_codex_settings(env)
     assert (buy.reasoning_effort, buy.timeout) == ("xhigh", 480)
     assert (sell.reasoning_effort, sell.timeout) == ("xhigh", 180)  # SELL budget untouched
@@ -46,8 +46,8 @@ def test_account_raised_xhigh_lifts_buy_timeout_only(tmp_path):
 
 def test_medium_account_keeps_configured_timeouts(tmp_path):
     env = {**CRON, "PRISM_BUY_CODEX_EFFORT": "medium", "PRISM_SELL_CODEX_EFFORT": "medium",
-           "PRISM_CODEX_EFFORT_BY_ACCOUNT": "dragon1086@naver.com=medium,munsangrok@gmail.com=xhigh",
-           "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "dragon1086@naver.com")}
+           "PRISM_CODEX_EFFORT_BY_ACCOUNT": "reporter@example.com=medium,trader@example.com=xhigh",
+           "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "reporter@example.com")}
     assert resolve_buy_codex_settings(env).timeout == 300
     assert resolve_sell_codex_settings(env).timeout == 180
 

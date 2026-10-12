@@ -168,7 +168,7 @@ com.prism.stance-mark   평일 15:40 KST · 하루 마감 + 리더보드 갱신
 | 항목 | 값 |
 |---|---|
 | 엔드포인트 | `http://127.0.0.1:8800` |
-| 원장 | `/Users/rocky/prism-stance/ledger.db` (`durable: true`) |
+| 원장 | `~/prism-stance/ledger.db` (`durable: true`) |
 | 로그 | `~/prism-stance/server.log` · `mark.log` |
 | 인증키 | `~/prism-stance/strategy.env` (600, 저장소 밖) |
 | 전용 venv | `.venv-stance` (저장소 venv 가 깨져 있어 새로 만듦) |
@@ -189,7 +189,7 @@ com.prism.stance-mark   평일 15:40 KST · 하루 마감 + 리더보드 갱신
 **PRISM 매매는 Stance 로 흘러가지 않는다.** 이유가 있다.
 
 배포하다 알게 된 사실이 있다. 실제 매매 cron 은
-**`/Users/rocky/work/prism-subscriber`** 에서 돈다. 같은 저장소의 **별도 체크아웃**이고
+**`~/work/prism-subscriber`** 에서 돈다. 같은 저장소의 **별도 체크아웃**이고
 커밋 `57ca1b8` 에 머물러 있으며, **`stance_adapter.py` 도 `stance_quotes.py` 도 없다.**
 
 즉 내가 `ExecutionService` 에 붙인 훅은 그 런타임에 존재하지 않는다.
