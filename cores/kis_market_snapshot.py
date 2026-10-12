@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 import json
+import logging
 import math
 import os
 import struct
@@ -20,6 +21,8 @@ import zipfile
 
 import pandas as pd
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -536,14 +539,33 @@ def build_kis_snapshot_bundle(
     if action_codes:
         previous = previous.copy(deep=True)
     started = time.monotonic()
+    action_unverified = []
     for code in action_codes:
         if time.monotonic() - started > 60:
             raise KisSnapshotError("KIS corporate-action validation deadline")
-        row = _rights_action_row(code, prev_date, previous.loc[code], master, corporate_action_fetcher)
+        try:
+            row = _rights_action_row(code, prev_date, previous.loc[code], master, corporate_action_fetcher)
+        except KisSnapshotError as exc:
+            # One unverifiable rights issue must not void the whole session.
+            # Drop only that issue (no fabricated bar), like an IPO exclusion.
+            if len(action_unverified) + 1 >= len(codes):
+                raise
+            logger.warning("Excluding %s from KIS snapshot: %s (cause: %r)", code, exc, exc.__cause__)
+            action_unverified.append(code)
+            continue
         if time.monotonic() - started > 60:
             raise KisSnapshotError("KIS corporate-action validation deadline after response")
         previous.loc[code, list(_COLUMNS.values())] = [row[column] for column in _COLUMNS.values()]
         volume_matches[code] = f"{action_types[code]}_official_adjusted_observed"
+    if action_unverified:
+        codes = [code for code in codes if code not in action_unverified]
+        cap = cap.loc[codes].copy()
+        previous_attrs = dict(previous.attrs)
+        previous = previous.loc[codes].copy()
+        previous.attrs.update(previous_attrs)
+        action_codes = [code for code in action_codes if code not in action_unverified]
+        for code in action_unverified:
+            volume_matches.pop(code, None)
     if any(kind is None for kind in volume_matches.values()):
         raise KisSnapshotError("KIS master previous-volume/session mismatch; cap date unverified")
     rounded_volume_codes = sorted(code for code, kind in volume_matches.items()
@@ -582,5 +604,6 @@ def build_kis_snapshot_bundle(
         requested_universe=len(master.names), eligible_coverage=len(codes),
         ipo_excluded=sum(master.listed_dates.get(code) == trade_date for code in master.names),
         nontrading_zero_cap_excluded=zero_cap,
+        corporate_action_unverified_excluded=action_unverified,
     )
     return MarketSnapshotBundle(snapshot, previous, cap, prev_date, "kis")
