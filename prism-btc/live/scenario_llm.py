@@ -594,7 +594,8 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
             generate: Callable | None = None, clock: Callable = time.time) -> dict:
     """Read-only proposal; caller must revalidate against fresh execution state.
 
-    No retry or alternate model on failure. A late response never becomes an order.
+    No logical retry or alternate model on failure. The operational caller alone
+    may enable one audited transport retry. A late response never becomes an order.
     The runtime must continue protection independently while this call is pending.
     """
     if snapshot.get("valid") is not True:

@@ -21,6 +21,13 @@ from live.scenario_provenance import run_capture
 from live.scenario_ledger import forward_run
 
 
+def operational_propose(*args, **kwargs):
+    """Only the production runner opts into one audited transport retry."""
+    from functools import partial
+    from live.scenario_oauth import generate_scenario
+    return propose(*args, **kwargs, generate=partial(generate_scenario, retry_transport=True))
+
+
 _FAILURE_STAGES = {"database_init", "control", "broker_init", "activation", "run", "model_input_preparation"}
 _ERROR_TYPES = {"Exception", "ValueError", "RuntimeError", "PermissionError", "TimeoutError",
                 "OperationalError", "IntegrityError", "DatabaseError", "LockBusy"}
@@ -218,7 +225,8 @@ def main():
             snapshots.append(value)
             return value
         failure_stage="run"
-        result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,snapshot=snapshot)
+        result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
+                        snapshot=snapshot,proposal=operational_propose)
         _record_health_best_effort(conn,result,snapshot=snapshots[-1] if snapshots else None,
                                    loop="protection" if args.protect_only else "decision")
         # Disabled adapters cannot produce trade notices. Delivery occurs only

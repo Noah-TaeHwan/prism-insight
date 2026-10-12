@@ -8,11 +8,86 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
+import time
 from types import SimpleNamespace
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 MAX_BYTES = 1_048_576
+MIN_RETRY_SECONDS = 5
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_error_key")
+        result[key] = value
+    return result
+
+
+def _verified_truncation(error, endpoint):
+    """Only the observed localhost proxy transport error, never model errors."""
+    if error.code != 502 or error.geturl() != endpoint:
+        return False
+    try:
+        raw = error.read(4097)
+        if len(raw) > 4096:
+            return False
+        body = json.loads(raw, object_pairs_hook=_unique_object)
+        if set(body) != {"error"} or set(body["error"]) != {"type", "message"}:
+            return False
+        failure = body["error"]
+        return failure["type"] == "server_error" and re.fullmatch(
+            r"Upstream connection error: Response payload is not completed: "
+            r"<TransferEncodingError:\s*400,\s*message='Not enough data for satisfy transfer length header\.'>",
+            failure["message"]) is not None
+    except Exception:
+        return False
+
+
+def _read_response(request, open_url, endpoint, timeout, retry_transport):
+    # Socket timeouts are not a hard wall-clock kill. Never accept late output.
+    from live.scenario_recovery import record_model_transport_attempt
+    started = time.monotonic()
+    deadline = started + timeout
+    for attempt in (1, 2):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or (attempt == 2 and remaining < MIN_RETRY_SECONDS):
+            raise ValueError("oauth_deadline")
+        status, reason, retry = None, "transport_failed", False
+        try:
+            with open_url(request, timeout=remaining) as response:
+                status = response.status
+                if response.geturl() != endpoint or status != 200:
+                    raise ValueError("oauth_proxy_response")
+                raw = response.read(MAX_BYTES + 1)
+            if time.monotonic() > deadline:
+                reason = "deadline_exceeded"
+                raise ValueError("oauth_deadline")
+            reason = "http_response"
+            return raw
+        except HTTPError as error:
+            status = error.code
+            try:
+                known = _verified_truncation(error, endpoint)
+            finally:
+                error.close()
+            reason = "upstream_transfer_truncated" if known else "http_error"
+            retry = (retry_transport and known and attempt == 1
+                     and deadline - time.monotonic() >= MIN_RETRY_SECONDS)
+            if not retry:
+                raise
+        finally:
+            recorded = False
+            if retry_transport:
+                recorded = record_model_transport_attempt(attempt=attempt, status=status, reason=reason,
+                    elapsed_seconds=max(0., time.monotonic() - started), retry=retry)
+        if retry and not recorded:
+            raise ValueError("oauth_retry_audit_unavailable")
+    raise ValueError("oauth_attempts_exhausted")
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -26,7 +101,10 @@ def _local_open(request, timeout):
 
 
 def generate_scenario(*, system_prompt, user_prompt, model, reasoning_effort,
-                      fast_tier, timeout, response_schema, mcp_profile=None, open_url=_local_open):
+                      fast_tier, timeout, response_schema, mcp_profile=None, open_url=_local_open,
+                      retry_transport=False):
+    if type(retry_transport) is not bool:
+        raise ValueError("scenario_retry_policy")
     if (model != "gpt-6-luna" or reasoning_effort != "high"
             or fast_tier is not True or mcp_profile is not None):
         raise ValueError("scenario_model_policy")
@@ -48,10 +126,7 @@ def generate_scenario(*, system_prompt, user_prompt, model, reasoning_effort,
     request = Request(endpoint, data=json.dumps(payload,allow_nan=False).encode(),
                       headers={"Content-Type":"application/json"}, method="POST")
     try:
-        with open_url(request,timeout=timeout) as response:
-            if response.geturl() != endpoint or response.status != 200:
-                raise ValueError("oauth_proxy_response")
-            raw = response.read(MAX_BYTES+1)
+        raw = _read_response(request, open_url, endpoint, timeout, retry_transport)
         if len(raw)>MAX_BYTES:
             raise ValueError("oauth_response_size")
         result=json.loads(raw)
