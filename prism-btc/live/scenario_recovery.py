@@ -81,6 +81,33 @@ def record_model_request(*, system_prompt, user_prompt, response_schema,
         conn.rollback()
 
 
+def record_model_transport_attempt(*, attempt, status, reason, elapsed_seconds, retry):
+    """Best-effort sanitized HTTP telemetry; never an order or recovery permit."""
+    capture = _wire.get()
+    if capture is None:
+        return False
+    conn, slot, clock = capture
+    try:
+        if (type(attempt) is not int or attempt not in (1, 2)
+                or (status is not None and (type(status) is not int or not 100 <= status <= 599))
+                or not _number(elapsed_seconds) or elapsed_seconds < 0
+                or type(retry) is not bool):
+            return False
+        safe = reason if reason in {"transport_failed", "http_response", "http_error",
+            "upstream_transfer_truncated", "deadline_exceeded"} else "transport_failed"
+        body = {"attempt": attempt, "status": status, "reason": safe,
+                "elapsed_seconds": round(elapsed_seconds, 6), "retry": bool(retry)}
+        journal(conn, "MODEL_TRANSPORT_ATTEMPT", body, clock(), slot=slot)
+        conn.commit()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            return False  # Even a closed journal cannot invalidate a safe response.
+        return False
+
+
 def record_model_error(code):
     capture = _wire.get()
     if capture is None:
