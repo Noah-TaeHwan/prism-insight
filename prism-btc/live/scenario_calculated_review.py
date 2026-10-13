@@ -20,7 +20,7 @@ from live.scenario_runtime import snapshot_input_time
 
 
 DRAFT_PROMPT = """
-Order-free candidate research. This top-level research response contract replaces
+Order-free candidate research. The supplied API response schema replaces
 the normal single-proposal output shape and overrides preceding instructions to
 personally compute costs/reward/risk. All trading safety rules remain unchanged.
 Return wait_proposal (a normal WAIT wire proposal), zero to two independent normal
@@ -41,10 +41,11 @@ to trade. Unknown real fees never authorize invented net-reward arithmetic.
 """
 
 SELECT_PROMPT = """
-Order-free calculated candidate review. This top-level research response contract
+Order-free calculated candidate review. The supplied API response schema
 replaces the normal single-proposal output shape and overrides preceding requests
-for model arithmetic, never safety constraints. Choose an eligible candidate
-ID and its exact receipt_sha256, or WAIT and the WAIT receipt_sha256. Never rewrite
+for model arithmetic, never safety constraints. Choose exactly one selection_token
+from the schema enum. Each host token binds a candidate ID (or WAIT) and its full
+receipt hash; never construct a token or copy a separate hash field. Never rewrite
 prices, quantities, expiry or confidence; revised plans require a new research
 run, not an extra call here. Interpret trend, support/resistance, fill plausibility
 and supplied host calculations. Do not invent net profit or recompute supplied
@@ -55,7 +56,7 @@ Unknown actual future fees alone are not a new automatic WAIT gate; evaluate the
 supplied reserve-based comparisons without inventing exact net profit or an edge.
 Pure wire/economic validation is NOT recovery authorization or execution evidence.
 No trade is mandatory. Explain the decisive evidence and invalidation briefly in
-Korean. Return exactly selection, receipt_sha256, rationale, no other fields.
+Korean. Return exactly selection_token and rationale, no other fields.
 """
 
 
@@ -207,7 +208,7 @@ def calculate_candidate(wire, context, *, candidate_id):
     return receipt
 
 
-def _model_payload(snapshot, context, response_contract):
+def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
     model_context = deepcopy(context)
     model_context["ma_structure"] = build_ma_structure_context(snapshot, context)
     model_context["current_primary_frame_facts"] = scenario_llm._current_primary_frame_facts(snapshot)
@@ -215,8 +216,11 @@ def _model_payload(snapshot, context, response_contract):
         if isinstance(context.get(field), list):
             model_context[field] = [{key: value for key, value in row.items() if key != "rationale"}
                 if isinstance(row, dict) else row for row in context[field]]
-    return project_model_input(dict(market_snapshot=snapshot, contract_context=model_context,
-                                   response_contract=response_contract))[0]
+    payload = dict(market_snapshot=snapshot, contract_context=model_context,
+                   response_contract=response_contract)
+    if calculated_candidates is not None:
+        payload["calculated_candidates"] = calculated_candidates
+    return project_model_input(payload)[0]
 
 
 def research_review(snapshot, context, response_contract, *, generate, record,
@@ -304,7 +308,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             raise ValueError("research_response_contract")
         return parsed
 
-    draft = call("candidate", DRAFT_PROMPT, dict(payload, research_response_contract=draft_schema), draft_schema)
+    draft = call("candidate", DRAFT_PROMPT, payload, draft_schema)
     expected_category = "CANDIDATES_PROVIDED" if draft["candidates"] else "FIRST_OBSERVATION" if first_observation else "NO_STRUCTURAL_SETUP"
     if draft["no_candidate_category"] != expected_category:
         raise ValueError("research_candidate_category")
@@ -329,10 +333,18 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     bundle_sha = receipt_hash(bundle)
     record(deepcopy(dict(kind="CALCULATED_CANDIDATES", body=bundle, sha256=bundle_sha)))
     if receipts:
-        selection_schema = _object(dict(selection=dict(type="string", enum=["WAIT"] + [r["id"] for r in receipts if r["eligible"]]),
-            receipt_sha256=dict(type="string"), rationale=dict(type="string")))
-        final = call("selection", SELECT_PROMPT, dict(payload, calculated_candidates=bundle,
-                     research_response_contract=selection_schema), selection_schema)
+        choices = {f"{r['id']}:{r['receipt_sha256']}": r
+                   for r in [wait_receipt] + receipts if r["id"] == "WAIT" or r["eligible"]}
+        selection_schema = _object(dict(selection_token=dict(type="string", enum=list(choices)),
+                                        rationale=dict(type="string")))
+        # Re-project with the phase-specific contract so restoration hashes remain
+        # valid. Market/account facts are unchanged; only obsolete output rules go.
+        selection_payload = _model_payload(frozen_snapshot, frozen_context, selection_schema,
+                                          calculated_candidates=bundle)
+        selection_wire = call("selection", SELECT_PROMPT, selection_payload, selection_schema)
+        chosen = choices[selection_wire["selection_token"]]
+        final = dict(selection=chosen["id"], receipt_sha256=chosen["receipt_sha256"],
+                     rationale=selection_wire["rationale"])
     else:
         final = dict(selection="WAIT", receipt_sha256=wait_receipt["receipt_sha256"],
                      rationale=draft["no_candidate_reason"])

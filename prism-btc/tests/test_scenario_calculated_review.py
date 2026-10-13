@@ -48,7 +48,7 @@ def run(ctx=None, candidates=None, *, mutate=None, clock=lambda: 1000, fail_seco
                 raise RuntimeError("secret")
             data = json.loads(kwargs["user_prompt"])["calculated_candidates"]
             chosen = next((r for r in data["candidates"] if r["eligible"]), data["wait"])
-            result = dict(selection=chosen["id"], receipt_sha256=chosen["receipt_sha256"],
+            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}",
                           rationale="계산과 추세 검토 후 선택")
         if mutate:
             mutate(result, len(calls), kwargs)
@@ -119,7 +119,7 @@ def test_rejected_risk_stays_visible_but_not_selectable():
     assert not r["eligible"]
 
 
-@pytest.mark.parametrize("field,value", [("selection", "invented"), ("receipt_sha256", "bad"),
+@pytest.mark.parametrize("field,value", [("selection_token", "invented"), ("receipt_sha256", "bad"),
                                           ("price", 84000), ("rationale", "")])
 def test_selection_tamper_rejected(field, value):
     def mutate(result, phase, _):
@@ -248,7 +248,7 @@ def test_recorder_cannot_mutate_selected_receipts():
                           no_candidate_category="CANDIDATES_PROVIDED")
         else:
             c = data["calculated_candidates"]["candidates"][0]
-            answer = dict(selection="c0", receipt_sha256=c["receipt_sha256"], rationale="판단 근거")
+            answer = dict(selection_token=f"c0:{c['receipt_sha256']}", rationale="판단 근거")
         return SimpleNamespace(text=json.dumps(answer))
     result = research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
         generate=generate, record=record, clock=lambda: 1000)
@@ -372,3 +372,78 @@ def test_original_stricter_input_age_not_extended():
         now[0] += 20
     with pytest.raises(ValueError, match="research_stale"):
         run(ctx=ctx, mutate=mutate, clock=lambda: now[0])
+
+
+def test_selection_token_schema_binds_id_and_hash_without_free_hash_field():
+    result, _, calls = run()
+    schema = calls[1]["response_schema"]
+    assert set(schema["properties"]) == {"selection_token", "rationale"}
+    tokens = schema["properties"]["selection_token"]["enum"]
+    assert f"c0:{result['selected']['receipt_sha256']}" in tokens
+    assert all(len(token.partition(":")[2]) == 64 for token in tokens)
+    def mutate(answer, phase, _kwargs):
+        if phase == 2:
+            answer["selection_token"] = "WAIT:" + answer["selection_token"].partition(":")[2]
+    with pytest.raises(ValueError, match="research_response_contract"):
+        run(mutate=mutate)
+
+
+def test_retained_row13_hash_typo_is_not_an_enum_value():
+    from live.scenario_contract import _matches
+    correct = "cdbfdf4d4a1fbec4a5895f1697be512f65643ea0977ce482f969202f503f3a0c"
+    observed_typo = "cdbfdf4d1a4fbec4a5895f1697be512f65643ea0977ce482f969202f503f3a0c"
+    schema = dict(type="string", enum=["WAIT:" + correct])
+    assert _matches("WAIT:" + correct, schema)
+    assert not _matches("WAIT:" + observed_typo, schema)
+
+
+def test_market_account_candidates_preserved_and_each_phase_uses_its_own_schema():
+    from live.scenario_model_input import restore_model_input
+    result, _, calls = run()
+    payloads = [json.loads(c["user_prompt"]) for c in calls]
+    restored = [restore_model_input(p) for p in payloads]
+    assert restored[0]["market_snapshot"] == restored[1]["market_snapshot"]
+    assert restored[0]["contract_context"] == restored[1]["contract_context"]
+    assert restored[1]["calculated_candidates"] == result["candidates"]
+    assert all("research_response_contract" not in p for p in payloads)
+    assert restored[0]["response_contract"] == response_contract(context())
+    assert set(calls[0]["response_schema"]["properties"]) == {
+        "wait_proposal", "candidates", "no_candidate_category", "no_candidate_reason"}
+    assert restored[1]["response_contract"] == calls[1]["response_schema"]
+    assert "wait_proposal" not in calls[1]["response_schema"]["properties"]
+
+
+def test_retained_row17_size_boundary_without_dropping_evidence_or_raising_cap():
+    from live.scenario_calculated_review import _encoded, _model_payload
+    from live.scenario_model_input import restore_model_input
+    # Row17's retained base was 91,641 bytes, obsolete contract 7,437 bytes.
+    # Pad neutral fixture evidence to reproduce that boundary, not its market.
+    ctx = context()
+    ctx["retained_evidence"] = ""
+    snap = dict(valid=True, as_of_ms=1000000)
+    contract = response_contract(ctx)
+    contract["fixture_rule"] = ""
+    contract["fixture_rule"] = "x" * (7437 - len(_encoded(contract).encode()))
+    ctx["retained_evidence"] = "x" * (91641 - len(_encoded(_model_payload(snap, ctx, contract)).encode()))
+    calls = []
+    p = wire(ctx, "LONG")
+    p["rationale"] = "x" * 2000
+    def generate(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            answer = dict(wait_proposal=wire(ctx), candidates=[p],
+                no_candidate_category="CANDIDATES_PROVIDED", no_candidate_reason="")
+        else:
+            token = kw["response_schema"]["properties"]["selection_token"]["enum"][0]
+            answer = dict(selection_token=token, rationale="프로토콜 검증")
+        return SimpleNamespace(text=json.dumps(answer))
+    result = research_review(snap, ctx, contract, generate=generate, record=lambda e: None, clock=lambda: 1000)
+    assert len(calls[0]["user_prompt"].encode()) == 91641
+    assert len(calls[1]["user_prompt"].encode()) < 100000
+    first_payload = json.loads(calls[0]["user_prompt"])
+    old_second = dict(first_payload, calculated_candidates=result["candidates"],
+                      research_response_contract=calls[1]["response_schema"])
+    assert len(_encoded(old_second).encode()) > 100000
+    second = restore_model_input(json.loads(calls[1]["user_prompt"]))
+    assert second["contract_context"]["retained_evidence"] == ctx["retained_evidence"]
+    assert second["calculated_candidates"] == result["candidates"]
