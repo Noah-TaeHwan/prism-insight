@@ -424,6 +424,8 @@ class ScenarioDemoBroker(ScenarioExecution):
         from live.scenario_recovery import risk_fraction
         fraction = risk_fraction(self._recovery_state(), active["scenario_id"] if active else None)
         children=self.children(active["scenario_id"]) if active else []
+        from live.scenario_entry_thesis import entry_thesis
+        initial_entry_evidence = entry_thesis(self.conn, active, children, observed)
         pending=[self._pending_entry(c)
             for c in children if c["kind"]=="entry" and c["status"]=="LIVE" and c["evidence"]]
         daily=self._daily(observed)
@@ -457,7 +459,7 @@ class ScenarioDemoBroker(ScenarioExecution):
             accounting_status="confirmed" if financial_ok else "pending", protection_ok=protection,
             legacy_fenced=observed["legacy_fenced"], pending_entries=pending, positions=accounting["positions"],
             unknown_intents=any(c["status"] == "UNKNOWN" or not c["evidence"] for c in children))
-        return dict(stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
+        return dict(entry_thesis=initial_entry_evidence, stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
             account_captured_at=observed["captured_at"], runner_economics=review_finance,
             target_status=[dict(target_id=c["local_id"],kind=c["kind"],status=c["status"],
                 intent_id=c["intent_id"],

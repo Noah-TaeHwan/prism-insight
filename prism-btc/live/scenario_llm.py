@@ -336,6 +336,26 @@ alone is not a mandatory full EXIT. Compare protected WAIT, conditional partial
 SL and full EXIT using actual primary-structure failure versus normal pullback;
 do not require a candle close or MA35 break when risk, protection or genuine
 invalidation already requires exit. Symmetric rules apply to SHORT.
+When entry_thesis is VERIFIED, use its original executed entry anchors and first
+fill time alongside the supplied timestamped 15m/30m/1h price path. Separately
+assess the broad MA trend and whether this particular entry still has supporting
+price follow-through. An unchanged bullish/bearish MA order alone is not a reason
+to keep a failed entry. If observable failure of the entry premise is supported,
+prefer EXIT or a justified executable conditional reduction over waiting for the
+hard SL, break-even recovery, another candle close or a lagging MA crossover.
+Do not move the failure criterion farther away merely to keep holding. If WAIT
+is chosen despite adverse entry-relative progress, state the current evidence
+that still supports holding and the observable failure condition, not MA order alone.
+Entry activation triggers are not automatic invalidation lines. A recent fill,
+one adverse tick, a normal retest, elapsed time, or slow favorable progress alone
+does not mandate exit. The entry_thesis endpoint comparison is not the intervening
+path: never infer that price made no progress throughout the holding period or
+invent its maximum excursion. Initial entry anchors are not remaining-lot cost
+basis; account for partial fills, reductions and later additions separately.
+MISSING entry evidence is unknown, not failed follow-through or a reason to disable
+protection. Use the evidence actually available without inventing the original
+setup or expected duration. All host risk, stop_policy and lifecycle restrictions
+remain unchanged; no fixed holding-time stop, new indicator or action is introduced.
 Compare mark and stop net values on the SAME future-cost basis. The provided
 after_estimated_costs values use a conservative risk allowance, not an observed
 future fee tier. Never compare mark-before-future-costs with stop-after-costs as

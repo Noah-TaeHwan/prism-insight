@@ -14,9 +14,9 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct11 explicit policy approval; this is not the rejected Oct10 candidate.
+    # Oct13 explicit entry-thesis review approval; short-wave TP candidate excluded.
     expected = {
-        'SYSTEM_PROMPT': '8ed185f09ac98b1ac1740a0707c363ab5c279fb39ba310e069317a3a7adde1a9',
+        'SYSTEM_PROMPT': '68041141d78523c9fccd253ee673f85f8f1aa7c119e5304fc12d255a8bb8ab61',
         'MA_STRUCTURE_PROMPT': 'faf00999ccf62b09488fe00ef27c866f691e79d1600ec04d184ae2a6657e18eb',
         'FLAT_ENTRY_PROMPT': 'e91e9cd77eed733610a9c51b8f78238e6e33e202124353dcd423b000f255b959',
     }
