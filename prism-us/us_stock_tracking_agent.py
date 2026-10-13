@@ -2455,7 +2455,7 @@ Please make a sell/hold decision for the following US stock holding.
 - Current Price: ${current_price:,.2f}
 - Target Price: ${target_price:,.2f} (initial scenario: ${initial_target_price:,.2f})
 - Stop Loss: ${stop_loss:,.2f} (initial scenario: ${initial_stop_loss:,.2f})
-- Highest Price Since Entry: ${highest_price:,.2f}{' (⚠️ First tracking - verify actual peak since entry via get_historical_stock_prices)' if highest_price_initialized else ''}
+- Highest Price Since Entry: ${highest_price:,.2f}{' (⚠️ First tracking - verify the peak from the session after entry via get_historical_stock_prices. Leave out the entry-day high, which may predate the buy; if bought this session, use this value as is)' if highest_price_initialized else ''}
 - Trailing Stop Adjustment Threshold: {trailing_stop_threshold_pct:.1f}% (only adjust stop-loss if new value is at least this much higher)
 - Return: {profit_rate:.2f}%
 - Holding Period: {days_passed} days
