@@ -69,3 +69,16 @@ def test_trailing_bands_match_the_exit_code(prompts):
     from cores.oneil_fallback import TRAIL_DROP_BULL, TRAIL_DROP_WEAK
     for key, text in prompts.items():
         assert f"× {TRAIL_DROP_BULL:.2f}" in text and f"× {TRAIL_DROP_WEAK:.2f}" in text, key
+
+
+@pytest.mark.parametrize("path,needles", [
+    ("stock_tracking_enhanced_agent.py", ("진입일 봉 고가는 매수 전에 찍혔을 수 있어 넣지 않", "Leave out the entry-day high")),
+    ("prism-us/us_stock_tracking_agent.py", ("Leave out the entry-day high",)),
+])
+def test_first_tracking_peak_excludes_the_pre_buy_entry_day_high(path, needles):
+    # 2026-10-13 RF머트리얼즈: bought 14:00 at 50,000, the AI took the entry-day high 52,500 (pre-buy) as the
+    # post-entry peak, switched the trailing stop on and sold 70 minutes later. The stored peak was 50,000.
+    src = (ROOT / path).read_text(encoding="utf-8")
+    for needle in needles:
+        assert needle in src
+    assert "verify actual peak since entry" not in src and "진입일 이후 실제 최고가" not in src
