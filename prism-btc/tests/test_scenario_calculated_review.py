@@ -644,3 +644,66 @@ def test_active_wait_preserves_lifecycle_without_flat_facts_or_old_rationale():
     presented = json.loads(calls[0]["user_prompt"])["contract_context"]
     assert "current_primary_frame_facts" not in presented
     assert "rationale" not in presented["current_plan"]
+
+
+def test_wait_schema_expresses_existing_inactive_protection_rules_only():
+    ctx = holding()
+    ctx["stop_policy"] = dict(version=1)
+    calls = []
+    def generate(**kw):
+        calls.append(kw)
+        return SimpleNamespace(text=json.dumps(dict(wait_proposal=holding_wire(ctx, "WAIT"),
+            candidates=[], no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="보호 유지")))
+    research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
+        generate=generate, record=lambda e: None, clock=lambda: 1000)
+    properties = calls[0]["response_schema"]["properties"]
+    wait = properties["wait_proposal"]["properties"]
+    for field in ("side", "hard_stop", "chase", "stop_revision"):
+        assert wait[field] == {"type": "null"}
+    for field in ("entries", "take_profits", "partial_stops"):
+        assert wait[field]["maxItems"] == 0
+    candidate = properties["candidates"]["items"]["properties"]
+    assert candidate["side"]["enum"] == ["LONG", "SHORT", None]
+    assert "maxItems" not in candidate["take_profits"]
+
+
+@pytest.mark.parametrize("field,value", [("side", "LONG"), ("hard_stop", 82970),
+    ("chase", dict(max_bps=0, max_reprices=0)),
+    ("entries", [dict(id="e", price=83000, quantity=.001)]),
+    ("take_profits", [dict(id="tp", price=84000, fraction=1)]),
+    ("partial_stops", [dict(id="sl", price=82900, fraction=.5)]),
+    ("stop_revision", dict(reason="구조", structure_reference="30m", input_id="research-1"))])
+def test_invalid_wait_output_is_rejected_by_schema_before_second_call(field, value):
+    ctx = holding()
+    ctx["stop_policy"] = dict(version=1)
+    calls = []
+    def generate(**kw):
+        calls.append(kw)
+        wait = holding_wire(ctx, "WAIT")
+        wait[field] = value
+        return SimpleNamespace(text=json.dumps(dict(wait_proposal=wait, candidates=[],
+            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="보호 유지")))
+    with pytest.raises(ValueError, match="research_response_contract"):
+        research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
+            generate=generate, record=lambda e: None, clock=lambda: 1000)
+    assert len(calls) == 1
+
+
+def test_valid_holding_cancel_only_wait_keeps_current_protection_and_metadata():
+    ctx = holding()
+    ctx.update(pending_entries=[dict(id="pending", price=83100, quantity=.01)],
+               review_contract_version=1, recovery_contract_version=2)
+    original = deepcopy(ctx)
+    wait = holding_wire(ctx, "WAIT")
+    wait.update(cancel_entry_ids=["pending"], review=dict(conditions=[], acknowledgements=[]), recovery=None)
+    result = research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
+        generate=lambda **kw: SimpleNamespace(text=json.dumps(dict(wait_proposal=wait, candidates=[],
+            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="추가 진입 취소, 기존 보호 유지"))),
+        record=lambda e: None, clock=lambda: 1000)
+    assert ctx == original
+    assert result["selected"]["raw_proposal"] == wait
+    assert result["selected"]["raw_proposal"]["cancel_entry_ids"] == ["pending"]
+    assert result["selected"]["raw_proposal"]["review"] == wait["review"]
+    assert result["executable"] is False and result["orders_submitted"] == 0
+    assert ctx["previous_hard_stop"] == original["previous_hard_stop"]
+    assert ctx["positions"] == original["positions"]

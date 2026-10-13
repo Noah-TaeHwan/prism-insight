@@ -369,6 +369,11 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     schema = response_schema(frozen_context)
     wait_schema = deepcopy(schema)
     wait_schema["properties"]["action"]["enum"] = ["WAIT"]
+    for field in ("side", "hard_stop", "chase", "stop_revision"):
+        if field in wait_schema["properties"]:
+            wait_schema["properties"][field] = {"type": "null"}
+    for field in ("entries", "take_profits", "partial_stops"):
+        wait_schema["properties"][field]["maxItems"] = 0
     candidate_schema = deepcopy(schema)
     candidate_schema["properties"]["action"]["enum"] = ["OPEN"] if context.get("scenario_id") is None else ["ADJUST", "EXIT"]
     first_observation = schema["properties"]["action"]["enum"] == ["WAIT"]
