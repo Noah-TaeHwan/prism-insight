@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Callable
+
+from engine.scenario_ma_context import build_ma_structure_context
+from live.scenario_model_input import project_model_input
 
 MODEL = "gpt-6-luna"
 EFFORT = "high"
@@ -45,6 +49,8 @@ or unsettled exposure never grants another attempt. The host-offered
 scenario_risk_fraction is authoritative: stage0=0.005, stage1=0.01, NORMAL stage 2
 =0.02. These are loss-risk ceilings including costs/reservations, not position
 margin fractions, trade quotas or guaranteed maximum realized losses.
+The host requires two prospective, fully settled cost-positive trades per stage;
+zero-net/unfilled trades and legacy aggregates do not count as new-rule wins.
 The host tests confirmed filled stage settlements, cost-net performance and
 closed-trade realized drawdown before offering a higher stage. This is an
 operational checkpoint, not a statistical proof of an edge. Compare LONG,
@@ -90,7 +96,8 @@ It includes recorded costs once and a conservative future cost/slippage allowanc
 not an observed future fee tier; future funding and execution prices remain unknown.
 Prefer a structurally justified profit-protecting SL at or beyond that positive
 boundary (higher for LONG, lower for SHORT), only if it remains on the valid side
-of current MarkPrice and never widens current protection. Price feasibility is
+of current MarkPrice. Prefer tightening or retaining protection; any restoration
+must independently satisfy the bounded stop_policy below. Price feasibility is
 not a noise-buffer verdict: do not mechanically hug the first profitable tick.
 If a feasible cost-positive level is not adopted, explain the concrete structure
 or noise reason for retaining risk; never call an estimated net-negative stop
@@ -190,7 +197,22 @@ When evidence is adverse to the held/candidate direction, prioritize loss contro
 when mixed, compare smaller risk-scaled exposure with WAIT. Opportunity cost
 never overrides execution safety, original risk limits or genuine invalidation.
 Leverage is FIXED 10, not confidence-dependent. Allocate less quantity to weaker
-evidence; never widen a live hard stop to avoid admitting a failed hypothesis.
+evidence. Set the structural invalidation first, then size down for the host
+risk cap including costs; recovery reduces quantity, not automatically the
+distance a valid thesis can withstand. Never consume the full cap just because
+it is available, or widen a stop to avoid admitting a failed hypothesis.
+When stop_policy.version=1 and widening_eligible=true, an ADJUST may request a
+limited restoration within initial_hard_stop using stop_revision={reason,
+structure_reference,input_id}. Explain the NEW observed structure, not simply
+an adverse price move. No entries, pending entries or cancellations may coexist;
+the host rechecks unchanged scenario risk, exact original anchor and fresh
+protection/accounting before an in-place Full SL change. A touched/crossed old
+stop is not eligible. Legacy/unknown anchors and hard blocks forbid restoration.
+Otherwise stop_revision must be null, and widening remains forbidden. Failed
+confirmation can restore the prior stronger protection; a proposal is not proof
+of an installed stop. Partial SL remains conditional reduceOnly protection of
+part of verified exposure, never authority to loosen the remaining Full SL or
+discount risk by assuming that partial orders will fill.
 One scenario runs from accepted OPEN to completely reconciled flat. Split entry,
 partial exits, re-entry and fees share its original host loss budget (recovery
 0.5%/1%, normal 2%). Recovery authority overrides generic addition/re-entry
@@ -267,7 +289,7 @@ the native Full SL and is not guaranteed to exit at the final TP.
 Re-evaluate tier allocation on each scheduled holding review, but do not keep
 moving near targets away merely to avoid taking profit. Extending any target
 needs new continuation evidence and an explicit failure condition, not just
-unchanged higher-frame bullishness. This is not permission to widen SL or
+unchanged higher-frame bullishness. TP changes alone do not authorize SL restoration or
 reopen consumed recovery authority. TP changes do not replace SL protection.
 Compare post-price-buffer economics and known costs; a break-even or losing
 de-risking reduction is not confirmed profit. An infeasible cost-positive SL
@@ -295,14 +317,49 @@ remains independent of the next model review.
 Missing levels do not force ADJUST or establish a clear path; preserve uncertainty
 and judge the verified evidence. Do not churn orders for trivial moving-MA drift;
 retain existing target prices unless a material evidence-based reason justifies revision.
-On every holding review compare maintain, incremental add, tighter protection,
-conditional partial reduction and immediate full EXIT. Short-term deterioration
-must inform management of EXISTING exposure, not only rejection of further adds.
+On every holding review first distinguish an intact thesis from deterioration,
+then compare maintain, incremental add, tighter protection, conditional partial
+reduction and immediate full EXIT using legal prices, costs and observed structure.
+An infeasible cost-positive SL alone does not justify retaining exposure:
+separately evaluate a loss-limiting stop below break-even for LONG or above
+break-even for SHORT, subject to current MarkPrice, the host stop_policy and noise room.
+Short-term deterioration must inform management of EXISTING exposure, not only
+rejection of further adds. A reassessment condition is not an installed protective order.
 State the observable breakout-failure or thesis-invalidation condition and the
 supported action if already observed; if not observed, describe it as a future
 reassessment condition, not an order that already exists. Ordinary pullbacks
 with an intact primary thesis may justify WAIT and keeping a runner. Do not
-tighten mechanically on every green tick or widen the stop to preserve a thesis.
+tighten mechanically on every green tick or restore a stop merely to preserve a failed thesis.
+Holding is not a fresh-entry test: a position may retain a valid 30m/1h thesis
+while a new entry is unattractive. A brief MA10 loss/BETWEEN or 15m weakening
+alone is not a mandatory full EXIT. Compare protected WAIT, conditional partial
+SL and full EXIT using actual primary-structure failure versus normal pullback;
+do not require a candle close or MA35 break when risk, protection or genuine
+invalidation already requires exit. Symmetric rules apply to SHORT.
+When entry_thesis is VERIFIED, use its original executed entry anchors and first
+fill time alongside the supplied timestamped 15m/30m/1h price path. Separately
+assess the broad MA trend and whether this particular entry still has supporting
+price follow-through. An unchanged bullish/bearish MA order alone is not a reason
+to keep a failed entry. If observable failure of the entry premise is supported,
+prefer EXIT or a justified executable conditional reduction over waiting for the
+hard SL, break-even recovery, another candle close or a lagging MA crossover.
+Do not move the failure criterion farther away merely to keep holding. If WAIT
+is chosen despite adverse entry-relative progress, state the current evidence
+that still supports holding and the observable failure condition, not MA order alone.
+Entry activation triggers are not automatic invalidation lines. A recent fill,
+one adverse tick, a normal retest, elapsed time, or slow favorable progress alone
+does not mandate exit. The entry_thesis endpoint comparison is not the intervening
+path: never infer that price made no progress throughout the holding period or
+invent its maximum excursion. Initial entry anchors are not remaining-lot cost
+basis; account for partial fills, reductions and later additions separately.
+MISSING entry evidence is unknown, not failed follow-through or a reason to disable
+protection. Use the evidence actually available without inventing the original
+setup or expected duration. All host risk, stop_policy and lifecycle restrictions
+remain unchanged; no fixed holding-time stop, new indicator or action is introduced.
+Compare mark and stop net values on the SAME future-cost basis. The provided
+after_estimated_costs values use a conservative risk allowance, not an observed
+future fee tier. Never compare mark-before-future-costs with stop-after-costs as
+if both were executable net proceeds; expected actual exit fees may be unknown.
 These are comparison alternatives, NOT new action enums: maintain unchanged
 protection with WAIT; add with ADJUST and ONLY incremental entries; arrange
 conditional reductions/protection with ADJUST; use EXIT for immediate full
@@ -312,7 +369,7 @@ the complete intended exit protection, including targets intentionally retained
 under the existing filled-quota rules. Do not restore already filled TP quotas.
 Use verified positions, pending entries and current accounting inputs, not
 historical current_plan.risk as available budget. Keep fixed 10x, the original
-host budget (normal 2%, recovery 0.5%/1%), no profit replenishment, no stop widening, pending-risk reservations
+host budget (normal 2%, recovery 0.5%/1%), no profit replenishment, bounded stop_policy, pending-risk reservations
 and all host guards. Never close/reopen solely to reset average entry or
 replenish risk budget; compare retaining exposure plus an incremental add when
 the same thesis remains valid. A justified EXIT is still allowed; a later OPEN
@@ -374,8 +431,157 @@ Use the supplied response_contract for exact field names and allowed actions.
 """
 
 
+FLAT_ENTRY_PROMPT = """
+Flat-entry comparison only; all preceding host safety/lifecycle rules prevail.
+Recovery baseline and changed_evidence audit change/authorization, not present
+momentum: an hours-old baseline price alone is not a momentum veto for either
+LONG or SHORT. Still cite required exact changed paths and assess their meaning;
+first observation remains WAIT and a numeric change alone never grants an edge.
+Judge current 30m/1h structure, MA slopes, observed forming progress and recent
+confirmed 15m bars. Ground price/MA claims in current_primary_frame_facts, derived
+from the same forming observations: bearish MA order is NOT price below both MAs;
+BETWEEN is not BELOW. Missing facts stay unknown, not an entry veto. Mixed price
+position can still support a trade with other concrete evidence, not fabricated alignment.
+Higher-frame direction alone is not a veto; concrete current
+4h/longer-frame obstacles still matter through achievable TP/SL and costs and
+can justify WAIT when no executable net-of-cost opportunity remains.
+Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
+for entry before the ORIGINAL next-decision deadline, and WAIT, symmetrically.
+If current evidence already justifies entry, do not demand a new low/high or retest
+by habit. Smaller quantity may express uncertainty in a valid setup, never repair
+an invalid setup. Neither immediate entry nor conditional entry is compulsory.
+Existing sizing cap: sum(new-entry risk) <= min(original_budget*confidence,
+budget remaining after consumed/reserved risk). Per-BTC risk is positive entry-to-SL
+distance + entry*estimated_cost_rate + hard_stop*slippage_bps/10000; round quantity
+DOWN to quantity_step. Never raise confidence or widen SL merely to fit quantity.
+For WAIT, name the specific current missing evidence or invalid risk. Recheck any
+prior waiting condition actually supplied as structured evidence; if met, do not
+move its goalposts without fresh counterevidence. Never invent an omitted prior condition.
+Keep recovery's first-observation WAIT, immutable host risk, 10x and original expiry.
+Recovery stages0/1 keep original-batch-only scope and zero chase; conditional entries
+also keep zero chase. Preserve host-authorized NORMAL ordinary-entry chase rules
+and all protection/accounting guards. No new fields,
+fabricated reward/risk or probabilities; summarize the choice in existing rationale.
+"""
+
+
+MA_STRUCTURE_PROMPT = """
+MA structure review applies to flat, pending and holding contexts; all earlier
+host safety, accounting, lifecycle and protection restrictions retain priority.
+Use ma_structure.primary own-time close/MA points and numeric transitions, not current
+MAs projected onto older candles. MA order, price position, price movement and
+MA movement are different facts: a stationary price can change band position
+because the MAs moved. Do not label that a price breakout or a successful retest.
+When primary frames differ, name each frame's actual position; do not collapse
+BETWEEN and BELOW into a collective claim that price is below both MAs on all frames.
+OHLCV volume is total volume, not buyer- or seller-initiated order flow. A down
+candle and increased total volume are separate facts, not measured selling volume.
+Compare LONG and SHORT symmetrically: crossover, existing MA-order gap expansion,
+contraction after expansion, compression then renewed expansion, repeated crosses
+and price/MA disagreement. Crosses lag price; expanding abs(MA10-MA35) is
+divergence, shrinking is convergence, not automatically a long-duration trend.
+Use raw price gap changes separately from normalized fractions; a changing price
+denominator is not raw-gap expansion. WIDENING reports the sign, not the strength
+of expansion: compare gap_change_price and gap_change_fraction_of_previous_close
+with actual close/high/low changes, separately for confirmed and provisional steps.
+Do not equate falling highs/closes in a bullish MA order with renewed ascent,
+or rising lows/closes in a bearish MA order with renewed descent merely because
+the gap widens. Compare acting now, an evidenced price-crossing reservation or
+WAIT; disagreement is not a hard veto or a requirement for another closed candle.
+Healthy pullbacks and a supported provisional reclaim remain eligible; conversely,
+a tiny positive gap change alone is not evidence of strong followthrough.
+Confirmed run counts exclude the forming
+candle. count_lower_bounds marks runs reaching the available history edge: those
+counts are minimum observed lengths, not exact total durations. Long compression
+followed by new directional expansion with price moving
+in that direction is a candidate to evaluate, not an entry command. Compare late
+overextension and failed-break/reversal counterexamples rather than chase by habit.
+Below-to-between recovery weakens a SHORT differently from above-to-between
+deterioration of a LONG. Between is mixed, neither automatic range nor trade ban.
+A touch alone is not support, rejection, a held retest or confirmed reversal.
+Observe forming progress/remaining time and OHLC reactions in the original
+snapshot; provisional moves can reverse. Limited history means unknown prior
+compression duration or recross history, not invented confirmation or a veto.
+30m/1h drive direction and 15m refines timing. nearby_confirmed_extrema contains
+point indices: high_above_mark references that point's high, low_below_mark its
+low, and at_mark lists exact equalities. Read source time and confirmation from
+the same primary.points entry. These are recent bar extremes, not confirmed swing
+pivots or proven support/resistance; missing candidates do not prove a clear path.
+Consider them alongside upper MAs when comparing near partial TP and runner
+extension, not as mandatory TP prices or reasons to shorten every target.
+Identical prices across points/frames are not independent reaction evidence.
+Inspect 4h/12h/1d/1w MA10/35
+levels on each proposed entry-to-TP or current-mark-to-TP profit path. Supplied
+obstacles are sorted from CONTEXT_MARK_PRICE, not from the proposed entry;
+obstacle lists and higher_frames.level_ids reference the single levels dictionary
+by stable timeframe.MA.confirmed/forming IDs. Look up each ID there; repeated
+references are not extra levels. Re-evaluate which levels lie on that actual path.
+Last-trade SMA and MarkPrice
+are different bases, not basis-adjusted execution evidence. Confirmed/forming
+versions sharing same_line_group are one evolving line, not independent votes.
+Identify confirmed or forming when citing a decisive higher-frame level. If its
+two versions straddle MarkPrice, acknowledge the evolving-line uncertainty; never
+describe the confirmed version as the current observed forming value.
+Higher-frame direction alone never vetoes a valid short-term trade, but nearby
+potential reactions can change cost-net reward, partial TP allocation, runner
+retention, protection or WAIT. Do not declare a line strong support/resistance
+without observed reactions, require a break/retest for every trade, or auto-exit
+at every touch. Missing levels remain unknown, not proof of a clear path.
+For holdings compare intact-thesis pullbacks with actual deterioration, using
+existing WAIT/ADJUST/EXIT mechanics and verified quantities, costs and stop
+constraints. Neither favorable structure nor an opposite signal permits reversal
+before fully reconciled flat or risk-cap changes; SL restoration requires the
+separate host stop_policy. A bearish higher-frame MA order can coexist with a
+rising MA10 and price recovery; evaluate both instead of treating the label as
+ongoing decline. Connect TP allocation to observed 30m/1h price follow-through:
+new expansion after compression plus price progress and room can support less
+near TP and more later exposure; fading price progress/rejection/near obstacles
+can support nearer or larger front tiers. Gap width or elapsed age alone never
+proves an early/late trend. Convergence can be a normal pullback; preserve a
+justified protected runner. Forming changes remain provisional and must account
+for elapsed time. Explain decisive evidence/invalidation in concise rationale
+and use stop_revision only for a permitted restoration; no invented fields.
+"""
+
+
 class ScenarioModelError(ValueError):
     """Sanitized model failure; never embeds response or account payload."""
+
+
+def _current_primary_frame_facts(snapshot: dict) -> dict:
+    """Arithmetic projection only: no new indicator, market observation or gate."""
+    facts = {}
+    frames = snapshot.get("timeframes")
+    for frame in ("15m", "30m", "1h"):
+        source = "timeframes." + frame + ".forming"
+        facts[frame] = {"status": "unavailable", "source": source}
+        item = frames.get(frame) if isinstance(frames, dict) else None
+        forming = item.get("forming") if isinstance(item, dict) else None
+        if not isinstance(forming, dict) or forming.get("observation_kind") == "synthetic_boundary":
+            continue
+        ohlcv = forming.get("ohlcv")
+        if not isinstance(ohlcv, dict):
+            continue
+        values = {"close": ohlcv.get("close"), "ma10": forming.get("ma10"), "ma35": forming.get("ma35")}
+        observed, as_of = forming.get("observed_at_ms"), snapshot.get("as_of_ms")
+        if (any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in values.values())
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in (observed, as_of))
+                or not 0 <= observed <= as_of):
+            continue
+        close, ma10, ma35 = values["close"], values["ma10"], values["ma35"]
+        if close == ma10 == ma35:
+            position = "AT_BOTH"
+        elif close == ma10 or close == ma35:
+            position = "AT_MA10" if close == ma10 else "AT_MA35"
+        else:
+            position = "ABOVE" if close > max(ma10, ma35) else "BELOW" if close < min(ma10, ma35) else "BETWEEN"
+        groups = [" = ".join(k for k, v in values.items() if v == price) for price in sorted(set(values.values()))]
+        facts[frame] = {"status": "available", "source": source, **values,
+                        "price_basis": "FORMING_LAST_CLOSE",
+                        "observed_at_ms": observed, "price_position": position,
+                        "ma_order": "BULLISH" if ma10 > ma35 else "BEARISH" if ma10 < ma35 else "EQUAL",
+                        "ordered_comparison": " < ".join(groups)}
+    return facts
 
 
 def _unique_pairs(pairs):
@@ -408,7 +614,8 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
             generate: Callable | None = None, clock: Callable = time.time) -> dict:
     """Read-only proposal; caller must revalidate against fresh execution state.
 
-    No retry or alternate model on failure. A late response never becomes an order.
+    No logical retry or alternate model on failure. The operational caller alone
+    may enable one audited transport retry. A late response never becomes an order.
     The runtime must continue protection independently while this call is pending.
     """
     if snapshot.get("valid") is not True:
@@ -430,6 +637,10 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     # Do not recycle retired-timeframe narratives into new-policy judgments.
     # Preserve the original audit context and all structured order/risk evidence.
     model_context = dict(context)
+    model_context["ma_structure"] = build_ma_structure_context(snapshot, context)
+    flat_entry = context.get("scenario_id") is None and not context.get("positions") and not context.get("pending_entries")
+    if flat_entry:
+        model_context["current_primary_frame_facts"] = _current_primary_frame_facts(snapshot)
     if isinstance(context.get("current_plan"), dict):
         model_context["current_plan"] = {key: value for key, value in context["current_plan"].items()
                                          if key != "rationale"}
@@ -440,17 +651,22 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     payload = {"market_snapshot": snapshot, "contract_context": model_context,
                "response_contract": response_contract}
     try:
-        prompt = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+        payload, projection_audit = project_model_input(payload)
+        prompt = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (TypeError, ValueError):
         raise ScenarioModelError("invalid_input") from None
     if len(prompt.encode("utf-8")) > 100_000:
         raise ScenarioModelError("input_size")
     started = clock()
+    system_prompt = SYSTEM_PROMPT + MA_STRUCTURE_PROMPT
+    if flat_entry:
+        system_prompt += FLAT_ENTRY_PROMPT
     from live.scenario_recovery import record_model_request, record_model_wire, record_model_error
-    record_model_request(system_prompt=SYSTEM_PROMPT, user_prompt=prompt,
-                         response_schema=schema, model=MODEL, effort=EFFORT, fast=True)
+    record_model_request(system_prompt=system_prompt, user_prompt=prompt,
+                         response_schema=schema, model=MODEL, effort=EFFORT, fast=True,
+                         input_projection=projection_audit)
     try:
-        result = generate(system_prompt=SYSTEM_PROMPT, user_prompt=prompt,
+        result = generate(system_prompt=system_prompt, user_prompt=prompt,
                           model=MODEL, reasoning_effort=EFFORT, fast_tier=True,
                           timeout=TIMEOUT_SECONDS, mcp_profile=None,
                           response_schema=schema)

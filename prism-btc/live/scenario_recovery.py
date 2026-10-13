@@ -63,7 +63,7 @@ def capture_wire(conn, slot, clock):
 
 
 def record_model_request(*, system_prompt, user_prompt, response_schema,
-                         model=None, effort=None, fast=None):
+                         model=None, effort=None, fast=None, input_projection=None):
     capture = _wire.get()
     if capture is None:
         return
@@ -72,11 +72,40 @@ def record_model_request(*, system_prompt, user_prompt, response_schema,
         body = {"system_prompt": system_prompt, "user_prompt": user_prompt,
                 "response_schema": response_schema, "model": model,
                 "effort": effort, "fast": fast}
+        if input_projection is not None:
+            body["input_projection"] = input_projection
         body["request_hash"] = digest(body)
         journal(conn, "MODEL_REQUEST", body, clock(), slot=slot)
         conn.commit()
     except Exception:
         conn.rollback()
+
+
+def record_model_transport_attempt(*, attempt, status, reason, elapsed_seconds, retry):
+    """Best-effort sanitized HTTP telemetry; never an order or recovery permit."""
+    capture = _wire.get()
+    if capture is None:
+        return False
+    conn, slot, clock = capture
+    try:
+        if (type(attempt) is not int or attempt not in (1, 2)
+                or (status is not None and (type(status) is not int or not 100 <= status <= 599))
+                or not _number(elapsed_seconds) or elapsed_seconds < 0
+                or type(retry) is not bool):
+            return False
+        safe = reason if reason in {"transport_failed", "http_response", "http_error",
+            "upstream_transfer_truncated", "deadline_exceeded"} else "transport_failed"
+        body = {"attempt": attempt, "status": status, "reason": safe,
+                "elapsed_seconds": round(elapsed_seconds, 6), "retry": bool(retry)}
+        journal(conn, "MODEL_TRANSPORT_ATTEMPT", body, clock(), slot=slot)
+        conn.commit()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            return False  # Even a closed journal cannot invalidate a safe response.
+        return False
 
 
 def record_model_error(code):
@@ -144,7 +173,8 @@ def _confirmed(settlement, scenario_id):
 
 def _stage_evidence(equity):
     return {"filled_count": 0, "net_pnl": 0., "peak_net_pnl": 0.,
-            "max_realized_drawdown": 0., "stage_start_equity": equity}
+            "max_realized_drawdown": 0., "stage_start_equity": equity,
+            "promotion_rule_version": 2, "positive_count": 0}
 
 
 def migrate(conn, state, ctx, now):
@@ -199,8 +229,18 @@ def offered_stage(recovery):
                 (not _number(equity) or equity <= 0))
                 or (evidence["filled_count"] == 0 and not empty)):
             raise ValueError("normalization_state_invalid")
+        rule = evidence.get("promotion_rule_version")
+        if "promotion_rule_version" in evidence:
+            count = evidence.get("positive_count")
+            if (type(rule) is not int or rule != 2 or type(count) is not int
+                    or not 0 <= count <= evidence["filled_count"]
+                    or (count > 0 and evidence["net_pnl"] <= 0)):
+                raise ValueError("normalization_state_invalid")
+        elif "positive_count" in evidence:
+            raise ValueError("normalization_state_invalid")
     if (recovery.get("policy_version") == 2 and stage < 2
-            and evidence.get("filled_count", 0) >= 3 and evidence.get("net_pnl", 0) > 0
+            and evidence.get("promotion_rule_version") == 2
+            and evidence.get("positive_count", 0) >= 2 and evidence.get("net_pnl", 0) > 0
             and evidence.get("max_realized_drawdown", float("inf")) <=
                 STAGE_FRACTIONS[stage] * evidence.get("stage_start_equity", 0)):
         return stage + 1
@@ -305,6 +345,8 @@ def prepare_input(conn, state, context, snapshot, slot, now):
     if recovery.get("policy_version") == 2:
         metadata.update(current_stage=recovery["stage"], offered_stage=offered_stage(recovery),
                         promotion_evidence=recovery["stage_evidence"],
+                        required_positive_settlements=2,
+                        promotion_basis="prospective_filled_closed_confirmed_net_pnl_positive",
                         risk_fraction=offered_fraction(state), one_attempt_only=False,
                         automatic_normal_resume=True, policy_version=2)
     context["recovery"] = metadata
@@ -373,6 +415,16 @@ def consume(conn, state, payload, context, slot, now):
             or not payload.get("entries") or now >= (slot + 1) * 300):
         raise ValueError("recovery_probe_risk_invalid")
     if recovery.get("policy_version") == 2:
+        evidence = recovery["stage_evidence"]
+        if "promotion_rule_version" not in evidence:
+            # Old aggregates include zero-net trades. Preserve them for audit,
+            # but never reinterpret them as two new-rule profitable trades.
+            upgraded = dict(evidence, promotion_rule_version=2, positive_count=0)
+            journal(conn, "PROMOTION_RULE_MIGRATION", {
+                "before": evidence, "after": upgraded,
+                "input_id": context["input_id"], "effective_new_scenario": payload["scenario_id"]},
+                now, slot=slot, scenario_id=payload["scenario_id"])
+            recovery["stage_evidence"] = upgraded
         if recovery["stage_evidence"].get("stage_start_equity") is None:
             recovery["stage_evidence"]["stage_start_equity"] = context["initial_equity"]
         offered = offered_stage(recovery)
@@ -510,6 +562,8 @@ def settled(conn, state, settlement, now):
                         now, scenario_id=settlement["scenario_id"])
             else:
                 evidence["filled_count"] += 1
+                if evidence.get("promotion_rule_version") == 2 and pnl > 0:
+                    evidence["positive_count"] += 1
                 evidence["net_pnl"] += pnl
                 evidence["peak_net_pnl"] = max(evidence["peak_net_pnl"], evidence["net_pnl"])
                 evidence["max_realized_drawdown"] = max(evidence["max_realized_drawdown"],

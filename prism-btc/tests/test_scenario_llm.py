@@ -30,7 +30,7 @@ def test_assembled_flexible_tp_policy_preserves_safety_and_no_fixed_allocations(
     for clause in ('near, intermediate and extension TP', 'not fixed percentages',
                    'two or three meaningful tiers', 'one target or an SL-protected runner',
                    'never restore already filled target quotas', 'rounding remainder stays protected',
-                   'not permission to widen SL', 'not a ban on structurally justified risk reduction'):
+                   'TP changes alone do not authorize SL restoration', 'not a ban on structurally justified risk reduction'):
         assert clause in policy
     user=json.loads(calls[0]['user_prompt'])
     rules=' '.join(user['response_contract']['rules'])

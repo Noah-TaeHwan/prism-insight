@@ -47,6 +47,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _kr_effective_score(scenario):
+    """effective_score = buy_score + macro_adjustment: the score the BUY instruction compares with min_score."""
+    def number(value):
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return result if result == result and abs(result) != float("inf") else 0.0
+    data = scenario if isinstance(scenario, dict) else {}
+    total = number(data.get("buy_score")) + number(data.get("macro_adjustment"))
+    return int(total) if total.is_integer() else total
+
+
 def _resolve_trading_analysis_concurrency() -> int:
     """Max concurrent buy-scenario analyses in the parallel pre-pass.
 
@@ -177,8 +190,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
         else:
             await self._analyze_simple_market_condition()
 
-        # Clean up old watchlist data (older than 1 month)
-        await self._cleanup_old_watchlist()
+        # Buy-decision records are kept (no 30-day cleanup), like the US table: the AI's skip
+        # reasons are the only record of why a later runner was passed over (2026-10-08).
 
         return True
 
@@ -271,22 +284,6 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
         except Exception as e:
             logger.error(f"Error migrating watchlist_history columns: {str(e)}")
-
-    async def _cleanup_old_watchlist(self):
-        """Delete watchlist data older than 1 month"""
-        try:
-            one_month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-            deleted = self.cursor.execute(
-                "DELETE FROM watchlist_history WHERE date(analyzed_date) < ?",
-                (one_month_ago,)
-            ).rowcount
-            self.conn.commit()
-
-            if deleted > 0:
-                logger.info(f"Deleted {deleted} old watchlist entries")
-
-        except Exception as e:
-            logger.error(f"Error cleaning watchlist: {str(e)}")
 
     def _calculate_trend(self, price_series):
         """Analyze price series trend (positive: uptrend, negative: downtrend)"""
@@ -516,6 +513,9 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
                 # Check entry decision
                 buy_score = scenario.get("buy_score", 0)
+                # The BUY instruction compares effective_score = buy_score + macro_adjustment with min_score
+                # (same contract as US _effective_buy_score); buy_score stays the AI's raw score for records.
+                effective_score = _kr_effective_score(scenario)
                 min_score = scenario.get("min_score", 0)
                 llm_min_score = min_score
                 scenario.pop("regime_entry_policy", None)
@@ -535,9 +535,9 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                         ticker, current_price
                     )
 
-                # 레짐 적응 하한선(env-gated REGIME_MIN_SCORE_FLOOR, 기본 off). 플래그 ON 시
+                # 레짐 적응 하한선(env-gated REGIME_MIN_SCORE_FLOOR, 기본 on: entry_score_policy). 플래그 ON 시
                 # 약세장 하한(strong_bear 9 / bear·sideways 8)을 강제해 min_score 를 끌어올린다.
-                # 아래 진입 게이트(buy_score < min_score → Skip)가 그대로 차단을 수행한다.
+                # 아래 진입 게이트(effective_score < min_score → Skip)가 그대로 차단을 수행한다.
                 # 레짐은 레거시 경로와 동일한 결정론적 현재 시장 레짐을 사용한다.
                 # 종목별 LLM market_condition은 설명용이며 안전 게이트 입력으로 쓰지 않는다.
                 try:
@@ -560,7 +560,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                             )
                             min_score = _eff
                         rebound_pilot = is_rebound_pilot_entry(
-                            buy_score, llm_min_score, _fr, _pulse, decision
+                            effective_score, llm_min_score, _fr, _pulse, decision
                         )
                         if rebound_pilot:
                             entry_cash_amount = configured_entry_amount(
@@ -600,7 +600,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     analysis_result["scenario"] = scenario
 
                 rationale = scenario.get("rationale", "") or ""
-                logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}, Min required score: {min_score}")
+                logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score} (effective {effective_score}), Min required score: {min_score}")
                 logger.info(
                     f"Scenario decision: {company_name}({ticker}) - "
                     f"decision={decision!r}, sector_diverse={sector_diverse}, sector={sector!r}"
@@ -611,7 +611,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 _buy_gate = {"allowed": False, "reason": "not an entry candidate"}
                 if decision == "Enter":
                     _buy_gate = self._evaluate_production_buy_gate(
-                        scenario, current_price, score_override=buy_score, is_add=is_add
+                        scenario, current_price, score_override=effective_score, is_add=is_add
                     )
                     if not _buy_gate.get("allowed"):
                         logger.warning(
@@ -626,7 +626,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 scenario = dict(scenario)
                 scenario["_decision_context"] = {
                     "decision": decision,
-                    "buy_score": buy_score,
+                    "buy_score": buy_score, "effective_score": effective_score,
                     "min_score": min_score,
                     "gate_allowed": bool(_buy_gate.get("allowed")),
                     "gate_reason": _buy_gate.get("reason"),
@@ -642,16 +642,16 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 # Respect AI agent's decision (consistent with US logic)
                 # AI considers qualitative factors (RSI, support structure, volume, sector outlook, etc.)
                 # beyond just the score, so do not override its decision
-                if buy_score > 0 and buy_score >= min_score and sector_diverse and decision != "Enter":
+                if buy_score > 0 and effective_score >= min_score and sector_diverse and decision != "Enter":
                     logger.info(
                         f"AI decision respected: {company_name}({ticker}) - "
-                        f"Score {buy_score} >= {min_score} but decision='{decision}', keeping Skip"
+                        f"Score {effective_score} >= {min_score} but decision='{decision}', keeping Skip"
                     )
 
                 # Generate message if not buying (watch/insufficient score/sector constraints)
                 if (
                     decision != "Enter"
-                    or (buy_score < min_score and not rebound_pilot)
+                    or (effective_score < min_score and not rebound_pilot)
                     or not sector_diverse
                     or (decision == "Enter" and not _buy_gate.get("allowed", False))
                 ):
@@ -663,26 +663,29 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
                     if decision != "Enter":
                         reason_parts.append(f"AI 판단: {decision}")
-                    elif buy_score < min_score and not rebound_pilot:
+                    elif effective_score < min_score and not rebound_pilot:
                         # AI said Enter but score is below threshold — flip to Skip
                         decision = "Skip"
                         logger.info(
                             f"Decision changed due to insufficient buy score: "
                             f"{company_name}({ticker}) - Enter → Skip "
-                            f"(Score: {buy_score} < {min_score})"
+                            f"(Score: {effective_score} < {min_score})"
                         )
 
-                    if buy_score < min_score and not rebound_pilot:
-                        reason_parts.append(f"점수 부족 ({buy_score}/{min_score})")
+                    if effective_score < min_score and not rebound_pilot:
+                        reason_parts.append(f"점수 부족 ({effective_score}/{min_score})")
                     if not sector_diverse:
-                        reason_parts.append(f"섹터 집중 ({sector})")
+                        from prism_core.sector_cap import sector_cap_note
+                        from prism_core.sector_names import sectors_overlap
+                        cap_note = sector_cap_note(self, "stock_holdings", sector, same_sector=sectors_overlap)
+                        reason_parts.append(f"섹터 집중 ({cap_note or sector})")
                     if decision == "Enter" and not _buy_gate.get("allowed", False):
                         reason_parts.append(
                             f"결정론적 게이트: {_buy_gate.get('reason', '차단')}"
                         )
 
                     reason = " / ".join(reason_parts) if reason_parts else "기타"
-                    from messaging.korean_trading_message import hold_reason_display
+                    from messaging.korean_trading_message import hold_reason_display, stored_skip_reason
                     display_reason = hold_reason_display(reason, scenario)
 
                     # Market condition info — translate regime label to Korean for display
@@ -697,14 +700,11 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                             market_condition_text = market_condition_text.replace(eng, ko, 1)
                             break
 
-                    # When the AI decided "Enter" but the trade was still deferred
-                    # (e.g., sector concentration cap), surface the contradiction on the
-                    # decision line itself. The standalone "보류 사유" line several rows
-                    # below is easy to miss, which made an Enter+hold look like a bug.
-                    if decision == "Enter":
-                        decision_display = f"Enter (실제 보류 — 사유: {display_reason})"
-                    else:
-                        decision_display = decision
+                    # When the AI decided "Enter" but a rule still deferred the trade
+                    # (e.g., sector concentration cap), say so on the decision line; the
+                    # "보류 사유" line below names the rule and its counts.
+                    from prism_core.sector_cap import deferred_decision_line
+                    decision_display = deferred_decision_line(decision == "Enter", decision)
 
                     # Generate skip message
                     skip_message = f"⚠️ 매수 보류: {company_name}({ticker})\n" \
@@ -748,7 +748,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                         buy_score=buy_score,
                         min_score=min_score,
                         decision=decision,
-                        skip_reason=reason,
+                        skip_reason=stored_skip_reason(reason, scenario),
                         scenario=scenario,
                         sector=sector
                     )
@@ -791,7 +791,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 scenario["_decision_context"]["cooldown_blocked"] = bool(_cd_block)
                 entry_eligible = (
                     decision == "Enter"
-                    and (buy_score >= min_score or rebound_pilot)
+                    and (effective_score >= min_score or rebound_pilot)
                     and sector_diverse
                     and not _cd_block
                     and _buy_gate.get("allowed", False)
@@ -828,7 +828,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 if entry_eligible:
                     buy_count += await self._enter_eligible_candidate(
                         ticker=ticker, company_name=company_name, current_price=current_price,
-                        scenario=scenario, analysis_result=analysis_result, buy_score=buy_score,
+                        scenario=scenario, analysis_result=analysis_result, buy_score=effective_score,
                         min_score=min_score, is_add=is_add, rebound_pilot=rebound_pilot,
                         entry_cash_amount=entry_cash_amount, rank_change_msg=rank_change_msg,
                         source_decision_id=source_decision_id, sector=sector, buy_gate=_buy_gate,
@@ -1281,23 +1281,25 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             if trend_facts:
                 scenario["_deterministic_trend_facts"] = trend_facts
             scenario = live.apply_stop_cap(scenario, current_price, scenario.get("_deterministic_market_regime"))
-            buy_score = scenario.get("buy_score", 0) or 0
+            buy_score = _kr_effective_score(scenario)    # effective score, as in the batch
             min_score = scenario.get("min_score", 0) or 0
+            # A rule-approved re-entry has no AI score: the score floors do not apply, every other check does.
+            rule_approved = live.deterministic_approval(scenario)
             try:
                 from cores.regime_policy import (effective_min_score, get_market_pulse_state,
                                                  regime_min_score_floor_enabled)
-                if regime_min_score_floor_enabled():
+                if not rule_approved and regime_min_score_floor_enabled():
                     pulse = effects.market_pulse() if effects is not None else get_market_pulse_state("kr")
                     min_score = max(min_score, effective_min_score(min_score, self._buy_floor_regime(), pulse))
             except EffectsFailure:
                 raise
             except Exception as floor_error:  # same fail-open as the batch
                 logger.warning(f"[REGIME_MIN_SCORE_FLOOR] fail-open, LLM min_score 유지: {floor_error}")
-            if effects is None:
+            if effects is None and not rule_approved:
                 min_score, scenario = micro_split_live.relaxed_min_score(
                     self, market="KR", ticker=ticker, current_price=current_price, scenario=scenario,
                     min_score=min_score, is_add=False, rebound_pilot=False, logger=logger)
-            if buy_score < min_score:
+            if not rule_approved and buy_score < min_score:
                 return {"bought": False, "reason": f"score_below_min({buy_score}<{min_score})"}
             buy_gate = self._evaluate_production_buy_gate(scenario, current_price, score_override=buy_score,
                                                           is_add=False)
@@ -1762,7 +1764,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 - 현재가: {current_price:,.0f}원
                 - 목표가: {target_price:,.0f}원 (최초 시나리오: {initial_target_price:,.0f}원)
                 - 손절가: {stop_loss:,.0f}원 (최초 시나리오: {initial_stop_loss:,.0f}원)
-                - 진입 후 최고가: {highest_price:,.0f}원{' (⚠️ 첫 추적 - get_stock_ohlcv로 진입일 이후 실제 최고가를 확인하세요)' if highest_price_initialized else ''}
+                - 진입 후 최고가: {highest_price:,.0f}원{' (⚠️ 첫 추적 - get_stock_ohlcv로 진입 다음 거래일부터의 고가를 확인하세요. 진입일 봉 고가는 매수 전에 찍혔을 수 있어 넣지 않으며, 오늘 산 종목이면 이 값을 그대로 쓰세요)' if highest_price_initialized else ''}
                 - 트레일링 스탑 조정 임계값: {trailing_stop_threshold_pct:.1f}% (이 값 이상 상향 시만 손절가 조정 가능)
                 - 수익률: {profit_rate:.2f}%
                 - 보유기간: {days_passed}일
@@ -1793,7 +1795,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 - Current Price: {current_price:,.0f} KRW
                 - Target Price: {target_price:,.0f} KRW (initial scenario: {initial_target_price:,.0f} KRW)
                 - Stop Loss: {stop_loss:,.0f} KRW (initial scenario: {initial_stop_loss:,.0f} KRW)
-                - Highest Price Since Entry: {highest_price:,.0f} KRW{' (⚠️ First tracking - verify actual peak since entry via get_stock_ohlcv)' if highest_price_initialized else ''}
+                - Highest Price Since Entry: {highest_price:,.0f} KRW{' (⚠️ First tracking - verify the peak from the session after entry via get_stock_ohlcv. Leave out the entry-day high, which may predate the buy; if bought today, use this value as is)' if highest_price_initialized else ''}
                 - Return: {profit_rate:.2f}%
                 - Holding Period: {days_passed} days
                 - Investment Period: {period}

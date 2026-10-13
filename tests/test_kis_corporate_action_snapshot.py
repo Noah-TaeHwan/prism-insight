@@ -191,3 +191,24 @@ def test_fetcher_uses_raw_adjusted_and_independent_readonly_quote():
     assert calls[:2] == [("475460", "20260915", "20260915", False), ("475460", "20260915", "20260915", True)]
     assert calls[2][1] == "FHKST01010100"
     assert base == "2765" and raw.iloc[0].to_dict() == RAW and adj.iloc[0].to_dict() == ADJUSTED
+
+
+def test_one_unverifiable_action_is_excluded_not_whole_session(case):
+    master, cached, options = case
+    normal = dict(RAW, Volume=1000, Amount=8290000)
+    codes = ["475460", "005930"]
+    options["master_fetcher"] = lambda: replace(
+        master, names={"475460": "미트박스", "005930": "normal"},
+        cap_df=pd.DataFrame({"시가총액": [46800000000, 1e12]}, index=codes),
+        listed_dates={}, previous_volumes={"475460": 31822, "005930": 1000})
+    options["history_fetcher"] = lambda c, date: pd.DataFrame([RAW, normal], index=codes)
+    options["snapshot_fetcher"] = lambda c: pd.DataFrame([normal] * len(c), index=list(c))
+    bad = dated(ADJUSTED)
+    bad.loc[:, "Volume"] = 286056
+    options["corporate_action_fetcher"] = lambda code, date: (dated(RAW), bad, "2765")
+    result = m.build_kis_snapshot_bundle("20260916", **options)
+    assert list(result.snapshot.index) == ["005930"]
+    assert list(result.prev_snapshot.index) == ["005930"]
+    assert list(result.cap_df.index) == ["005930"]
+    assert result.snapshot.attrs["corporate_action_unverified_excluded"] == ["475460"]
+    assert result.prev_snapshot.attrs["corporate_action_adjusted_codes"] == []

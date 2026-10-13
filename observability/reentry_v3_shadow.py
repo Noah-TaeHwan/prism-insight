@@ -118,6 +118,13 @@ def _hash(*parts):
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
 
 
+def _origin_trace(market, watch):
+    """The original position's trace (observability.trading_context formula), so the
+    re-entry campaign reads on the stopped-out/skipped decision; watch-scoped if unknown."""
+    decision = str((watch.get("row") or {}).get("decision_id") or "").strip()
+    return _hash("trade-trace", market, decision) if decision else _hash("reentry-watch", watch["watch_id"])
+
+
 class MarketContext:
     """Deterministic regime (production cores.data_prefetch._compute_kr_regime on the regime
     benchmark: KOSPI for KR, SPY as the S&P 500 proxy for US) after the BUY distribution-day
@@ -222,6 +229,8 @@ def advance(state, rows, frames, completed, market, ctx):
     enrolled = 0
     for row in sorted(rows, key=lambda r: (r["exit_date"], r["entry_date"], r["ticker"])):
         wid = _watch_id(market, row)
+        if wid in watches and row.get("decision_id") and not watches[wid]["row"].get("decision_id"):
+            watches[wid]["row"]["decision_id"] = row["decision_id"]   # trace link only; identity unchanged
         if wid in watches or V2._blocked(watches, row):
             continue
         watches[wid] = {"watch_id": wid, "status": "PENDING_ENROLL", "row": row, "market": market,
@@ -478,8 +487,8 @@ def _items_for(p, records):
 def _entry_context(entry, state, frames, completed, reports_root, market, db_path=None):
     """Everything the tracker entry needs beyond the scenario: name, sector, decision bars, report path.
 
-    Sector: the recheck scenario's, else the original decision row's (trading/watchlist history), else
-    "Unknown" (which the tracker's sector limit does not count).
+    Sector: prism_core.reentry_v3_live.resolve_sector (scenario, original decision row, the ticker's other
+    rows, KR KIS master), else "Unknown" (recorded as unknown; the tracker's sector limit does not count it).
     """
     from observability.reentry_recheck_inputs import REPORT_DIRS
     watch = next((w for w in state["watches"] if w["watch_id"] == entry["watch_id"]), None)
@@ -489,8 +498,8 @@ def _entry_context(entry, state, frames, completed, reports_root, market, db_pat
     ref = entry["item"].get("report_ref") or {}
     report_path = str(Path(reports_root) / REPORT_DIRS[market] / ref["name"]) if ref.get("kind") == "file" else None
     return {"company_name": watch["row"].get("company_name") or watch["ticker"],
-            "sector": ((entry["record"].get("scenario") or {}).get("sector")
-                       or (LIVE.original_sector(db_path, market, watch["row"]) if db_path else None) or "Unknown"),
+            "sector": LIVE.resolve_sector(db_path, market, watch["ticker"], watch["row"],
+                                          (entry["record"].get("scenario") or {}).get("sector")),
             "bars": bars[-80:], "report_path": report_path}
 
 
@@ -546,17 +555,23 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
                          "report_available": item["report_ref"] is not None,
                          "micro_split_appendix": bool(item["appendix_text"])}
                 if emit_event("reentry_v3.shadow_trigger", service=_service(market), event_id=item["event_id"],
-                              market=market, ticker=watch["ticker"], attributes=attrs, event_time=now) is not None:
+                              market=market, ticker=watch["ticker"], trace_id=_origin_trace(market, watch),
+                              attributes=attrs, event_time=now) is not None:
                     sent += 1
             for name, watch, key, attrs in ledger_events:
                 emit_event(name, service=_service(market), event_id=_hash(watch["watch_id"], key), market=market,
-                           ticker=watch["ticker"], attributes={"mode": "SHADOW", "trading_impact": "none",
+                           ticker=watch["ticker"], trace_id=_origin_trace(market, watch),
+                           attributes={"mode": "SHADOW", "trading_impact": "none",
                                                                "policy_version": C.POLICY_VERSION,
                                                                "watch_ref": watch["watch_id"],
                                                                "source": watch["source"], **attrs}, event_time=now)
         rechecked = []
         live_enabled = LIVE.live_enabled(market)
-        if not dry_run and (llm_recheck if llm_recheck is not None else llm_recheck_enabled()):
+        if not dry_run and LIVE.deterministic_enabled():
+            # No LLM: today's primary-rule triggers are approved by the rule at the decision run.
+            if phase == "intraday" and live_enabled:
+                rechecked = _approve_deterministic(state, market, completed, p, decision_day)
+        elif not dry_run and (llm_recheck if llm_recheck is not None else llm_recheck_enabled()):
             cap = {}
             if phase == "intraday" and live_enabled:
                 # Today's triggers: recheck at most the remaining daily cap + 1, in LIVE rank order.
@@ -567,8 +582,12 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
         live_results = []
         if phase == "intraday" and not dry_run and live_enabled and rechecked:
             def _emit_live(name, watch, key, attrs):
+                entry_decision = attrs.pop("entry_decision_id", None)
+                if entry_decision:      # the new position's own trace, linked from the campaign
+                    attrs["entry_trace_id"] = _hash("trade-trace", market, entry_decision)
                 emit_event(name, service=_service(market), event_id=_hash(watch["watch_id"], key), market=market,
-                           ticker=watch["ticker"], attributes={"mode": "LIVE", "trading_impact": "order",
+                           ticker=watch["ticker"], trace_id=_origin_trace(market, watch),
+                           attributes={"mode": "LIVE", "trading_impact": "order",
                                                                "policy_version": C.POLICY_VERSION,
                                                                "watch_ref": watch["watch_id"],
                                                                "source": watch["source"], **attrs},
@@ -595,12 +614,48 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
                    "attempt_counts": attempts, "intraday": counts, "new_triggers": len(frozen),
                    "trigger_events_emitted": sent, "ledger_events": len(ledger_events), "archived": archived,
                    "dry_run": dry_run, "rechecks": len(rechecked),
-                   "llm_calls": sum(r["status"] in {"OK", "PARSE_ERROR", "ERROR"} for r in rechecked),
+                   "llm_calls": sum(r["status"] in {"OK", "PARSE_ERROR", "ERROR"} and r.get("approval") != "deterministic"
+                                    for r in rechecked),
                    "recheck_status": _tally(r["status"] for r in rechecked)}
         if not dry_run:
             emit_event("reentry_v3.shadow_run", service=_service(market), market=market, attributes=summary,
                        event_time=datetime.now(timezone.utc))
         return summary
+
+
+def _approve_deterministic(state, market, completed, p, decision_day):
+    """REENTRY_V3_DETERMINISTIC: approve today's pending primary-rule triggers without an LLM call.
+
+    The records keep the recheck shape (results file, state, event) so the LIVE path, the ledger and the
+    reports read them unchanged; prism_core.reentry_v3_live.plan still applies the daily cap and rank order.
+    """
+    todo = [(watch, event_id, rc) for watch in state["watches"]
+            for event_id, rc in (watch.get("rechecks") or {}).items()
+            if rc["status"] not in RC3.FINAL and rc["status"] != "SKIPPED_CAP"]
+    items = _items_for(p, [{"event_id": event_id} for _, event_id, _ in todo])
+    results = []
+    for watch, event_id, rc in todo:
+        item = items.get(event_id)
+        if item is None or item.get("trigger_date") != decision_day or item.get("live_rule") != LIVE.PRIMARY_RULE:
+            continue
+        record = LIVE.deterministic_record(item, market)
+        record.update(attempt=rc["attempts"], trigger=item["trigger"], decision_price=item["decision_price"],
+                      decision_time=item["decision_time"], level=item["level"]["L"])
+        with p["results"].open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+        rc.update(status=record["status"], last=completed, approved=True, approval="deterministic")
+        _atomic(p["state"], state)
+        emit_event("reentry_v3.shadow_recheck", service=_service(market),
+                   event_id=_hash(event_id, "recheck", "deterministic"), market=market, ticker=watch["ticker"],
+                   trace_id=_origin_trace(market, watch),
+                   attributes={"mode": "SHADOW", "trading_impact": "none", "policy_version": C.POLICY_VERSION,
+                               "watch_ref": watch["watch_id"], "trigger_date": item["trigger_date"],
+                               "trigger": item["trigger"], "status": "OK", "approved": True, "decision": "진입",
+                               "approval": "deterministic", "decision_price": item.get("decision_price"),
+                               "level": item["level"]["L"]},
+                   event_time=datetime.now(timezone.utc))
+        results.append(record)
+    return results
 
 
 def _run_rechecks(state, market, completed, p, reports_root, archive_db, llm, only_day=None, limit=None,
@@ -657,9 +712,11 @@ def _run_rechecks(state, market, completed, p, reports_root, archive_db, llm, on
                  "latency_s": record.get("latency_s"), "attempt": attempts,
                  "micro_split_appendix": bool(item.get("appendix_text")),
                  "decision_price": item.get("decision_price"), "level": item["level"]["L"],
-                 "rejection_reason": str(record.get("rejection_reason") or "")[:300] or None}
+                 "rejection_reason": str(record.get("rejection_reason") or "")[:300] or None,
+                 "error": str(record.get("error") or "")[:300] or None}
         emit_event("reentry_v3.shadow_recheck", service=_service(market),
                    event_id=_hash(event_id, "recheck", attempts), market=market, ticker=watch["ticker"],
+                   trace_id=_origin_trace(market, watch),
                    attributes=attrs, event_time=datetime.now(timezone.utc))
         results.append(record)
     return results

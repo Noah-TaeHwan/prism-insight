@@ -161,7 +161,7 @@ v2(`docs/REENTRY_V2_DESIGN_20260927_ko.md`) 코드는 그대로 두고 cron만 v
 ## 5. LLM 재점검 (신호 시점, LIVE 매수의 승인 단계)
 
 - v2 장치 재사용: 운영 BUY 지시문 + 재점검 절, **BUY Codex 설정**(`resolve_buy_codex_settings`, 현재 gpt-6.1-sol, effort는
-  활성 OAuth 계정 따라 munsangrok=xhigh·fast, dragon1086=medium), **MCP 도구 없음**, 보고서는 신호 전날까지의 최신본을
+  활성 OAuth 계정 따라 매매 계정=xhigh·fast, 리포트 계정=medium), **MCP 도구 없음**, 보고서는 신호 전날까지의 최신본을
   참조+sha256로 동결, 실패는 한 번만 재시도.
 - 동결 입력 계약 `reentry_v3_recheck_input_v1`: 기준 가격과 근거, 신호 종류, 판단가·판단 시각·저가, 추정 거래량과 비중
   출처, 목표(규칙·저항·증액 조건·2a 여부)·손절(규칙·최대 손절폭)·손익비·floor, 기준별 시도 번호와 이전 시도, 시작선·
@@ -382,6 +382,24 @@ REENTRY_V3_LIVE_MARKETS=KR,US      # 한 시장만 켜려면 KR 또는 US
 - 전체 중단: cron 네 줄 주석 처리 또는 정책 `enabled:false`.
 - 이미 산 포지션은 끈 뒤에도 기존 매도 로직이 계속 관리한다(별도 정리 불필요). 수동 청산은 평소 절차대로.
 - 코드 되돌리기: 이 PR revert. `_enter_eligible_candidate` 분리와 진입 락(배치는 최대 120초 대기 뒤 진행)을 같이 되돌려도 배치에 영향 없음.
+
+### 11.6a AI 재점검 없이 규칙으로 진입 (2026-10-10 사용자 결정)
+- 스위치: `REENTRY_V3_DETERMINISTIC=true`(코드 기본 false). 켜면 LLM 재점검을 부르지 않고, 결정 실행(14:00/13:50)에서
+  그날 1순위 규칙(L97) 신호를 규칙 자체로 승인한다(`prism_core.reentry_v3_live.deterministic_record`). 기록은 재점검과 같은
+  모양(`approval: "deterministic"`, `model: null`)으로 결과 파일·상태·이벤트에 남는다. 그림자 모드(LIVE 꺼짐)에서도 LLM을 부르지 않는다.
+- 시나리오: 손절·목표·손익비는 원장의 결정론 값, 원래 분석의 `fundamental_check`만 가져온다. 매수 근거 문구는
+  "재진입 규칙 신호로 매수합니다(AI 재점검 없음)…". AI 점수가 없으므로 점수 하한(국면 하한·초분할 하한·최종 게이트 점수)만
+  건너뛰고(`cores/buy_gate.py` `score_exempt`), 나머지 검사(보유·슬롯·업종 한도·신선 시세 가격대·국면 손절 상한·추세 관문 T1/T2·
+  손익비 하한·쿨다운·초분할 계획·하루 2건·마감 시각)는 그대로다. 증액 계획(add_plan)은 매수 뒤 매일 재검토에서 세운다.
+- 근거(같은 신호를 AI 승인분 vs 전부 산 경우, 결정론 청산, 총 슬롯 손익): 손절 후 KR −20.2%p(17건) vs +29.1%p(91건),
+  US +13.4%p(4건) vs +62.9%p(72건); 보류 후 KR −9.2%p(7건) vs +12.8%p(32건), US +13.7%p(16건) vs +81.9%p(153건).
+  AI 승인·거절의 평균 차이는 ±1%p 안팎(선별력 없음). 주의: 전부 사는 쪽은 매매가 많고 상위 몇 건 의존이 크며(KR 손절 후 상위 2건 빼면
+  −67%p), KR 손절 후 뒤 절반은 −41%p. 연구: tasks/research-20261010/reentry-heldoff, reentry-v4/report.txt.
+- 50일선 관문(T1, 종가<50일선) 해제(2026-10-10 사용자 결정): 규칙 승인 재진입에는 T1이 막지 않고 기록만 남긴다
+  (`buy_gate` `t1_exempt`, finding `individual_trend_t1_exempt`). T2(20일선 하락+5% 이탈)와 나머지 관문은 그대로.
+  근거(손절 후, 결정론 청산): 50일선 위만 KR +35.2%p/48건·US +16.6%p/35건 → 제한 없음 KR +29.1%p/91건·US +62.9%p/72건.
+  KR은 50일선 아래 신호가 평균 −1.0%로 약간 손해, US는 크게 이득. 한·미 같은 규칙으로 해제.
+- 끄기: `REENTRY_V3_DETERMINISTIC=false`(LLM 재점검 승인으로 복귀; `REENTRY_V3_LLM_RECHECK=true` 필요).
 
 ### 11.7 첫 실거래일 점검표
 1. 14:00(한국)/13:50(미국) 실행 로그: 시세 수신 수, 신호 수, 재점검 결과(OK/승인 수), `live_results`.

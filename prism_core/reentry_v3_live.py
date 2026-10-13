@@ -74,6 +74,45 @@ def live_enabled(market):
     return _flag("REENTRY_V3_LIVE_ENABLED", "false") and str(market).upper() in live_markets()
 
 
+def deterministic_enabled():
+    """REENTRY_V3_DETERMINISTIC=true: the rule's signal is the entry, no LLM recheck (user decision 2026-10-10).
+
+    LLM replays (stop-out and held-off, KR and US) showed the recheck picked no better than chance and kept
+    far less of the total than taking every signal. Every deterministic check of the entry path still runs.
+    """
+    return _flag("REENTRY_V3_DETERMINISTIC", "false")
+
+
+def deterministic_record(item, market, now=None):
+    """Recheck-shaped approval of one trigger without an LLM call (scenario = entry, stop and target of the rule).
+
+    The original analysis's fundamental check is kept so the final buy gate treats it as the batch would."""
+    signal = SIGNALS[item["trigger"]]
+    original = item.get("original") or {}
+    meta = {"signal": signal, "level": item["level"]["L"], "source": item["source"],
+            "level_basis": item["level"].get("basis"),
+            "band_level": (((item.get("campaign") or {}).get("windows") or {}).get(PRIMARY_RULE) or {}).get("R"),
+            "band_basis": (item.get("campaign") or {}).get("reclaim_basis")}
+    why = SIGNAL_WHY_KO[signal].format(level=level_phrase(meta, market))
+    scenario = {"decision": "진입", "investment_period": "중기",
+                "rationale": (f"재진입 규칙 신호로 매수합니다(AI 재점검 없음). "
+                              f"{SOURCE_SENTENCE_KO.get(item['source'], '')} {why}.")}
+    if isinstance(original.get("fundamental_check"), dict):
+        scenario["fundamental_check"] = original["fundamental_check"]
+    return {"contract": "reentry_v3_recheck_result_v1", "event_id": item["event_id"], "watch_ref": item["watch_ref"],
+            "market": market, "ticker": item["ticker"], "source": item["source"],
+            "trigger_date": item["trigger_date"], "entry": item.get("entry"),
+            "evaluated_at": (now or datetime.now(timezone.utc)).isoformat(), "status": "OK", "approved": True,
+            "decision": "진입", "approval": "deterministic", "buy_score": None, "model": None,
+            "report_stale": None, "latency_s": 0.0, "scenario": scenario}
+
+
+def deterministic_approval(scenario):
+    """True for a re-entry approved by the rule (no AI score: the entry path skips the score floors)."""
+    meta = (scenario or {}).get("reentry") if isinstance(scenario, dict) else None
+    return isinstance(meta, dict) and meta.get("approval") == "deterministic"
+
+
 def _local(market, now, table):
     zone = table[market][0]
     return (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone))
@@ -151,6 +190,7 @@ def build_scenario(item, record, market):
         "stop_rule": item.get("stop_rule"), "target_rule": item.get("target_rule"),
         "band_level": window.get("R") or item["level"]["L"],
         "band_basis": (item.get("campaign") or {}).get("reclaim_basis") if window.get("R") else "L",
+        "approval": record.get("approval") or "llm",
     }
     scenario["stop_loss"] = item["stop"]
     if item.get("target"):
@@ -158,6 +198,8 @@ def build_scenario(item, record, market):
     _price_fields(scenario, float(item["decision_price"]))    # the final buy gate checks this arithmetic
     scenario["trigger_type"] = trigger_label(market, signal)
     scenario["_decision_id"] = f"reentry_v3:{item['event_id']}"
+    # Observation only: lets the ledger point this position back to the original decision.
+    scenario["reentry"]["origin_decision_id"] = (item.get("original") or {}).get("decision_id")
     return scenario
 
 
@@ -406,7 +448,8 @@ def process(state, market, decision_day, records, items, journal_path, executor,
                  {"status": status, "reason": outcome.get("reason"), "signal": entry["signal"],
                   "decision_price": entry["price"], "attempt": entry["scenario"]["reentry"]["attempt"],
                   "stop_loss": entry["scenario"].get("stop_loss"), "target_price": entry["scenario"].get("target_price"),
-                  "entry_price": outcome.get("entry_price"), "holding_count": len(outcome.get("holding_ids") or [])})
+                  "entry_price": outcome.get("entry_price"), "holding_count": len(outcome.get("holding_ids") or []),
+                  "entry_decision_id": entry["scenario"].get("_decision_id")})
     for entry in skipped:
         status = REASON_STATUS.get(entry["reason"], "SKIPPED")
         results.append({"key": entry["key"], "ticker": entry["ticker"], "signal": entry["signal"], "status": status,
@@ -489,6 +532,59 @@ def strict_position_counts(cursor, table, ticker, account_key):
     held = cursor.execute(_HELD_COUNT_SQL[table], (ticker, account_key)).fetchone()[0]
     slots = cursor.execute(_SLOT_COUNT_SQL[table], (account_key,)).fetchone()[0]
     return int(held) > 0, int(slots)
+
+
+# Latest known sector of a ticker in the decision tables, newest first (fixed literal queries).
+_TICKER_SECTOR_SQL = {
+    "KR": ("SELECT sector FROM watchlist_history WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) != '' "
+           "AND sector != 'Unknown' ORDER BY analyzed_date DESC LIMIT 1",
+           "SELECT sector FROM trading_history WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) != '' "
+           "AND sector != 'Unknown' ORDER BY sell_date DESC LIMIT 1",
+           "SELECT sector FROM stock_holdings WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) != '' "
+           "AND sector != 'Unknown' ORDER BY buy_date DESC LIMIT 1"),
+    "US": ("SELECT sector FROM us_watchlist_history WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) != '' "
+           "AND sector != 'Unknown' ORDER BY analyzed_date DESC LIMIT 1",
+           "SELECT sector FROM us_trading_history WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) != '' "
+           "AND sector != 'Unknown' ORDER BY sell_date DESC LIMIT 1",
+           "SELECT sector FROM us_stock_holdings WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) != '' "
+           "AND sector != 'Unknown' ORDER BY buy_date DESC LIMIT 1"),
+}
+
+
+def ticker_sector(db_path, market, ticker):
+    """The ticker's newest known sector in any analysis/trade/holding row (read-only), else None."""
+    try:
+        with _ro(db_path) as conn:
+            for query in _TICKER_SECTOR_SQL["KR" if market == "KR" else "US"]:
+                found = conn.execute(query, (ticker,)).fetchone()
+                if found and isinstance(found[0], str) and found[0].strip():
+                    return found[0]
+    except Exception:  # noqa: BLE001 - no sector -> next fallback
+        return None
+    return None
+
+
+def kis_master_sector(ticker):
+    """KR: the industry of the ticker in today's KIS stock master (cached per day), else None."""
+    try:
+        from cores.kis_market_snapshot import fetch_kis_master_data
+        from cores.kis_sector_map import get_sector_info
+        return get_sector_info(fetch_kis_master_data().observed_date).get(str(ticker)) or None
+    except Exception:  # noqa: BLE001 - network/master outage -> unknown sector
+        return None
+
+
+def resolve_sector(db_path, market, ticker, row, scenario_sector=None):
+    """Sector for the sector limit: scenario, original decision row, the ticker's other rows, KR KIS master.
+
+    Never blocks an entry: when nothing is found the sector is "Unknown" (as the batch records it)."""
+    for candidate in (scenario_sector,
+                      original_sector(db_path, market, row) if db_path else None,
+                      ticker_sector(db_path, market, ticker) if db_path else None,
+                      kis_master_sector(ticker) if market == "KR" else None):
+        if isinstance(candidate, str) and candidate.strip() and candidate != "Unknown":
+            return candidate
+    return "Unknown"
 
 
 def original_sector(db_path, market, row):

@@ -72,6 +72,19 @@ ClickHouse process (mode `0644`).
 - `entry.executed`
 - `entry.fill_reconciled` (US CAPTURE: 제출과 실제 체결을 구분하는 주문 provenance)
 - `exit.executed`
+- `holding.evaluated` (every KR/US hold-or-sell review after the runner guard; shares the
+  position's `trace_id`, because the holding-decision tables keep only the latest row)
+- `broker.order_request` (every KIS order TR from `trading/kis_auth._url_fetch`: accepted,
+  rejected, HTTP error or exception; account numbers dropped, `execution_profile_ref` kept;
+  acceptance is not a fill)
+- `job.run_completed` (run heartbeat for the analysis batches, hard-stop, trend-exit,
+  fill-chaser and US pending orders, so a missing run shows up as a time gap)
+- `btc.scenario.decision_input` / `intent_committed` / `exchange_call` /
+  `settlement_recorded` (bounded summaries of committed `llm_scenario_audit_events`; raw
+  exchange order IDs and response bodies stay in SQLite, only `order_id_hash` ships),
+  `btc.scenario.notice` (HALTED, MODEL_ERROR, fills… as queued) and
+  `job.run_completed` with `job=btc-scenario` (one per runner invocation; the runner's
+  stdout status lines carry no timestamp)
 
 `candidate.evaluated`, `entry.executed`, and `exit.executed` use context schema
 version 1. The entry scenario keeps the authoritative deterministic market
@@ -109,6 +122,27 @@ event stores the unchanged live ranks 1 and 2 beside the counterfactual rank 3.
 `tools/track_third_slot_shadow.py` later appends exact 1/3/5/10 KRX trading-day
 close, MFE, and MAE outcomes. `tools/build_third_slot_evidence_packet.py`
 deduplicates and compares these cohorts without claiming fills or account PnL.
+
+## Trace linkage
+
+One `trace_id` reads a decision end to end. The id is
+`sha256("trade-trace|<MARKET>|<decision_id>")[:32]` (`observability.trading_context`).
+
+- **Screening → position**: when `candidate.evaluated` is emitted for a `report:<pdf>`
+  decision, `screening.candidate_linked` copies the matching
+  `runtime/candidate_ledger.sqlite` rows (market, trade date, session, ticker parsed from
+  the report name) onto the same trace, timestamped at the screening run.
+- **Position lifecycle**: `candidate.evaluated` → `entry.executed` → `entry.fill_reconciled`
+  → every `holding.evaluated` → `exit.executed`.
+- **Re-entry campaign**: every `reentry_v3.*` watch event (trigger, recheck, live
+  entry/skip, exit, campaign end) uses the trace of the stopped-out or skipped original
+  decision, falling back to a watch-scoped trace when it is unknown. A live re-entry buy
+  is a new position with its own trace. `reentry_v3.live_entry` carries its
+  `entry_trace_id`, and that position's context events carry `origin_trace_id`.
+- **BTC**: `btc.scenario.*` share `sha256("scenario:<id>")`. A `decision_input` joins the
+  scenario trace when its run touched exactly one scenario (`scenario_inferred=true`).
+- Not linked by design: `broker.order_request` (HTTP layer; join by ticker, time and
+  `execution_profile_ref`) and `job.run_completed` (run level).
 
 ## Historical baseline
 

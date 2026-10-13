@@ -126,11 +126,20 @@ def evaluate_production_buy_gate(
     market_pulse: str | None = None,
     pilot_budget_available: bool = False,
     required_score_override: float | None = None,
+    score_exempt: bool = False,
+    t1_exempt: bool = False,
 ) -> dict[str, Any]:
     """Evaluate one candidate immediately before the simulator buy call.
 
     ``required_score_override`` replaces the regime score floor for a verified
     micro-split entry (KR/US, 2026-10-02); every other gate is unchanged.
+
+    ``score_exempt`` skips the score floor for a new entry that has no AI score
+    (rule-approved re-entry, 2026-10-10); every other gate is unchanged.
+
+    ``t1_exempt`` turns the T1 trend gate (close below the 50-day line) into a
+    recorded, non-blocking finding for a rule-approved re-entry (user decision
+    2026-10-10); T2 and every other gate are unchanged.
 
     ``market_regime`` must be the programmatically computed regime.  A missing
     regime is a hard stop for a new buy: a data outage may reduce opportunity,
@@ -167,7 +176,9 @@ def evaluate_production_buy_gate(
         macro = _number(data.get("macro_adjustment")) or 0.0
         score = (buy_score + macro) if buy_score is not None else None
     score_policy = None
-    if score is None:
+    if score_exempt and not is_add:
+        score_policy = {"mode": "score_exempt", "reason": "rule-approved re-entry (no AI score)"}
+    elif score is None:
         findings.append(_finding("missing_score", "effective buy score is unavailable"))
     elif rule is not None:
         scenario_min = _number(data.get("min_score")) or 0.0
@@ -261,17 +272,25 @@ def evaluate_production_buy_gate(
             if reported_rr is not None:
                 tolerance = max(0.15, abs(basis_rr) * 0.10)
                 if abs(reported_rr - basis_rr) > tolerance:
-                    findings.append(_finding("rr_arithmetic_mismatch", f"reported R/R {reported_rr:.2f} != {basis_rr:.2f}"))
+                    # Recorded, not blocking (user decision 2026-10-10): the floors above already use
+                    # the recomputed R/R, so the AI's arithmetic slip alone must not refuse the entry.
+                    findings.append(_finding("rr_arithmetic_mismatch", f"reported R/R {reported_rr:.2f} != {basis_rr:.2f}",
+                                             hard=False))
 
             for field, expected in (("expected_return_pct", basis_return), ("expected_loss_pct", basis_loss)):
                 reported = _number(data.get(field))
                 if reported is not None and abs(reported - expected) > max(0.25, abs(expected) * 0.10):
-                    findings.append(_finding("risk_arithmetic_mismatch", f"{field} {reported:.2f} != {expected:.2f}"))
+                    findings.append(_finding("risk_arithmetic_mismatch", f"{field} {reported:.2f} != {expected:.2f}",
+                                             hard=False))
 
     t1 = _T1_RE.search(facts)
     t2 = _T2_RE.search(facts)
     if t1 and t1.group(1).lower() == "true":
-        findings.append(_finding("individual_trend_t1", "T1 individual trend gate is hit"))
+        if t1_exempt and not is_add:
+            findings.append(_finding("individual_trend_t1_exempt",
+                                     "T1 hit; not blocking for a rule-approved re-entry", hard=False))
+        else:
+            findings.append(_finding("individual_trend_t1", "T1 individual trend gate is hit"))
     if t2 and t2.group(1).lower() == "true":
         findings.append(_finding("individual_trend_t2", "T2 individual trend gate is hit"))
 

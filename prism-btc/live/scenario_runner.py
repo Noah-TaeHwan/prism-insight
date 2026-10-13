@@ -18,9 +18,17 @@ from live.scenario_runtime import ScenarioRuntime
 from live.shared_entry_coordinator import mutation_lock
 from live.entry_reservations import LockBusy
 from live.scenario_provenance import run_capture
+from live.scenario_ledger import forward_run
 
 
-_FAILURE_STAGES = {"database_init", "control", "broker_init", "activation", "run"}
+def operational_propose(*args, **kwargs):
+    """Only the production runner opts into one audited transport retry."""
+    from functools import partial
+    from live.scenario_oauth import generate_scenario
+    return propose(*args, **kwargs, generate=partial(generate_scenario, retry_transport=True))
+
+
+_FAILURE_STAGES = {"database_init", "control", "broker_init", "activation", "run", "model_input_preparation"}
 _ERROR_TYPES = {"Exception", "ValueError", "RuntimeError", "PermissionError", "TimeoutError",
                 "OperationalError", "IntegrityError", "DatabaseError", "LockBusy"}
 
@@ -92,6 +100,9 @@ def record_health(conn,result,*,snapshot=None,loop=None,clock=time.time):
         detail="scenario tick blocked: "+str(result.get("reason","unknown"))
         if result.get("failure_stage") in _FAILURE_STAGES:
             detail+="; failure_stage="+result["failure_stage"]
+        if result.get("reason") == "llm_input_preparation_failed" and result.get("failure_code") in {
+                "snapshot_unavailable", "snapshot_stale", "invalid_contract_context", "invalid_input", "input_size"}:
+            detail += "; failure_code=" + result["failure_code"]
         if result.get("error_type") in _ERROR_TYPES:
             detail+="; error_type="+result["error_type"]
         tracking.log_event(conn,"error",detail,level="error",mode="demo")
@@ -114,14 +125,16 @@ def notify_runtime_status(conn,result,*,clock=time.time):
         conn.execute("CREATE TABLE IF NOT EXISTS llm_scenario_model_incident (id INTEGER PRIMARY KEY CHECK(id=1),event_id TEXT,opened REAL,active INTEGER)")
         model_row=conn.execute("SELECT event_id,opened,active FROM llm_scenario_model_incident WHERE id=1").fetchone()
         model_failed=result.get("status")=="blocked" and result.get("reason") in {
-            "llm_output_contract_failed", "llm_call_failed"}
+            "llm_output_contract_failed", "llm_call_failed", "llm_input_preparation_failed"}
         model_validated=result.get("status")=="wait" or (
             result.get("status")=="intent_pending" and result.get("reason")=="awaiting_exact_evidence")
         if model_failed and (not model_row or not model_row[2]):
             identity="model-error-"+uuid.uuid4().hex
             stamp=clock()
             enqueue(conn,identity,{"kind":"MODEL_ERROR","timestamp":stamp,
-                "reason_code":result["reason"]})
+                "reason_code":result["reason"],
+                "failure_code": "input_size" if result.get("reason") == "llm_input_preparation_failed"
+                    and result.get("failure_code") == "input_size" else None})
             conn.execute("INSERT OR REPLACE INTO llm_scenario_model_incident VALUES(1,?,?,1)",(identity,stamp))
         elif model_validated and model_row and model_row[2]:
             enqueue(conn,model_row[0]+"-resolved",{"kind":"MODEL_RECOVERED","timestamp":clock(),
@@ -160,6 +173,8 @@ def main():
     parser.add_argument("--root-db",type=Path,
                         default=Path(__file__).resolve().parents[2]/"stock_tracking_db.sqlite")
     args=parser.parse_args()
+    started=time.monotonic()
+    loop="protection" if args.protect_only else "decision"
     if not args.execute and not args.protect_only and not args.activate:
         print(json.dumps({"status":"execution_disabled","reason":"explicit_activation_required"}))
         return 0
@@ -210,13 +225,15 @@ def main():
             snapshots.append(value)
             return value
         failure_stage="run"
-        result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,snapshot=snapshot)
+        result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
+                        snapshot=snapshot,proposal=operational_propose)
         _record_health_best_effort(conn,result,snapshot=snapshots[-1] if snapshots else None,
                                    loop="protection" if args.protect_only else "decision")
         # Disabled adapters cannot produce trade notices. Delivery occurs only
         # after the runtime released the trading lock and only for queued proofs.
         if result.get("status")!="lock_busy":
             deliver_notices(conn,result)
+        forward_run(result,loop=loop,started=started)
         print(json.dumps(result,ensure_ascii=False))
         return 1 if result["status"] in {"blocked","execution_disabled"} else 0
     except LockBusy:
@@ -227,6 +244,7 @@ def main():
         if failure_stage in {"control", "broker_init", "activation"}:
             result["model_called"]=False
         _record_health_best_effort(conn,result,loop="protection" if args.protect_only else "decision")
+        forward_run(result,loop=loop,started=started)
         print(json.dumps(result))
         return 0
     except Exception as exc:
@@ -237,6 +255,7 @@ def main():
         _record_health_best_effort(conn,result,loop="protection" if args.protect_only else "decision")
         if conn is not None:
             deliver_notices(conn,result)
+        forward_run(result,loop=loop,started=started)
         print(json.dumps(result))
         return 1
     finally:

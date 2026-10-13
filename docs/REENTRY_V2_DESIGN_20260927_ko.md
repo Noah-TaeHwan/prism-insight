@@ -234,8 +234,8 @@ LIVE 승격은 7절 기준과 사용자 승인이 필요하다.
 ## 15. 운영 병행 LLM 재점검 (2026-09-27, 14절의 "나중 일괄 재점검"을 대체)
 
 사용자 결정: 일괄 재점검은 하지 않는다. SHADOW가 운영과 함께 돌다가 트리거가 날 때만 LLM을 부른다.
-모델은 BUY Codex 설정(`resolve_buy_codex_settings`, 현재 gpt-6.1-sol; effort는 활성 OAuth 계정 따라 munsangrok=xhigh·fast,
-dragon1086=medium)을 그대로 따른다(2026-10-04 정정: 이전 기재 astra/high는 당시 값). 30일 넘은 보고서는 재생성하지 않고
+모델은 BUY Codex 설정(`resolve_buy_codex_settings`, 현재 gpt-6.1-sol; effort는 활성 OAuth 계정 따라 매매 계정=xhigh·fast,
+리포트 계정=medium)을 그대로 따른다(2026-10-04 정정: 이전 기재 astra/high는 당시 값). 30일 넘은 보고서는 재생성하지 않고
 `stale` 표시만 남겨 나중에 따로 비교한다.
 
 - 코드: `observability/reentry_v2_recheck.py`(PR #814). 매일 러너가 새 트리거를 동결한 직후 호출한다.
@@ -330,8 +330,8 @@ dragon1086=medium)을 그대로 따른다(2026-10-04 정정: 이전 기재 astra
 
 ## 18. 재점검 호출 비용·빈도 실측 (2026-09-28)
 
-- 모델·설정: BUY Codex 설정을 따른다(현재 gpt-6.1-sol; effort는 활성 OAuth 계정 따라 munsangrok=xhigh·fast,
-  dragon1086=medium), MCP 도구 없음. 아래 실측(속도·토큰)은 2026-09-28 당시 `gpt-6-astra`·effort high·timeout 240초 기준이다.
+- 모델·설정: BUY Codex 설정을 따른다(현재 gpt-6.1-sol; effort는 활성 OAuth 계정 따라 매매 계정=xhigh·fast,
+  리포트 계정=medium), MCP 도구 없음. 아래 실측(속도·토큰)은 2026-09-28 당시 `gpt-6-astra`·effort high·timeout 240초 기준이다.
   ChatGPT OAuth(구독) 경로라 호출당 달러 과금이 아니라 **구독 사용 한도**를 쓴다.
 - 속도: 운영 BUY(같은 모델, MCP 도구 사용) 최근 73건 지연 p50 93초, p90 120초, 최대 148초.
   재점검은 도구를 쓰지 않아 이보다 짧을 것으로 보지만 아직 실측 전이다. 장 마감 뒤 실행이라 매매 속도와 무관하다.

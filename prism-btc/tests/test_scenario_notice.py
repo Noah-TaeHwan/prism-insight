@@ -241,7 +241,7 @@ def test_add_uses_whole_position_average_not_last_fill():
 def test_short_and_profitable_stop():
     out = render_notice(filled(position(side="SHORT", average_entry_price=100, hard_stop=90,
         take_profits=[dict(price=80, quantity=.06)]), side="SHORT"))
-    assert "수익 보호" in out and "+10.00%" in out and "+100.00%" in out
+    assert "가격이익 구간 SL" in out and "+10.00%" in out and "+100.00%" in out
     assert "+1.20 USDT" in out
 
 
@@ -515,6 +515,15 @@ def test_model_notice_never_exposes_payload_or_claims_exchange_uncertainty(reaso
 def test_model_error_requires_safe_reason_code():
     with pytest.raises(ValueError,match='model_error_reason_required'):
         render_notice(dict(kind='MODEL_ERROR',timestamp=1000,reason_code='raw exception'))
+
+
+def test_input_failure_notice_does_not_invent_an_llm_response():
+    out = render_notice(dict(kind='MODEL_ERROR',timestamp=1000,
+                            reason_code='llm_input_preparation_failed',failure_code='input_size',
+                            details='secret raw input'))
+    assert '허용 크기' in out and 'LLM을 호출하지 않았습니다' in out
+    assert '입력' in out and '출력 규격' not in out and '이번 응답' not in out
+    assert '별도 확인 대상' in out and 'secret' not in out
 
 
 def test_readable_blocks_show_notional_and_verified_equity_without_fake_margin():

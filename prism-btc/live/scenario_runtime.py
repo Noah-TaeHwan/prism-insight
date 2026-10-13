@@ -25,7 +25,7 @@ from core.scenario_limit_prices import validate_execution_prices
 from live.shared_entry_coordinator import database_path, mutation_lock
 from live.entry_reservations import LockBusy
 from live.scenario_llm import ScenarioModelError
-from live.scenario_review_memory import apply_review, observe_review
+from live.scenario_review_memory import apply_review, observe_review, review_context
 from live import scenario_recovery as recovery
 
 REQUIRED_CAPABILITIES = frozenset({"exact_fills", "atomic_protection",
@@ -139,6 +139,24 @@ class ScenarioRuntime:
     def _save(self, state):
         self.conn.execute("UPDATE llm_scenario_state SET body=? WHERE id=1", (_json(state),))
         self.conn.commit()
+
+    def _apply_review(self, active, payload, validated, presented, input_id, slot):
+        """Optional audit failures must never interrupt advisory apply or EXIT."""
+        stamp, boundary = self.clock(), None
+        try:
+            from live.scenario_provenance import begin_review_capture
+            boundary = begin_review_capture(active, presented, payload, validated,
+                input_id=input_id, slot=slot, applied_at=stamp)
+        except Exception:
+            boundary = None
+        receipt = apply_review(active, payload.get("review"), validated["action_id"],
+                               now=stamp, presented=presented)
+        try:
+            from live.scenario_provenance import finish_review_capture
+            finish_review_capture(boundary, active, receipt)
+        except Exception:
+            return receipt
+        return receipt
 
     def _notice(self, identity, event):
         """Optional local publication must never undo a durable order intent."""
@@ -275,6 +293,7 @@ class ScenarioRuntime:
 
     def _context(self, state):
         ctx = dict(self.broker.context())
+        hard_risk_blocked = ctx.get("new_risk_blocked")
         for flag in ("legacy_fenced", "protection_ok", "new_risk_blocked"):
             if type(ctx.get(flag)) is not bool:
                 raise ValueError("unconfirmed_account_context")
@@ -293,6 +312,7 @@ class ScenarioRuntime:
         ctx.update(review_contract_version=1,
                    review_memory=json.loads(_json(active.get("review_memory", []))) if active else [],
                    review_status=active.get("review_status", "not_initialized") if active else "no_scenario")
+        ctx.update(review_context(active))
         ctx.update(scenario_id=active["scenario_id"] if active else None,
                    revision=active["revision"] if active else 0,
                    seen_action_ids=[r[0] for r in self.conn.execute("SELECT id FROM llm_scenario_intents")])
@@ -355,6 +375,16 @@ class ScenarioRuntime:
         ctx["new_risk_blocked"] = bool(ctx["new_risk_blocked"] or (
             state["breaker"].get("blocked") and not ctx.get("recovery_observing")
             and not ctx.get("recovery_normal_permission")))
+        from core.scenario_stop_policy import build_stop_policy
+        ctx.setdefault("stop_policy", build_stop_policy(active,
+            hard_blocked=hard_risk_blocked,
+            permit_valid=not state["breaker"].get("blocked") or bool(
+                set(state["breaker"].get("reasons", [])) == {"three_losses"}
+                and recovery.managed_permit(state, active)),
+            accounting_status=ctx.get("accounting_status"), protection_ok=ctx.get("protection_ok"),
+            legacy_fenced=ctx.get("legacy_fenced"), pending_entries=ctx.get("pending_entries"),
+            positions=ctx.get("positions"), unknown_intents=bool(self.conn.execute(
+                "SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' OR status IS NULL").fetchone())))
         if state["breaker"].get("blocked") and not state.get("halt_notified"):
             stamp=state.setdefault("halted_at",self.clock())
             reasons=set(state["breaker"].get("reasons",[]))
@@ -475,10 +505,10 @@ class ScenarioRuntime:
                 core_payload = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
                 validated = validate_execution_prices(core_payload, fresh)
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids"):
-                    apply_review(state["active"], payload.get("review"), validated["action_id"],
-                                 now=self.clock(), presented=ctx["review_memory"])
+                    receipt = self._apply_review(state["active"], payload, validated,
+                                                 ctx["review_memory"], input_id, slot)
                     self._save(state)
-                    return {"status": "wait"}
+                    return {"status": "wait", **({"review_update_receipt": receipt} if receipt else {})}
                 stage = "execution"
                 ident = validated["action_id"]
                 if state["active"] is None:
@@ -488,9 +518,11 @@ class ScenarioRuntime:
                         recovery.consume(self.conn, state, validated, fresh, slot, self.clock())
                     state["active"] = {"scenario_id": validated["scenario_id"], "initial_equity": fresh["initial_equity"],
                         "side": validated["side"], "hard_stop": validated["hard_stop"], "revision": 0,
-                        "created_at": self.clock(), "expires_at": validated["expires_at"]}
-                apply_review(state["active"], payload.get("review"), validated["action_id"],
-                             now=self.clock(), presented=ctx["review_memory"])
+                        "created_at": self.clock(), "expires_at": validated["expires_at"],
+                        "stop_policy": {"version": 1, "initial_hard_stop": validated["hard_stop"],
+                                        "initial_action_id": validated["action_id"]}}
+                receipt = self._apply_review(state["active"], payload, validated,
+                                             ctx["review_memory"], input_id, slot)
                 state["active"]["revision"] = validated["revision"]
                 if validated["action"] in ("OPEN", "ADJUST"):
                     state["active"]["desired_hard_stop"] = validated["hard_stop"]
@@ -525,11 +557,27 @@ class ScenarioRuntime:
                 except Exception:
                     self._notice("unknown:"+ident,dict(kind="PENDING",timestamp=self.clock()))
                     self.conn.commit()
-                    return {"status": "intent_pending", "reason": "submission_unknown"}
-                return {"status": "intent_pending", "reason": "awaiting_exact_evidence"}
+                    return {"status": "intent_pending", "reason": "submission_unknown",
+                            "review_update_receipt": receipt}
+                return {"status": "intent_pending", "reason": "awaiting_exact_evidence",
+                        "review_update_receipt": receipt}
         except ScenarioModelError as exc:
             self.conn.rollback()
             # Fixed codes only: never expose a response, account or transport error.
+            code = str(exc)
+            if code in {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
+                        "invalid_input", "input_size"}:
+                if self.recovery_enabled and claimed:
+                    try:
+                        recovery.journal(self.conn, "MODEL_INPUT_ERROR", {
+                            "input_id": ctx.get("input_id"), "code": code,
+                            "model_called": False}, self.clock(), slot=slot)
+                        self.conn.commit()
+                    except Exception:
+                        self.conn.rollback()
+                return {"status": "blocked", "reason": "llm_input_preparation_failed",
+                        "failure_stage": "model_input_preparation", "failure_code": code,
+                        "model_called": False}
             reason = ("llm_call_failed" if str(exc) in {"oauth_model_failed", "late_response"}
                       else "llm_output_contract_failed")
             return {"status": "blocked", "reason": reason}
@@ -568,7 +616,9 @@ class ScenarioRuntime:
                          "stale input or invalid expiry": "scenario_stale_input_or_expiry",
                          "invalid or opposite side": "scenario_opposite_side",
                          "conditional entry expiry exceeds next decision": "scenario_entry_expiry_invalid"}
-                outcome["failure_code"] = fixed.get(str(exc), "scenario_contract_invalid")
+                outcome["failure_code"] = ("scenario_stop_widening_forbidden"
+                    if str(exc).startswith("stop widening forbidden") else
+                    fixed.get(str(exc), "scenario_contract_invalid"))
             return outcome
 
     def tick(self):

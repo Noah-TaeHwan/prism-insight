@@ -306,6 +306,12 @@ def _capture_entry_quality_context(*, cursor, scenario, current_price, trigger_t
         return None
 
 
+def _reentry_rule_approved(scenario):
+    """Rule-approved re-entry: the final gate skips its score floor and the T1 (50-day line) block."""
+    from prism_core.reentry_v3_live import deterministic_approval
+    return deterministic_approval(scenario)
+
+
 def _micro_split_gate_score(scenario):
     """Relaxed required score of a verified micro-split entry (None keeps the regime floor)."""
     try:
@@ -1031,15 +1037,15 @@ class StockTrackingAgent:
 
             lines = [
                 "### 📉 개별 추세 팩트 (추세 게이트용 · as-of 오늘)",
-                f"- 종가: {close:,.0f}",
+                f"- 현재가(판단 시점 · 장중이면 오늘 미완성 봉): {close:,.0f}",
                 f"- vs MA20: {_above(close, ma20)} ({_fmt(_pct(close, ma20), '%')}), MA20 기울기: {_dir(ma20_up)}",
                 f"- vs MA50: {_above(close, ma50)} ({_fmt(_pct(close, ma50), '%')}), MA50 기울기: {_dir(ma50_up)}",
                 f"- vs MA60: {_above(close, ma60)} ({_fmt(_pct(close, ma60), '%')}), MA60 기울기: {_dir(ma60_up)}",
                 _ma200_line(),
                 f"- RS(60일, 종목-지수): {_fmt(rs, '%p')} (종목 {_fmt(stock_ret, '%')} / 지수 {_fmt(idx_ret, '%')})",
                 f"- Volatility: ATR20={_fmt(atr20_pct, '%')} / ADR20={_fmt(adr20_pct, '%')} (손절폭 shadow 검증)",
-                f"- T1_hit(종가<{ma_mid_label}, 오닐 10주선 이탈): {t1_hit} / "
-                f"T2_hit(MA20 하락 and 종가 MA20 대비 -5%↓): {t2_hit}",
+                f"- T1_hit(현재가<{ma_mid_label}, 오닐 10주선 이탈): {t1_hit} / "
+                f"T2_hit(MA20 하락 and 현재가 MA20 대비 -5%↓): {t2_hit}",
             ]
             # Momentum signal 1 volume facts. Today's bar is always open during
             # KR batches; a partial bar that already reaches 200% proves it.
@@ -1312,6 +1318,7 @@ class StockTrackingAgent:
                 "PRISM_KR_CODEX_FAST_TRADING", "0"
             ).strip().lower() in {"1", "true", "yes", "on"}
             if codex_enabled:
+                settings = None
                 try:
                     instruction = str(
                         getattr(self.trading_agent, "instruction", "") or ""
@@ -1348,6 +1355,10 @@ class StockTrackingAgent:
                         scenario_json is not None,
                         len(codex_result.mcp_calls),
                     )
+                    if scenario_json is None:
+                        from observability.fallbacks import note_codex_fallback
+                        await note_codex_fallback("KR", "buy", ticker, "parse_failed",
+                                                  timeout_s=settings.timeout)
                     if scenario_json is not None:
                         schedule_buy_model_shadow(
                             market="KR", ticker=ticker or "?",
@@ -1366,6 +1377,9 @@ class StockTrackingAgent:
                         ticker or "?",
                         type(codex_err).__name__,
                     )
+                    from observability.fallbacks import note_codex_fallback
+                    await note_codex_fallback("KR", "buy", ticker, codex_err,
+                                              timeout_s=settings.timeout if settings else None)
                     scenario_json = None
 
             if scenario_json is None:
@@ -2902,6 +2916,8 @@ class StockTrackingAgent:
                 trend_facts=str(scenario.get("_deterministic_trend_facts") or ""),
                 is_add=is_add,
                 required_score_override=_micro_split_gate_score(scenario),
+                score_exempt=_reentry_rule_approved(scenario),
+                t1_exempt=_reentry_rule_approved(scenario),
             )
             if result.get("score_policy"):
                 logger.info("[ENTRY_SCORE_POLICY][KR] regime=%s pulse=%s policy=%s", computed_regime, pulse, result["score_policy"])
@@ -3329,18 +3345,17 @@ class StockTrackingAgent:
                 )
 
             # Add sell message
-            arrow = "⬆️" if profit_rate > 0 else "⬇️" if profit_rate < 0 else "➖"
             from prism_core.runner_hold import public_reason, sell_message_line
+            from prism_core.sell_message import allocation_after_adds, holding_text, plain_reason, return_line
             message = f"📉 매도: {company_name}({ticker})\n" \
                       f"매수가: {buy_price:,.0f}원\n" \
                       f"매도가: {current_price:,.0f}원\n" \
-                      f"수익률: {arrow} {abs(profit_rate):.2f}%\n" \
-                      f"보유기간: {holding_days}일\n" \
-                      f"매도이유: {public_reason(sell_reason)}"
-            from prism_core.micro_split_live import allocation_line
-            _alloc = allocation_line(scenario_json, profit_rate=profit_rate, market="KR")
+                      f"{return_line(profit_rate, scenario_json)}\n" \
+                      f"보유기간: {holding_text(now_datetime - buy_datetime)}\n" \
+                      f"매도이유: {plain_reason(public_reason(sell_reason), sell_price=current_price, market='KR')}"
+            _alloc = allocation_after_adds(scenario_json, profit_rate=profit_rate, market="KR")
             if _alloc:
-                message += "\n" + _alloc.rstrip("\n")
+                message += "\n" + _alloc
             _runner_line = sell_message_line(scenario_json, language="ko")
             if _runner_line:
                 message += "\n" + _runner_line
@@ -3849,6 +3864,13 @@ class StockTrackingAgent:
                     if effects is None:
                         should_sell, sell_reason = runner_hold_live.guard_result(
                             self, "KR", stock, should_sell, sell_reason, logger=logger)
+                if effects is None:  # observation only: every review, hold or sell, in time order
+                    try:
+                        from observability.holding_decisions import emit_holding_evaluation
+                        emit_holding_evaluation("KR", stock, should_sell, sell_reason,
+                                                source="runner_exit" if runner_exit else "sell_review")
+                    except Exception:  # noqa: BLE001 - observation must never affect a sell decision
+                        logger.debug("holding evaluation event skipped")
 
                 if should_sell:
                     if effects is not None:
@@ -4306,11 +4328,11 @@ class StockTrackingAgent:
                     entry_cash_amount = None
                     logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}")
 
-                    # 레짐 적응 하한선 게이트(env-gated REGIME_MIN_SCORE_FLOOR, 기본 off).
+                    # 레짐 적응 하한선 게이트(env-gated REGIME_MIN_SCORE_FLOOR, 기본 on: entry_score_policy).
                     # KR 진입은 LLM decision=="Enter" 로만 결정되고 min_score 는 정보용이었다.
                     # 플래그 ON 시 약세장 하한(strong_bear 9 / bear·sideways 8)을 강제해,
                     # buy_score 가 하한 미만이면 LLM 이 Enter 라 해도 매수를 차단한다(안전 게이트).
-                    # 기본 off = 현행 유지(하한 계산·차단 없음). fail-open: 레짐 조회 실패 시 하한 0.
+                    # 플래그 false = 하한 계산·차단 없음. fail-open: 레짐 조회 실패 시 하한 0.
                     _regime_floor_block = False
                     try:
                         from cores.regime_policy import (

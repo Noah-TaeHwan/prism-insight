@@ -53,6 +53,30 @@ seed를 직접 수정하지 않으며, 첫 저장부터 지정한 runtime 파일
 - 규모(2026-10-02 실측): 거래일 하루 약 8천 건, 약 2.3MB. 1년 약 0.6~0.8GB.
 - 조회: `prism_core.kr_news_store.search()` (키워드·태그 종목·기간).
 
+## KIS 뉴스 제목 저장소 (US)
+
+- 기본 경로: `runtime/us_news_titles.sqlite` (Git ignored). 경로 override: `PRISM_US_NEWS_DB`. 스키마는 KR과 같습니다.
+- 내용: KIS 해외뉴스종합(제목) 피드(`HHPSTH60100C1`). 연합미국·글로벌ETF·한국투자증권·연합차이나 등 한국어 제목,
+  기사당 태그 종목 1개(심볼·한글 종목명), `provider_code` = 국가 코드(US, CN 등), `category` = 분류(종목리포트·특징주·시황·ETF 등).
+- 과거 조회는 약 2025-10부터 가능합니다. 한 번에 약 10건, 하루 약 90~160건(10~18회 호출).
+- 수집: `tools/collect_kr_news_titles.py --market us live|backfill|prune` (KR과 같은 수집기, 읽기 전용 KIS 호출)
+- 조회: `prism_core.kr_news_store.search(store.connect(store.db_path("US")), ...)`.
+
+## US 세부 테마 지도 (참고 자료)
+
+- 경로: `runtime/us_theme_map_v3.json`(시총 상위 1000 ∪ 거래대금 상위 500, 현재본), `runtime/us_theme_map_v2.json`(시총 상위 1000), `runtime/us_theme_map_v1.json`(상위 500, 첫 빌드). KR `runtime/kr_theme_map_v1.json`과 같은 `{meta, themes}` 모양이고, 검토표는 `runtime/us_theme_map_<버전>_review.md`입니다 (Git ignored).
+- 만들기: `tools/build_us_theme_map.py --top 1000 --top-value 500 --map-version v3` (시총 상위 N ∪ 60거래일 평균 거래대금 상위 M(시총 10억 달러 이상) → 1년 일간 종가의 SPY 제거 잔차 상관 → 평균 연결 군집 → AI 이름·배정 → 기사 종목 → 사용자 수정 → US 뉴스 제목 근거). 중간 파일과 이어하기 파일은 `--workdir`에 둡니다. 모델 단계 캐시가 있으면 다시 돌려도 모델을 부르지 않습니다.
+- 사용자 수정: `prism_core/data/us_theme_overrides.json`(Git 추적). 매 빌드의 마지막 단계로 적용합니다. `themes`는 대상 테마 정의(`anchor` 종목이 든 테마 → 같은 이름 테마 → 새로 만듦), `assign`은 종목의 테마를 목록으로 바꾸고, `add`는 테마를 더합니다. 수정된 소속은 종목당 3개 제한에서 빠지지 않고 자동 소속이 대신 빠집니다. 목록 밖 종목은 건너뛰고 `meta.overrides`에 기록합니다. `--overrides ''`로 끌 수 있습니다.
+- 테마 필드: `lines` = 묶음이 시장과 따로 함께 움직인 날 수, `active_days` = 그날들과 평균 등락률, `mean_corr` = 평균 잔차 상관, 종목 `corr`·`share`·`role`(core = 가격 묶음, ai, news, override = 사용자 수정), `evidence` = 관련 제목 수와 표본.
+- 설명 자료로만 씁니다. 스크리닝·점수·매매 판단에 넣지 않습니다.
+
+## US 테마 흐름 (얼럿용)
+
+- 경로: `runtime/us_theme_flow.json` (Git ignored). `tools/build_us_theme_flow.py --mode morning|afternoon`이 US 배치 몇 분 전
+  (db-server cron, 뉴욕 시간 10:09·14:24) 테마 지도(`runtime/us_theme_map_vN.json` 최신판) 구성 종목 시세를 yfinance로 받아
+  테마별 중앙값 등락·상승 비율·대표 종목·관련 제목 1건을 저장합니다(약 3분, 모델 호출 없음).
+- US 시그널 얼럿은 이 파일이 같은 거래일·30분 이내면 "오늘 테마 흐름"을 붙이고, 아니면 업종 ETF 한 줄로 대신합니다.
+
 ## 운영 점검 명령
 
 ```bash

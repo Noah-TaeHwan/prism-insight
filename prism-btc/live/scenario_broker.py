@@ -424,6 +424,8 @@ class ScenarioDemoBroker(ScenarioExecution):
         from live.scenario_recovery import risk_fraction
         fraction = risk_fraction(self._recovery_state(), active["scenario_id"] if active else None)
         children=self.children(active["scenario_id"]) if active else []
+        from live.scenario_entry_thesis import entry_thesis
+        initial_entry_evidence = entry_thesis(self.conn, active, children, observed)
         pending=[self._pending_entry(c)
             for c in children if c["kind"]=="entry" and c["status"]=="LIVE" and c["evidence"]]
         daily=self._daily(observed)
@@ -446,7 +448,18 @@ class ScenarioDemoBroker(ScenarioExecution):
             observed_at=observed["captured_at"], now=self.clock(), pending_entries=pending,
             initial_equity=active["initial_equity"] if active else observed["equity"],
             estimated_cost_rate=.002, slippage_bps=20, price_tick=instrument["tick"])
-        return dict(scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
+        from core.scenario_stop_policy import build_stop_policy
+        from live.scenario_recovery import managed_permit
+        state = self._recovery_state()
+        breaker = state.get("breaker", {})
+        stop_policy = build_stop_policy(active,
+            hard_blocked=not self._new_risk_enabled() or not daily.get("new_risk_allowed", False),
+            permit_valid=not breaker.get("blocked", False) or bool(
+                set(breaker.get("reasons", [])) == {"three_losses"} and managed_permit(state, active)),
+            accounting_status="confirmed" if financial_ok else "pending", protection_ok=protection,
+            legacy_fenced=observed["legacy_fenced"], pending_entries=pending, positions=accounting["positions"],
+            unknown_intents=any(c["status"] == "UNKNOWN" or not c["evidence"] for c in children))
+        return dict(entry_thesis=initial_entry_evidence, stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
             account_captured_at=observed["captured_at"], runner_economics=review_finance,
             target_status=[dict(target_id=c["local_id"],kind=c["kind"],status=c["status"],
                 intent_id=c["intent_id"],
@@ -498,6 +511,19 @@ class ScenarioDemoBroker(ScenarioExecution):
                 self._query_child(child)
             except Exception:
                 unknown=True
+        observed=self.capture_account()
+        if observed["legacy_fenced"] and not unknown:
+            try:
+                self._recover_parent_linked_native(active)
+                observed=self.capture_account()
+                if observed["legacy_fenced"]:
+                    unknown=True
+                    self._save("native_parent_recovery_blocked",dict(scenario_id=active["scenario_id"],
+                        reason="position_change_without_exact_parent_evidence"))
+            except Exception:
+                unknown=True
+                self._save("native_parent_recovery_blocked",dict(scenario_id=active["scenario_id"],
+                    reason="native_parent_evidence_unverified"))
         try:
             daily=self._daily(observed)
             state=json.loads(self.conn.execute("SELECT body FROM llm_scenario_state WHERE id=1").fetchone()[0])
@@ -559,7 +585,9 @@ class ScenarioDemoBroker(ScenarioExecution):
                         self._cancel(child)
                     except Exception:
                         unknown=True
-        if self.execution_enabled and not (halted or expired or not protection or stop_hit or unknown):
+        latest=self.conn.execute("SELECT payload FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid DESC LIMIT 1",(active["scenario_id"],)).fetchone()
+        exiting=bool(latest and json.loads(latest[0])["action"]=="EXIT")
+        if self.execution_enabled and not exiting and not (halted or expired or not protection or stop_hit or unknown):
             try:
                 self._autochase(active,self.capture_account())
             except Exception:
@@ -572,6 +600,13 @@ class ScenarioDemoBroker(ScenarioExecution):
                 except Exception:
                     unknown=True
         protection=self._verify_protection(observed,active["hard_stop"],active["side"])
+        if exiting and self.execution_enabled and not stop_hit and not unknown and not observed["legacy_fenced"]:
+            try:
+                if self._continue_unsubmitted_exit(active):
+                    observed=self.capture_account()
+                    protection=self._verify_protection(observed,active["hard_stop"],active["side"])
+            except Exception:
+                unknown=True
         children=self.children(active["scenario_id"])
         if (stop_hit or not protection) and self.execution_enabled and not unknown and not observed["exchange_flat"] and not observed["legacy_fenced"]:
             # A fill racing the terminal hard stop must not restart the thesis.
@@ -583,7 +618,9 @@ class ScenarioDemoBroker(ScenarioExecution):
                 emergency=[c for c in self.children(active["scenario_id"]) if c["kind"]=="exit" and c["local_id"].startswith("hard-stop-race:")]
                 # One bounded residual attempt per reconciliation. Never issue
                 # another until the prior IOC has exact terminal fill proof.
-                if not emergency or emergency[-1]["status"]=="TERMINAL":
+                pending_exit=any(c["kind"]=="exit" and c["status"]!="TERMINAL"
+                                 for c in self.children(active["scenario_id"]))
+                if not pending_exit and (not emergency or emergency[-1]["status"]=="TERMINAL"):
                     self._submit(json.loads(parent[1]),parent[0],"exit","hard-stop-race:"+str(len(emergency)),
                         dict(side="Sell" if active["side"]=="LONG" else "Buy",orderType="Market",
                             qty=str(size),reduceOnly=True,closeOnTrigger=True))
@@ -598,6 +635,8 @@ class ScenarioDemoBroker(ScenarioExecution):
                 if plan["action"]=="EXIT":
                     break
                 if plan["action"] in ("OPEN","ADJUST"):
+                    if plan.get("stop_revision") and not self._stop_revision_evidence("stop_revision_confirmed", ident):
+                        break
                     try:
                         self._sync_exits(plan,ident)
                     except Exception:
@@ -612,7 +651,9 @@ class ScenarioDemoBroker(ScenarioExecution):
                 continue
             if not group:
                 cancelled=all(any(c["kind"]=="entry" and (c["local_id"]==entry or c["order_id"]==entry) and c["status"]=="TERMINAL" for c in children) for entry in payload.get("cancel_entry_ids",[]))
-                adjusted=payload["action"]=="ADJUST" and not payload.get("entries") and self._verify_protection(observed,payload["hard_stop"],active["side"])
+                adjusted=(payload["action"]=="ADJUST" and not payload.get("entries")
+                    and (not payload.get("stop_revision") or self._stop_revision_evidence("stop_revision_confirmed", ident))
+                    and self._verify_protection(observed,payload["hard_stop"],active["side"]))
                 no_submit=payload["action"]=="OPEN" and observed["exchange_flat"] and not observed["open_orders"]
                 batch=self.conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id=?",(ident,)).fetchone()
                 # Children are durable BEFORE any submit. An explicitly aborted
@@ -653,6 +694,40 @@ class ScenarioDemoBroker(ScenarioExecution):
                 financial_pending=accounting.get("status")!="confirmed"
             except Exception:
                 financial_pending=True
+        # A failed weakening must not permanently block future WAIT/EXIT. Only
+        # release its intent after restoring the prior stored stronger Full SL
+        # and independently reconciling all fills, fees and remaining orders.
+        if (protection and not unknown and not financial_pending and accounting
+                and accounting.get("status") == "confirmed" and not observed["legacy_fenced"]
+                and all(c["evidence"] and c["status"] != "UNKNOWN" for c in children)
+                and not any(c["kind"] == "entry" and c["status"] != "TERMINAL" for c in children)):
+            from core.scenario_stop_policy import is_widening
+            for ident, body, batch_status in self.conn.execute(
+                    "SELECT i.id,i.payload,b.status FROM llm_scenario_intents i "
+                    "JOIN llm_scenario_execution_batches b ON b.intent_id=i.id "
+                    "WHERE i.scenario_id=? AND i.status!='TERMINAL' "
+                    "AND b.status IN ('ABORTED','INTERRUPTED','ABORTED_RESTORED')", (active["scenario_id"],)).fetchall():
+                plan = json.loads(body)
+                if (plan.get("action") != "ADJUST" or not plan.get("stop_revision")
+                        or self._stop_revision_evidence("stop_revision_confirmed", ident)
+                        or not is_widening(active["side"], plan["hard_stop"], active["hard_stop"])):
+                    continue
+                attempt = self._stop_revision_evidence("stop_revision_attempt", ident)
+                previous = attempt["old_stop"] if attempt else active["hard_stop"]
+                if not self._verify_protection(observed, previous, active["side"]):
+                    continue
+                if batch_status != "ABORTED_RESTORED":
+                    self.conn.execute("INSERT INTO llm_scenario_broker_evidence VALUES(?,?,?)", (
+                        "stop_revision_aborted_restored", self.clock(), json.dumps(dict(
+                            intent_id=ident, scenario_id=active["scenario_id"], status="ABORTED_RESTORED",
+                            requested_stop=plan["hard_stop"], restored_stop=observed["position"]["stopLoss"],
+                            accounting_status="confirmed", captured_at=observed["captured_at"]), sort_keys=True)))
+                    self.conn.execute("UPDATE llm_scenario_execution_batches SET status='ABORTED_RESTORED' WHERE intent_id=?", (ident,))
+                if not any(item["intent_id"] == ident for item in items):
+                    items.append(dict(intent_id=ident, terminal=True, protection_ok=True,
+                        orders_reconciled=True, executions_complete=True, execution_ids=[],
+                        filled_quantity=0., exchange_order_ids=[], open_entries=[],
+                        stop_revision_status="ABORTED_RESTORED"))
         # Notification enrichment is optional. Its SQL and rendering failures
         # must never roll back verified execution/accounting or prevent the
         # runtime from receiving the reconciliation result.

@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import logging
 import json
+import hashlib
 import math
 import os
 from datetime import datetime, timedelta, timezone
@@ -182,6 +183,15 @@ def _check_error_burst(conn, mode: str, now: datetime) -> dict | None:
     if len(recent) > _ERROR_MAX_COUNT:
         latest = max(recent, key=lambda row: _parse_ts(row["ts"]))
         last_error = _parse_ts(latest["ts"])
+        # Only this known repaired input failure can age out early. Unknown/future
+        # timestamps or a truncated error window cannot prove complete recovery.
+        timestamps_known = all(_parse_ts(row['ts']) is not None and
+                               _parse_ts(row['ts']) <= now for row in rows)
+        oldest_age = _age_minutes(rows[-1]['ts'], now)
+        complete_window = len(rows) < 200 or (oldest_age is not None and oldest_age > _ERROR_WINDOW_HOURS*60)
+        if (mode == 'demo' and timestamps_known and complete_window
+                and _recovered_input_size_burst(conn, recent, last_error, now)):
+            return None
         last_msg = str(latest["message"])[:120]
         action = ""
         if "api_key_expired" in last_msg:
@@ -194,6 +204,76 @@ def _check_error_burst(conn, mode: str, now: datetime) -> dict | None:
                         f"마지막 오류: {_kst_time(last_error)} ({age:.0f}분 전; {last_msg})\n"
                         f"{_completion_context(conn, mode, last_error, now)}{action}")}
     return None
+
+
+def _recovered_input_size_burst(conn, errors, last_error: datetime, now: datetime) -> bool:
+    """Read-only proof of two actual post-error WAITs, not protection-only recovery."""
+    expected = ('scenario tick blocked: llm_input_preparation_failed; '
+                'failure_stage=model_input_preparation; failure_code=input_size')
+    if not errors or any(row['message'] != expected for row in errors):
+        return False
+    current, failed_at = now.timestamp(), last_error.timestamp()
+
+    def valid_time(value):
+        return type(value) in (int, float) and math.isfinite(value) and failed_at < value <= current
+
+    try:
+        incident = conn.execute('SELECT active FROM llm_scenario_model_incident WHERE id=1').fetchall()
+        if len(incident) != 1 or type(incident[0][0]) is not int or incident[0][0] != 0:
+            return False
+        health = {}
+        for lane, status, maximum_age in (('decision', 'wait', 600), ('protection', 'protection_checked', 180)):
+            item = json.loads(tracking.get_meta(conn, 'scenario_health_'+lane, 'demo'))
+            if item.get('status') != status or not valid_time(item.get('at')) or current-item['at'] > maximum_age:
+                return False
+            health[lane] = item
+        decisions = conn.execute('SELECT slot,context,proposal,outcome FROM llm_scenario_decisions ORDER BY slot DESC LIMIT 2').fetchall()
+        if len(decisions) != 2 or decisions[0]['slot'] == decisions[1]['slot']:
+            return False
+        # No slot/kind index exists: bound the rowid tail before joining in memory.
+        wire = conn.execute('SELECT slot,kind,observed_at,body FROM llm_scenario_recovery_events ORDER BY rowid DESC LIMIT 128').fetchall()
+        observed, input_ids = [], []
+        for decision in decisions:
+            ctx, proposal, outcome = (json.loads(decision[key]) for key in ('context', 'proposal', 'outcome'))
+            stamp, input_id = ctx.get('now'), ctx.get('input_id')
+            if (not valid_time(stamp) or stamp > health['decision']['at']
+                    or type(decision['slot']) is not int or int(stamp//300) != decision['slot']
+                    or not isinstance(input_id, str) or not input_id
+                    or proposal.get('action') != 'WAIT' or proposal.get('input_id') != input_id
+                    or outcome.get('status') != 'wait'):
+                return False
+            observed.append(stamp)
+            input_ids.append(input_id)
+            records = {}
+            for kind in ('MODEL_REQUEST', 'MODEL_RAW'):
+                matches = [row for row in wire if row['slot'] == decision['slot'] and row['kind'] == kind]
+                if len(matches) != 1:
+                    return False
+                row = matches[0]
+                if (not valid_time(row['observed_at']) or not stamp <= row['observed_at'] <= health['decision']['at']):
+                    return False
+                body = json.loads(row['body'])
+                if body.get('input_id') != input_id:
+                    return False
+                records[kind] = (row['observed_at'], body)
+            request_at, request = records['MODEL_REQUEST']
+            raw_at, response = records['MODEL_RAW']
+            fields = ('system_prompt', 'user_prompt', 'response_schema', 'model', 'effort', 'fast')
+            request_data = {key: request[key] for key in fields}
+            if 'input_projection' in request:
+                request_data['input_projection'] = request['input_projection']
+            request_hash = hashlib.sha256(json.dumps(request_data, sort_keys=True, ensure_ascii=False,
+                                                     allow_nan=False).encode()).hexdigest()
+            raw = response['raw']
+            raw_proposal = json.loads(raw)
+            if (raw_at < request_at or request.get('request_hash') != request_hash
+                    or json.loads(request['user_prompt'])['contract_context']['input_id'] != input_id
+                    or hashlib.sha256(raw.encode()).hexdigest() != response.get('sha256')
+                    or raw_proposal.get('action') != 'WAIT' or raw_proposal.get('input_id') != input_id):
+                return False
+        return current-observed[0] <= 600 and observed[0] > observed[1] and len(set(input_ids)) == 2
+    except Exception:  # Missing/ambiguous evidence keeps the existing alert; never repairs DB.
+        return False
 
 
 def _intentional_flat_halt(conn, now: datetime) -> bool:
@@ -223,6 +303,27 @@ def _intentional_flat_halt(conn, now: datetime) -> bool:
                 and protection.get("verified_flat") is True)
     except Exception:
         return False
+
+
+def _check_scenario_decision_halted(conn, mode: str, now: datetime) -> dict | None:
+    """Distinguish a proven pre-model halt from an actual market WAIT decision."""
+    if mode != "demo" or not _intentional_flat_halt(conn, now):
+        return None
+    try:
+        from live.scenario_control import read_control
+        if read_control(conn)["state"] == "paused":
+            return None  # An explicit operator pause is not an unexpected halt.
+        state = json.loads(conn.execute(
+            "SELECT body FROM llm_scenario_state WHERE id=1").fetchone()[0])
+        recovery = state.get("recovery")
+        reason = ("시험매매 종료 후 검토 대기 · "
+                  if isinstance(recovery, dict) and recovery.get("phase") == "DONE_REVIEW_REQUIRED"
+                  else "")
+        return {"level": "warn", "code": "decision_halted",
+                "msg": (reason + "보호 점검은 정상이나 LLM 시장 판단 호출 전 신규 진입이 차단되어 있습니다. "
+                        "시장 관망 판단과 다릅니다.")}
+    except Exception:  # noqa: BLE001 — unavailable evidence must not invent a halt
+        return None
 
 
 def _check_price_stale(conn, mode: str, now: datetime) -> dict | None:
@@ -361,6 +462,7 @@ _CHECKS = (
     _check_daemon,
     _check_error_burst,
     _check_price_stale,
+    _check_scenario_decision_halted,
     _check_equity,
     _check_stale_positions,
     _check_shadow_divergence,
@@ -405,6 +507,7 @@ _CODE_TAG = {
     "daemon_down": "데몬정지",
     "error_burst": "에러폭주",
     "price_stale": "시세정지",
+    "decision_halted": "판단중단",
     "equity_missing": "자산없음",
     "equity_zero": "자산이상",
     "stale_position": "포지션고착",

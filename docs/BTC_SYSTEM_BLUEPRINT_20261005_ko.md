@@ -267,6 +267,51 @@ MA는 잠재 지지·저항이며 보장된 반등선이 아니다. 형성 중 �
 
 ## 확인한 근거
 
+### 2026-10-09 실행 연속성 보완 계약 (M0.1/M0.2)
+
+- 대상: 1분 관측 사이에 진입과 native SL이 모두 체결된 경우의 소유권 복구와,
+  TP 취소 접수 후 종료 확인을 기다리던 EXIT의 후속 집행이다. 전략 변경이 아니다.
+- SL 근거: 선물에 부착된 TP/SL의 `parentOrderLinkId`는 원래 진입 주문을 가리키며,
+  trading-stop으로 수정해도 유지된다. [Bybit 주문 이력 규격](https://bybit-exchange.github.io/docs/v5/order/order-list)을
+  확인했고, 실제 최근 3건의 보존 native SL 행에서도 해당 부모 ID와 진입 link ID가 일치했다.
+- 가격·시간·손익이 비슷하다는 이유로 SL을 소유 주문으로 채택하지 않는다.
+  정확한 부모 연결, 시나리오·방향·종목·positionIdx·SL 종류·reduceOnly 및 개별 order ID의
+  전체 체결을 검증하고 기존 금융 정산 대조를 유지한다. 부모 ID 없는 과거 응답은 미확정이다.
+- EXIT 재개는 같은 영속 청산 의도와 제출 전 자식 기록을 사용한다. 취소 ACK를 종료로 보지 않고,
+  정확한 취소/체결 확인 후 최신 보유량만 reduceOnly로 청산한다. UNKNOWN 제출은 재전송하지 않는다.
+  보호 SL 경합·부분 체결·재시작·같은 틱 재관측에서 중복 청산을 검사한다.
+- 백테스트 가상 거래소에는 실제 부모 ID 필드를 반영하되, 필드 누락·틀린 부모·다른 시나리오·
+  불완전 체결은 실패하도록 반례를 유지한다. 가상 상태를 강제로 flat이나 정산 완료로 만들지 않는다.
+- 검증/롤백 범위: 실행기·브로커·가상 거래소와 관련 테스트만 변경한다. 정책/예산/cron은 유지하고,
+  문제 발생 시 이 실행 변경을 되돌리는 새 커밋을 배포한다. 운영 DB·주문·원장 삭제로 복구하지 않는다.
+
+### 2026-10-09 백테스트 정책·초기 상태 계약
+
+`analysis.scenario_replay`의 기본 `--policy-profile current-live-v2`는 운영과 같은
+회복·자동 정상화 기능을 켠다. `--initial-state fresh-unblocked`는 과거 손실이 없는 새 계좌로
+시작하며, `--initial-state recovery-stage0`는 0.5% 관측 단계의 합성 시작 조건을 명시한다.
+후자는 실제 계좌·과거 거래·손익·승격 표본을 가져오지 않는다. 첫 관측 WAIT와 실제 runtime의
+허가 검사를 거쳐야 한다. 비교 실험은 두 전략의 초기 상태·자산·비용을 같게 맞춘다.
+
+`legacy-no-recovery`는 **현재 코드와 프롬프트에서 회복 기능만 끈 비교 모드**다. 과거 본 로직+
+스윙 전략이나 과거 배포 버전이라는 뜻이 아니다. schema1 기록은 원래 코드로 재생해야 하며,
+새 도구가 schema2/현재 정책으로 몰래 재분류하지 않는다. frozen 모드는 같은 소스·데이터·정책·
+초기 상태·입력과 원응답을 확인하고 외부 모델을 호출하지 않는다.
+
+새 시작 디렉터리와 새 기록 파일을 지정하는 예시:
+
+```bash
+python -m analysis.scenario_replay --input /path/to/verified-bundle.json \
+  --output /path/to/new-research-run --tape /path/to/new-tape.jsonl --mode fresh \
+  --policy-profile current-live-v2 --initial-state recovery-stage0
+```
+
+fresh의 모델 연결은 기존 명시적 loopback OAuth만 허용된다. 위 명령은 가상거래소를 사용하며
+운영 주문 명령이 아니다. 1분봉 안의 OHLC/OLHC 순서,유동성·슬리피지 가정은 실제 틱과 다르다.
+미정산·UNKNOWN·fenced는 완료 거래/확정 수익으로 처리하지 않는다. `economic.halted`는
+이전 차단 latch의 호환 필드이므로 현재 진입 가능 여부로 단독 해석하지 말고 `recovery_state`와
+결과 사유를 함께 본다. 이 도구 보완은 수익성 입증이 아니다.
+
 - `prism-btc/live/scenario_llm.py`: 판단 프롬프트·모델·75초 호출 제한·strict 출력.
 - `prism-btc/engine/scenario_snapshot.py`: 진행봉·MA·다중 시간봉 관측.
 - `prism-btc/core/llm_scenario.py`: 위험 산식·중단·상태별 행동·추격 한도.

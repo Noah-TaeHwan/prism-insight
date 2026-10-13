@@ -27,7 +27,7 @@ def response_contract(context):
         "side": "LONG | SHORT for OPEN/ADJUST; null for WAIT/EXIT",
         "confidence": "number 0..1 (NOT calibrated win probability)",
         "expires_at": context["now"] + 300,
-        "hard_stop": "positive price for OPEN/ADJUST; no widening; null for WAIT/EXIT",
+        "hard_stop": "positive price for OPEN/ADJUST; widening only under enabled stop_policy with valid stop_revision; null for WAIT/EXIT",
         "entries": [{"id":"unique", "price":"positive number", "quantity":"positive BTC number"}],
         "take_profits": [{"id":"unique", "price":"positive number", "fraction":"number >0..1"}],
         "partial_stops": [{"id":"unique", "price":"positive number", "fraction":"number >0..1"}],
@@ -49,6 +49,11 @@ def response_contract(context):
                   "For each lot D=price-hard_stop for LONG, hard_stop-price for SHORT. New/pending entries require D>0; filled positions allow profitable stops using max(0,D). Lot risk=quantity*(max(0,D)+price*estimated_cost_rate+hard_stop*slippage_bps/10000).",
                   "Total risk=realized_loss+fees_paid+funding_paid+filled lot risk+ALL current pending lot risk+new lot risk. For new entries total risk <= budget; requested cancellation does not remove pending risk. Unknown costs are not zero.",
                   "New order risk <= ORIGINAL budget*confidence AND remaining budget, not remaining budget*confidence. Round quantity DOWN to the supplied quantity_step and obey minimum_quantity/minimum_notional and price_tick. Code is the final risk/precision authority."]}
+    if (context.get("stop_policy") or {}).get("version") == 1:
+        contract["stop_revision"] = {"reason": "fresh structural reason, 1..240 chars",
+            "structure_reference": "observed timeframe/structure, 1..240 chars", "input_id": context["input_id"]}
+        contract["rules"].append("stop_revision is null unless requesting an ADJUST restoration. Only host widening_eligible permits it: no entries/pending/cancellations, exact original initial_hard_stop boundary, current old stop not touched, unchanged budget including costs and ALL remaining full-stop risk. Protective WAIT/EXIT/tightening need no restoration metadata. Legacy missing anchor never becomes an invented new anchor.")
+        contract["rules"].append("Restoration is new risk even with entries=[] and requires total risk<=existing scenario budget. Pending partial stops do not release reserved risk. Choose structural invalidation then size down; recovery caps do not require artificially tight stops.")
     if context.get("review_contract_version") == 1:
         contract["review"] = {"conditions": [{"source": "MARK_PRICE", "operator": "ge | le", "price": "positive numeric threshold"}],
                               "acknowledgements": [{"id": "exact review_memory host ID", "disposition": "hold | replace", "reason": "1..240 characters explaining decision"}]}

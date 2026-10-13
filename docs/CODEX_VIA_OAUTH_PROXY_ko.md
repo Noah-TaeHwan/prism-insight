@@ -5,7 +5,7 @@
 리포트(`cores/chatgpt_proxy`, `chatgpt_auth.json`)와 BUY/SELL(codex CLI, `/root/.codex-prism/auth.json`)이
 **로그인 세션을 따로** 가지고 있었다. OAuth refresh 토큰은 1회용(rotation)이라 한 세션을 두 프로그램이
 나눠 쓰면 한쪽 갱신 때 다른 쪽이 로그아웃된다. 그래서 계정을 바꿀 때마다 추가 로그인(브라우저/기기 코드)이
-필요했고, 실제로 BUY/SELL과 리포트가 서로 다른 계정(munsangrok / dragon1086)을 쓰게 됐다.
+필요했고, 실제로 BUY/SELL과 리포트가 서로 다른 계정(매매용 / 리포트용)을 쓰게 됐다.
 
 ## 구조 (2026-09-29부터)
 
@@ -54,6 +54,6 @@ fast_mode = true
 
 ## 계정별 추론 강도 (2026-09-30)
 
-`PRISM_CODEX_EFFORT_BY_ACCOUNT="dragon1086@naver.com=medium,munsangrok@gmail.com=xhigh"`를 매매 cron에 두면,
+`PRISM_CODEX_EFFORT_BY_ACCOUNT="reporter@example.com=medium,trader@example.com=xhigh"`를 매매 cron에 두면,
 실행 시점에 `chatgpt_auth.json`의 활성 계정 이메일을 읽어 BUY/SELL effort를 고른다. 매핑에 없거나 파일을 읽을
 수 없으면 기존 `PRISM_{BUY,SELL}_CODEX_EFFORT`를 쓴다. 계정만 바꾸면 강도가 따라 바뀐다.

@@ -96,16 +96,20 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         O'Neil principle: **never buy a stock below a declining moving average (no falling knives).**
         Regardless of market regime, momentum, capital inflow, or a bullish report, if the stock's OWN
         trend matches any below → **No Entry**:
-        - (T1) Close below the 50-day (or 60-day) MA — a break of O'Neil's 10-week line (a pullback above a rising MA is fine; losing the line is trend damage)
-        - (T2) The 20-day MA is sloping down AND close is ≥5% below the 20-day MA — a sharp early breakdown
+        - (T1) Current price at decision time below the 50-day (or 60-day) MA — a break of O'Neil's 10-week line (a pullback above a rising MA is fine; losing the line is trend damage)
+        - (T2) The 20-day MA is sloping down AND the current price is ≥5% below the 20-day MA — a sharp early breakdown
         Use the provided '개별 추세 팩트 / Individual Trend Facts' input and report section '1-1 Price'
         (if facts absent, judge conservatively from the report).
         **Only cite a moving average that appears in the facts block.** If a line is marked
         데이터 없음, or is not listed at all, do not assert where price sits relative to it and do not
         call it support or resistance — say the data is unavailable instead. A market index's
         200-day MA is the index's, never the stock's.
-        **Exception (entry allowed)** only when the stock reclaims/breaks above the declining MA with
-        volume, confirming a trend change. "It looks like it will bounce soon" is NOT an exception.
+        Judge T1/T2 at any time of day from the facts block's current price and the system's T1_hit/T2_hit;
+        do not re-judge them from the previous close or the report's older prices (the final buy check uses the
+        same current price). **Exception (entry allowed)**: if the previous close was below the 50-day MA but the
+        current price has reclaimed it (T1_hit=False), T1 does not apply; cite rising volume in the rationale as
+        trend-change evidence. While the current price is still below the 50-day MA (T1_hit=True), "it looks like
+        it will bounce soon" is NOT an exception.
         State the trend basis in rejection_reason (No Entry) or rationale (exception entry).
 
         ## Step 1.6 — Repeat Stop-Out Gate (mandatory)
@@ -118,6 +122,10 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         ## Step 2 — Market-Regime Entry Matrix (single source of truth)
 
         Apply only after the Fundamental Gate is evaluated.
+        min_score column: when a "Micro-split entry threshold" appendix follows this instruction, its minimum score
+        replaces this column (with the exceptions it states); without that appendix, use this column, but the
+        system's regime floor applies when it is higher (sideways / moderate_bear 8, strong_bear 9, sideways with an
+        UPTREND market pulse 7).
 
         | Regime | min_score | R/R floor | Max stop | Momentum signals | Extra confirmations |
         |--------|-----------|-----------|----------|------------------|---------------------|
@@ -152,9 +160,10 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         counted **deterministically** in `index_summary.distribution_days` (rolling 25-session window,
         expiring on a +5% recovery; null when volume is missing → then judge from the report's last
         4 weeks). The HIGHER this count of distribution days, the more institutional selling is underway.
-        - When it is elevated (≈5-6 or more), apply ONE step of caution to NEW BUYS ONLY
-          (parabolic → strong_bull, strong_bull → moderate_bull, moderate_bull → sideways): raise the bar
-          for new entries / parabolic sizing.
+        - When it is **6 or more**, the system steps the regime down ONE level for NEW BUYS ONLY
+          (parabolic → strong_bull, strong_bull → moderate_bull, moderate_bull → sideways, sideways → moderate_bear,
+          moderate_bear → strong_bear, strong_bear stays). Judge new buys with the stepped-down regime's matrix row
+          (min_score, R/R floor, max stop, momentum signals, extra confirmations); the final buy check applies the same row.
         - Do NOT change sell or trailing-stop decisions for existing holdings — those keep the original
           regime. Distribution days never force an early exit.
         - State the distribution_days value and any new-buy caution in the `market_condition` field.
@@ -228,7 +237,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         2. PER ≥ 2.5× industry average (extreme overvaluation)
         3. Fundamental Gate fail in sideways / bear regime
         4. Direct victim of a "high" severity risk event (cite event + impact path)
-        5. effective_score < min_score for the current regime
+        5. effective_score < min_score (the micro-split appendix's minimum when that appendix is present; otherwise the matrix value for the current regime)
 
         **Compound (BOTH required):**
         6. (RSI ≥ 85 OR 20d-MA deviation ≥ +25%) AND (foreign + institutional net selling ≥ 5 sessions)
@@ -244,7 +253,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         - **9~10**: All 4 fundamental checks strong + 3+ momentum signals + clear trend (above a rising 50-day MA)
         - **7~8**: F1~F4 pass + 2+ momentum signals + Step 1.5/1.6 gates pass
         - **5~6**: F1~F4 pass + 1 momentum signal + Step 1.5/1.6 gates pass (conditional zone)
-        - **3~4**: F1~F4 pass + zero momentum signals (a no-entry zone because the matrix momentum condition fails), or F1~F4 pass but the stock is a no-entry under the Step 1.5 trend gate or the Step 1.6 repeat stop-out gate. A gated stock never scores above 4 however strong its fundamentals or momentum, and the trend gate alone does not push it down to 1~2. When the Step 1.5 exception (volume-backed reclaim of the moving average) holds, the gate counts as passed and the score is assigned normally.
+        - **3~4**: F1~F4 pass + zero momentum signals (a no-entry zone because the matrix momentum condition fails), or F1~F4 pass but the stock is a no-entry under the Step 1.5 trend gate or the Step 1.6 repeat stop-out gate. A gated stock never scores above 4 however strong its fundamentals or momentum, and the trend gate alone does not push it down to 1~2. When the Step 1.5 exception (the current price has reclaimed the 50-day MA, T1_hit=False) holds, the gate counts as passed and the score is assigned normally.
         - **1~2**: Fundamental Gate fails, or clear negative factor (e.g. standalone no-entry reasons 1, 2 or 4). Exception: a stock on the Step 1 bull-regime compensation path (one F check fails, the rationale gives concrete compensating evidence, and rejection_reason is null) is scored by the momentum and gate bands instead, capped at 6 (conditional zone). Without compensating evidence, or with two or more fails, it scores 1~2.
 
         R/R, stop-width and target shortfalls are about price location: do not fold them into the score; state them in rejection_reason only.
@@ -387,7 +396,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
             "buy_score": Integer 1~10,
             "macro_adjustment": -1, 0, or +1,
             "effective_score": buy_score + macro_adjustment,
-            "min_score": Regime-adaptive (parabolic:4, strong_bull:4, moderate_bull:4, sideways:5, moderate_bear:5, strong_bear:6),
+            "min_score": The micro-split appendix's minimum when present; otherwise the regime matrix value (parabolic:4, strong_bull:4, moderate_bull:4, sideways:5, moderate_bear:5, strong_bear:6),
             "momentum_signal_count": 0~5,
             "additional_confirmation_count": 0~5,
             "decision": "Enter" or "No Entry",
@@ -497,12 +506,15 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
 
         오닐 원칙: **하락하는 이동평균 아래의 종목은 사지 않는다(떨어지는 칼 금지).**
         시장 체제·모멘텀·자금 유입·보고서 강세와 무관하게, 종목 자신의 추세가 아래에 해당하면 **미진입**:
-        - (T1) 종가가 50일선(또는 60일선) 아래 — 오닐 10주선 이탈 (상승 이동평균 위 눌림목은 정상, 라인 이탈은 추세 훼손)
-        - (T2) 20일선이 하향이고 종가가 20일선 대비 5% 이상 아래 — 급격한 초기 붕괴
+        - (T1) 판단 시점 현재가가 50일선(또는 60일선) 아래 — 오닐 10주선 이탈 (상승 이동평균 위 눌림목은 정상, 라인 이탈은 추세 훼손)
+        - (T2) 20일선이 하향이고 현재가가 20일선 대비 5% 이상 아래 — 급격한 초기 붕괴
         입력으로 제공되는 '개별 추세 팩트' 섹션과 보고서 '1-1 가격'을 사용해 판정하십시오
         (팩트가 없으면 보고서로 보수적으로 판단).
-        **예외(진입 허용)**: 하락 이동평균을 거래량 동반으로 상향 돌파·회복하여 추세 전환이
-        확인된 경우에 한함. "곧 반등할 것 같다"는 기대는 예외가 아니다.
+        T1·T2는 시간대와 관계없이 '개별 추세 팩트'의 현재가와 시스템이 계산한 T1_hit/T2_hit로 판정하고,
+        직전 종가나 보고서의 과거 가격으로 다시 판정하지 마십시오(최종 매수 검증도 같은 현재가 기준입니다).
+        **예외(진입 허용)**: 직전 종가가 50일선 아래였더라도 현재가가 50일선 위로 회복했으면(T1_hit=False)
+        T1이 아닙니다. 거래량이 함께 늘었으면 추세 전환 근거로 rationale에 적으십시오. 현재가가 아직
+        50일선 아래(T1_hit=True)인데 "곧 반등할 것 같다"는 기대는 예외가 아닙니다.
         미진입 시 rejection_reason에, 예외 진입 시 rationale에 추세 근거를 명시하십시오.
 
         ## 1.6단계 — 상습 손절 종목 게이트 (필수)
@@ -514,6 +526,9 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         ## 2단계 — 시장 체제별 진입 매트릭스 (단일 기준점)
 
         펀더 게이트 평가가 끝난 후에만 적용하십시오.
+        min_score 열: 이 지시문 뒤에 '초분할 진입 기준' 부록이 붙어 있으면 그 부록의 최소 점수가 이 열을 대신합니다(부록이 정한
+        예외 포함). 부록이 없으면 이 열을 따르되, 시스템 국면 하한(횡보·moderate_bear 8점, strong_bear 9점, 횡보이면서
+        시장 흐름 UPTREND 7점)이 더 높으면 그 값이 적용됩니다.
 
         | 시장 체제 | min_score | 손익비 floor | 최대 손절폭 | 모멘텀 신호 | 추가 확인 |
         |----------|-----------|------------|----------|----------|--------|
@@ -546,9 +561,10 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         분포일(거래량 동반 -0.2%↓ 마감)은 `index_summary.distribution_days`에 **결정론적으로 집계**됩니다
         (최근 25거래일 윈도우, +5% 회복 시 만료; 거래량 결측이면 null → 보고서 최근 4주 내 분포일로 판단).
         이 값이 높을수록 기관 분배가 진행 중이라는 천장 경고입니다.
-        - 값이 높으면(통상 5~6건 이상) **신규 매수에 한해** regime을 1단계 보수적으로 적용하십시오
-          (parabolic → strong_bull, strong_bull → moderate_bull, moderate_bull → sideways): 신규 진입·parabolic
-          사이징의 문턱만 높입니다.
+        - 값이 **6건 이상**이면 시스템이 **신규 매수에 한해** regime을 1단계 낮춰 판정합니다
+          (parabolic → strong_bull, strong_bull → moderate_bull, moderate_bull → sideways, sideways → moderate_bear,
+          moderate_bear → strong_bear, strong_bear는 그대로). 신규 매수는 낮춘 regime의 매트릭스 행(min_score·손익비 floor·
+          최대 손절폭·모멘텀 신호·추가 확인)으로 판단하십시오. 최종 매수 점검도 같은 기준을 적용합니다.
         - **보유 종목의 매도·trailing 판단은 원래 regime을 그대로 사용**하며, 분산일로 조기 청산하지 않습니다.
         - distribution_days 값과 신규매수 보수화 여부를 `market_condition` 필드에 명시하십시오.
 
@@ -617,7 +633,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         2. PER ≥ 업종 평균 2.5배 (극단적 고평가)
         3. 펀더 게이트 미달 + 시장 체제가 sideways/bear
         4. severity = "high" 리스크 이벤트의 직접 피해 종목 (이벤트명 + 영향 경로 명시 필수)
-        5. effective_score < 현재 regime의 min_score
+        5. effective_score < min_score (초분할 진입 기준 부록이 있으면 그 최소 점수, 없으면 매트릭스의 현재 regime 값)
 
         **복합 사유 (둘 다 충족 시):**
         6. (RSI ≥ 85 OR 20일선 괴리율 ≥ +25%) AND (외국인 + 기관 5거래일+ 순매도)
@@ -632,7 +648,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         - **9~10점**: 펀더 4개 모두 강함 + 모멘텀 3개+ 신호 + 추세 명확 (상승하는 50일선 위)
         - **7~8점**: F1~F4 통과 + 모멘텀 2개+ 신호 + 1.5·1.6단계 게이트 통과
         - **5~6점**: F1~F4 통과 + 모멘텀 1개 신호 + 1.5·1.6단계 게이트 통과 (조건부 진입 영역)
-        - **3~4점**: F1~F4 통과 + 모멘텀 신호 0개(매트릭스 모멘텀 조건 미달이라 미진입 영역), 또는 F1~F4는 통과했지만 1.5단계 추세 게이트·1.6단계 상습 손절 게이트에 걸려 미진입하는 종목. 게이트에 걸린 종목은 펀더·모멘텀이 강해도 4점을 넘지 않고, 추세 게이트 하나만으로 1~2점까지 내리지 않습니다. 1.5단계 예외(거래량 동반 이동평균 회복)가 성립하면 게이트 통과로 보고 정상 산정합니다.
+        - **3~4점**: F1~F4 통과 + 모멘텀 신호 0개(매트릭스 모멘텀 조건 미달이라 미진입 영역), 또는 F1~F4는 통과했지만 1.5단계 추세 게이트·1.6단계 상습 손절 게이트에 걸려 미진입하는 종목. 게이트에 걸린 종목은 펀더·모멘텀이 강해도 4점을 넘지 않고, 추세 게이트 하나만으로 1~2점까지 내리지 않습니다. 1.5단계 예외(현재가의 50일선 회복, T1_hit=False)가 성립하면 게이트 통과로 보고 정상 산정합니다.
         - **1~2점**: 펀더 게이트 미달 또는 명확한 부정 요소 (미진입 단독 사유 1·2·4 해당 등). 단, 1단계의 강세 국면 보완 경로(F 1개 미달 + rationale의 구체적 보완 근거 + rejection_reason null)에 해당하면 1~2점이 아니라 모멘텀·게이트 기준대로 산정하되 최대 6점(조건부 진입 영역)으로 둡니다. 보완 근거가 없거나 2개 이상 미달이면 1~2점입니다.
 
         손익비·손절폭·목표가 미달은 가격 위치의 문제이므로 점수에 반영하지 않고 rejection_reason에만 적습니다.
@@ -772,7 +788,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
             "buy_score": 1~10 정수,
             "macro_adjustment": -1, 0, 또는 +1,
             "effective_score": buy_score + macro_adjustment,
-            "min_score": 시장 체제별 (parabolic:4, strong_bull:4, moderate_bull:4, sideways:5, moderate_bear:5, strong_bear:6),
+            "min_score": 초분할 진입 기준 부록이 있으면 그 최소 점수, 없으면 시장 체제별 매트릭스 값 (parabolic:4, strong_bull:4, moderate_bull:4, sideways:5, moderate_bear:5, strong_bear:6),
             "momentum_signal_count": 0~5,
             "additional_confirmation_count": 0~5,
             "decision": "진입" 또는 "미진입",
@@ -862,8 +878,9 @@ def create_sell_decision_agent(language: str = "ko"):
         You need to comprehensively analyze the data of currently held stocks to decide whether to sell or continue holding.
 
         ### ⚠️ Important: Trading System Characteristics
-        **This system does NOT support split trading. When selling, 100% of the position is liquidated.**
-        - No partial sells, gradual exits, or averaging down
+        **Sells are all-or-nothing: when selling, 100% of the position is liquidated.**
+        - No partial sells, gradual exits, or averaging down (adding to a losing position)
+        - Adding to a position happens only for micro-split holdings, through the add-plan block in the user message and under its rules
         - Only 'Hold' or 'Full Exit' possible
         - Make decision only when clear sell signal, not on temporary dips
         - **Clearly distinguish** between 'temporary correction' and 'trend reversal'
@@ -872,7 +889,10 @@ def create_sell_decision_agent(language: str = "ko"):
 
         ### Step 0: Assess Market Environment (Top Priority Analysis)
 
-        **Must check first for every decision:**
+        When the user message carries the system-computed market regime, use it and skip the self-check below.
+        Run the self-check only when that regime is missing or could not be computed.
+
+        **Self-check (only without the system regime):**
         1. Check KOSPI/KOSDAQ recent 20 days data with get_index_ohlcv
         2. Is it rising above 20-day moving average?
         3. Are foreigners/institutions net buying with get_stock_trading_volume?
@@ -908,10 +928,12 @@ def create_sell_decision_agent(language: str = "ko"):
           unconfirmed. Quote the filing date when you sell.
         - If no event, proceed normally with Core-1~4 technical judgement below.
 
-        **Core-1) Stop loss is intraday; trailing stop is closing-price based:**
+        **Core-1) Stop loss is intraday; the system trailing stop is confirmed at the close:**
         - stop_loss and the absolute -7% stop are executed automatically on the **live intraday price**: once the price is at or below stop_loss × 0.995 (0.5% wick buffer) or 7% or more below entry, the intraday hard stop exits fully without waiting for the close.
         - A brief touch inside the buffer (between stop_loss and stop_loss × 0.995) is not a stop-loss on its own.
-        - Trailing-stop judgements are based on the **closing price**. An intraday low that briefly touches the trailing stop (intraday wick) is NEVER a sell reason on its own.
+        - The system trailing stop (off the post-entry peak) is confirmed by the **pre-close automatic check** (between 15:10 and 15:25 KST) or by a breach over several consecutive days. An intraday low that briefly touches the trailing stop (intraday wick) is NEVER a sell reason on its own.
+        - This sell decision runs before the close (afternoon run around 14:46 KST), so today's close does not exist yet. Use the latest confirmed session close for close-based judgements.
+- But a stop you raise through portfolio_adjustment (new_stop_loss) is executed by the intraday hard stop above. Raising stop_loss to the trailing level makes that level sell on an intraday wick.
         - Use today's close only when the source confirms a completed session and captured-data finality. Otherwise use the latest verified completed session and state its date; time alone cannot finalize a bar.
 
         **Core-2) Interpret buy-scenario take-profit conditions as milestones:**
@@ -928,7 +950,7 @@ def create_sell_decision_agent(language: str = "ko"):
 
         **Core-4) Sell-signal priority (single source of truth):**
         - Tier 1: Absolute sell (live-price loss ≥ -7%, OR live price at or below stop_loss × 0.995 — executed automatically by the intraday hard stop).
-        - Tier 2: Trailing-stop closing breach (only if activated per Core-3).
+        - Tier 2: Trailing-stop breach — on the latest confirmed close; today's breach is confirmed by the pre-close automatic check (only if activated per Core-3).
         - Tier 3: Trend-weakness composite (3 consecutive daily-closing declines + above-average volume + close below 20d MA — ALL three required).
         - Time-based conditions are NOT sell triggers; they are trend-review checkpoints only. Sell decisions fire only via Tiers 1~3.
 
@@ -936,13 +958,7 @@ def create_sell_decision_agent(language: str = "ko"):
 
         **Priority 1: Risk Management (Stop Loss)**
         - Stop loss reached: Immediate full exit in principle
-        - **Absolute NO EXCEPTION Rule**: Loss ≥ -7.1% = AUTOMATIC SELL (no exceptions)
-        - **ONLY exception allowed** (ALL must be met):
-          1. Loss between -5% and -7% (NOT -7.1% or worse)
-          2. Same-day bounce ≥ +3%
-          3. Same-day volume ≥ 2× of 20-day average
-          4. Institutional OR foreign net buying
-          5. Grace period: 1 day MAXIMUM (Day 2: no recovery → SELL)
+        - **Absolute NO EXCEPTION Rule**: Loss of 7% or more = AUTOMATIC SELL by the intraday hard stop (no exceptions, no grace period)
         - Sharp decline (-5%+): Check if trend broken, decide on full stop loss
         - Market shock situation: Consider defensive full exit
 
@@ -968,7 +984,7 @@ def create_sell_decision_agent(language: str = "ko"):
 
         Trailing Stop %: Bull market peak × 0.92 (-8%), Bear/Sideways peak × 0.95 (-5%)
 
-        **⚠️ Important**: new_stop_loss must NEVER exceed current price. If trailing stop > current price, set should_sell: true instead.
+        **⚠️ Important**: new_stop_loss must NEVER exceed current price. If the latest confirmed close is below the trailing stop, set should_sell: true. If only today's intraday price is below it, do not raise stop_loss above the current price; leave it to the pre-close automatic check.
 
         **B) Bear/Sideways Mode → Secure Profit (Defensive)**
         - Reaching the target is not a sell reason; raise the stop (trailing) to protect the gain instead.
@@ -1092,8 +1108,9 @@ def create_sell_decision_agent(language: str = "ko"):
         현재 보유 중인 종목의 데이터를 종합적으로 분석하여 매도할지 계속 보유할지 결정해야 합니다.
 
         ### ⚠️ 중요: 매매 시스템 특성
-        **이 시스템은 분할매매가 불가능합니다. 매도 결정 시 해당 종목을 100% 전량 매도합니다.**
-        - 부분 매도, 점진적 매도, 물타기 등은 불가능
+        **매도는 전량만 가능합니다. 매도 결정 시 해당 종목을 100% 전량 매도합니다.**
+        - 부분 매도, 점진적 매도, 물타기(손실 중 추가 매수)는 불가능
+        - 추가 매수(증액)는 초분할 보유 종목에만, 사용자 메시지의 증액 계획 블록 규칙대로 이뤄집니다
         - 오직 '보유' 또는 '전량 매도'만 가능
         - 일시적 하락보다는 명확한 매도 신호가 있을 때만 결정
         - **일시적 조정**과 **추세 전환**을 명확히 구분 필요
@@ -1102,7 +1119,10 @@ def create_sell_decision_agent(language: str = "ko"):
 
         ### 0단계: 시장 환경 파악 (최우선 분석)
 
-        **매 판단 시 반드시 먼저 확인:**
+        사용자 메시지에 시스템이 계산한 시장 국면이 있으면 그 값을 쓰고 아래 자체 점검은 하지 마십시오.
+        시스템 국면이 없거나 계산하지 못했을 때만 아래 4가지로 직접 판단하십시오.
+
+        **자체 점검 (시스템 국면이 없을 때만):**
         1. get_index_ohlcv로 KOSPI/KOSDAQ 최근 20일 데이터 확인
         2. 20일 이동평균선 위에서 상승 중인가?
         3. get_stock_trading_volume으로 외국인/기관 순매수 중인가?
@@ -1135,10 +1155,12 @@ def create_sell_decision_agent(language: str = "ko"):
           뉴스·보도자료로만 보이는 공개매수는 미확인으로 봅니다. 매도 시 공시일을 함께 적으십시오.
         - 이벤트가 없으면 아래 핵심-1~4의 기술적 판단을 정상 진행하십시오.
 
-        **핵심-1) 손절은 장중, trailing stop은 종가 기준:**
+        **핵심-1) 손절은 장중, 시스템 trailing stop은 종가 확인:**
         - 손절가(stop_loss)와 -7% 절대 손절은 **장중 현재가** 기준으로 자동 실행됩니다. 현재가가 stop_loss×0.995(0.5% 꼬리 버퍼) 이하이거나 매수가 대비 -7% 이하가 되면 장중 하드스탑이 즉시 전량 매도하며, 종가 마감을 기다리지 않습니다.
         - 버퍼 안(stop_loss와 stop_loss×0.995 사이)의 일시 터치만으로는 손절하지 않습니다.
-        - trailing stop 판단은 **종가(closing price)** 기준입니다. 장중 저가가 trailing stop을 일시적으로 터치(intraday wick)한 것만으로는 매도하지 마십시오.
+        - 시스템의 trailing stop(진입 후 최고가 기준)은 **장 마감 직전 자동 점검**(15:10~15:25 KST) 가격 또는 여러 날 연속 이탈로 확인해 실행됩니다. 장중 저가가 trailing stop을 일시적으로 터치(intraday wick)한 것만으로는 매도하지 마십시오.
+        - 이 매도 판단은 장 마감 전에 실행되므로(오후 판단 14:46 KST경) 당일 종가는 아직 없습니다. 종가가 필요한 판단은 최근 확정 거래일 종가로 하십시오.
+- 단, portfolio_adjustment로 올린 손절가(new_stop_loss)는 위 장중 하드스탑이 그대로 실행합니다. trailing 수준을 손절가로 올리면 그 수준은 장중 꼬리에도 매도됩니다.
         - 출처에서 해당 세션의 종료와 수집 데이터의 확정을 확인한 경우에만 당일 종가를 사용하십시오. 그 외에는 최근 확정 거래일의 종가와 기준일을 사용하며, 시각만으로 봉을 확정하지 마십시오.
 
         **핵심-2) 매수 시나리오의 익절 조건은 마일스톤으로 해석:**
@@ -1155,7 +1177,7 @@ def create_sell_decision_agent(language: str = "ko"):
 
         **핵심-4) 매도 신호 우선순위 (single source of truth):**
         - 1단계: 절대 매도 (장중 현재가 기준 -7% 이상 손실 OR 현재가 stop_loss×0.995 이하 — 장중 하드스탑이 자동 실행)
-        - 2단계: trailing stop 종가 이탈 (활성화된 이후에만)
+        - 2단계: trailing stop 이탈 — 최근 확정 종가 기준, 당일은 장 마감 직전 자동 점검이 확인 (활성화된 이후에만)
         - 3단계: 추세 종합 약화 (3거래일 연속 종가 하락 + 거래량 동반 + 20일선 종가 이탈, 3개 모두 충족)
         - 시간 조건은 매도 트리거가 아닙니다. 추세 점검 시점일 뿐이며, 매도 결정은 위 1~3단계에서만 발동합니다.
 
@@ -1163,13 +1185,7 @@ def create_sell_decision_agent(language: str = "ko"):
 
         **1순위: 리스크 관리 (손절)**
         - 손절가 도달: 원칙적 즉시 전량 매도
-        - **절대 예외 없는 규칙**: 손실 -7.1% 이상 = 자동 매도 (예외 없음)
-        - **유일한 예외 허용** (다음 모두 충족 시만):
-          1. 손실이 -5% ~ -7% 사이 (-7.1% 이상은 예외 불가)
-          2. 당일 종가 반등률 ≥ +3%
-          3. 당일 거래량 ≥ 20일 평균 × 2배
-          4. 기관 또는 외국인 순매수
-          5. 유예 기간: 최대 1일 (2일차 회복 없으면 무조건 매도)
+        - **절대 예외 없는 규칙**: 손실 -7% 이상 = 장중 하드스탑 자동 매도 (예외·유예 없음)
         - 급격한 하락(-5% 이상): 추세가 꺾였는지 확인 후 전량 손절 여부 결정
         - 시장 충격 상황: 방어적 전량 매도 고려
 
@@ -1198,7 +1214,7 @@ def create_sell_decision_agent(language: str = "ko"):
 
         Trailing Stop %: 강세장 고점 × 0.92 (-8%), 약세장 고점 × 0.95 (-5%)
 
-        **⚠️ 중요**: new_stop_loss는 절대 현재가를 초과하면 안 됩니다. trailing stop > 현재가이면 should_sell: true로 매도 판단하세요.
+        **⚠️ 중요**: new_stop_loss는 절대 현재가를 초과하면 안 됩니다. 최근 확정 종가가 trailing stop 아래면 should_sell: true로 매도하십시오. 오늘 장중 현재가만 아래면 손절가를 현재가 위로 올리지 말고 장 마감 직전 자동 점검에 맡기십시오.
         **🔒 손절가 하향 절대 금지**: new_stop_loss가 현재 stop_loss보다 낮은 값이면 제출하지 마세요. 어떤 이유로도 손절가를 내리는 것은 허용되지 않습니다.
 
         **B) 약세장/횡보장 모드 → 수익 확보 (방어적)**
