@@ -103,12 +103,19 @@ def _economic_evidence(item):
 
 class ScenarioRuntime:
     def __init__(self, conn, broker, propose, snapshot, *, clock=time.time,
-                 recovery_enabled=False, automatic_normalization_enabled=False):
+                 recovery_enabled=False, automatic_normalization_enabled=False,
+                 calculated_review_enabled=False, calculated_review_propose=None):
+        if type(calculated_review_enabled) is not bool:
+            raise ValueError("calculated_review_flag_must_be_bool")
+        if calculated_review_enabled and not callable(calculated_review_propose):
+            raise ValueError("calculated_review_callback_required")
         database_path(conn)  # In-memory state cannot provide restart safety.
         self.conn, self.broker = conn, broker
         self.propose, self.snapshot, self.clock = propose, snapshot, clock
         self.recovery_enabled = recovery_enabled or automatic_normalization_enabled
         self.automatic_normalization_enabled = automatic_normalization_enabled
+        self.calculated_review_enabled = calculated_review_enabled
+        self.calculated_review_propose = calculated_review_propose
         with mutation_lock(conn):
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS llm_scenario_state (
@@ -130,7 +137,40 @@ class ScenarioRuntime:
                          (_json({"version": 0, "active": None, "breaker": {}}),))
             if self.recovery_enabled:
                 recovery.ensure_schema(conn)
+            if self.calculated_review_enabled:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS llm_scenario_review_events (
+                        slot INTEGER NOT NULL, sequence INTEGER NOT NULL,
+                        body TEXT NOT NULL, PRIMARY KEY(slot,sequence));
+                    CREATE TABLE IF NOT EXISTS llm_scenario_review_tapes (
+                        slot INTEGER PRIMARY KEY, body TEXT NOT NULL);
+                """)
             conn.commit()
+
+    def _record_calculated_review(self, slot, event):
+        from analysis.scenario_review_tape import MAX_BYTES
+        body = _json(event)
+        if len(body.encode()) > MAX_BYTES:
+            raise ValueError("review_record_bound")
+        sequence = self.conn.execute(
+            "SELECT COUNT(*) FROM llm_scenario_review_events WHERE slot=?", (slot,)).fetchone()[0]
+        if sequence >= 128:
+            raise ValueError("review_record_bound")
+        self.conn.execute("INSERT INTO llm_scenario_review_events VALUES(?,?,?)",
+                          (slot, sequence, body))
+        self.conn.commit()
+
+    def _assert_calculated_review_time(self, envelope, context, fresh, payload):
+        # Durable journal I/O is inside the original budget, not a new lease.
+        now = self.clock()
+        started = next(operation["value"] for operation in envelope["operations"]
+                       if operation["kind"] == "clock")
+        max_age = min(120, context["max_input_age_seconds"])
+        if (not _finite(now) or not 0 <= now - started < 75
+                or payload["expires_at"] <= now
+                or not 0 <= now - context["input_captured_at"] <= max_age
+                or not 0 <= now - fresh["account_captured_at"] <= 120):
+            raise ValueError("review_final_deadline")
 
     def state(self):
         return json.loads(self.conn.execute(
@@ -452,7 +492,36 @@ class ScenarioRuntime:
             from live.scenario_provenance import record_hashed
             record_hashed("decision_input", {"snapshot": snap, "context": ctx, "input_id": input_id},
                           scenario_id=ctx.get("scenario_id"), decision_slot=slot)
-            if self.recovery_enabled:
+            review_envelope = review_bindings = None
+            if self.calculated_review_enabled:
+                from live.scenario_contract import validate_wire_proposal
+                from live.scenario_provenance import review_policy_binding
+                from analysis.scenario_review_tape import MAX_BYTES
+                review_bindings = review_policy_binding()
+                review_envelope = self.calculated_review_propose(snap, ctx,
+                    record=lambda event: self._record_calculated_review(slot, event))
+                envelope_body = _json(review_envelope)
+                if len(envelope_body.encode()) > MAX_BYTES:
+                    raise ValueError("review_tape_bound")
+                self.conn.execute("INSERT INTO llm_scenario_review_tapes VALUES(?,?)",
+                                  (slot, envelope_body))
+                self.conn.commit()
+                stored_input = self.conn.execute(
+                    "SELECT snapshot,context FROM llm_scenario_decisions WHERE slot=?", (slot,)).fetchone()
+                if stored_input != (_json(snap), _json(ctx)):
+                    raise ValueError("review_input_mutated")
+                if review_envelope.get("outcome", {}).get("status") != "COMPLETE":
+                    raise ValueError("review_tape_incomplete")
+                recorded_events = [json.loads(row[0]) for row in self.conn.execute(
+                    "SELECT body FROM llm_scenario_review_events WHERE slot=? ORDER BY sequence", (slot,))]
+                expected_events = [operation["event"] for operation in review_envelope["operations"]
+                                   if operation["kind"] == "record"]
+                if recorded_events != expected_events:
+                    raise ValueError("review_durable_events_mismatch")
+                payload = validate_wire_proposal(
+                    review_envelope["outcome"]["result"]["selected"]["raw_proposal"], ctx)
+                payload["rationale"] = review_envelope["outcome"]["result"]["selection"]["rationale"]
+            elif self.recovery_enabled:
                 with recovery.capture_wire(self.conn, slot, self.clock):
                     payload = self.propose(snap, ctx)
             else:
@@ -497,13 +566,39 @@ class ScenarioRuntime:
                              max_input_age_seconds=120)
                 stage = "validation"
                 probe = False
+                if self.calculated_review_enabled:
+                    from live.scenario_review_guard import guard_review
+                    from live.scenario_preview import response_contract
+                    from live.scenario_provenance import review_policy_binding
+                    if review_policy_binding() != review_bindings:
+                        raise ValueError("review_policy_changed")
+                    guarded = guard_review(snap, ctx, response_contract(ctx), review_envelope,
+                                           fresh, bindings=review_bindings)
+                    payload, validated = guarded["payload"], guarded["validated"]
+                    self._record_calculated_review(slot, dict(kind="FRESH_REVIEW_RECEIPT",
+                                                             receipt=guarded["receipt"]))
+                    if self.recovery_enabled:
+                        # These are original phase texts, never a host-normalized
+                        # proposal disguised as a model response.
+                        for operation in review_envelope["operations"]:
+                            if operation["kind"] == "record" and operation["event"]["kind"] in {"MODEL_REQUEST", "MODEL_RAW"}:
+                                event = operation["event"]
+                                recovery.journal(self.conn, event["kind"], dict(event, calculated_review_version=1),
+                                                 self.clock(), slot=slot)
+                        recovery.journal(self.conn, "CALCULATED_REVIEW_SELECTION", guarded["receipt"],
+                                         self.clock(), slot=slot)
+                        self.conn.commit()
+                    self._assert_calculated_review_time(review_envelope, ctx, fresh, payload)
                 if ctx.get("recovery_observing"):
                     if not fresh.get("recovery_observing"):
                         return {"status": "blocked", "reason": "recovery_hard_guard"}
                     probe = recovery.assess(self.conn, state, ctx, payload, slot, self.clock())
                     self.conn.commit()
-                core_payload = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
-                validated = validate_execution_prices(core_payload, fresh)
+                if self.calculated_review_enabled:
+                    self._assert_calculated_review_time(review_envelope, ctx, fresh, payload)
+                if not self.calculated_review_enabled:
+                    core_payload = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
+                    validated = validate_execution_prices(core_payload, fresh)
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids"):
                     receipt = self._apply_review(state["active"], payload, validated,
                                                  ctx["review_memory"], input_id, slot)

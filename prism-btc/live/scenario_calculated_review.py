@@ -1,4 +1,4 @@
-"""Order-free, flat-only research: model prices, host arithmetic, model selection.
+"""Order-free lifecycle research: model prices, host arithmetic, model selection.
 
 Not a runtime proposer. Results are research receipts, never executable orders.
 Caller supplies an audited, no-retry generator and a durable research recorder.
@@ -24,7 +24,8 @@ Order-free candidate research. The supplied API response schema replaces
 the normal single-proposal output shape and overrides preceding instructions to
 personally compute costs/reward/risk. All trading safety rules remain unchanged.
 Return wait_proposal (a normal WAIT wire proposal), zero to two independent normal
-OPEN wire candidates, and no_candidate_reason. Choose strategic direction, entry,
+wire candidates (OPEN when flat, ADJUST/EXIT when active), and no_candidate_reason.
+Choose strategic direction, entry,
 SL, TP, quantities and fractions yourself from supplied market evidence; the host
 does not choose these. Candidates are mutually exclusive alternatives, never a
 combined portfolio. Do not calculate reward/risk, costs or projected PnL yourself:
@@ -38,6 +39,13 @@ NO_STRUCTURAL_SETUP to bypass calculation. Nonempty candidates require category
 CANDIDATES_PROVIDED. First recovery observation stays WAIT only, empty candidates
 and category FIRST_OBSERVATION. Candidate submission is not an order or permission
 to trade. Unknown real fees never authorize invented net-reward arithmetic.
+For an active scenario keep its side and original risk budget. ADJUST entries are
+incremental only; exit targets are the complete replacement protection. Existing
+confirmed positions already reflect prior partial exits; never restore sold lots.
+Pending quantities are unfilled reservations, not confirmed holdings; cancellation
+requests do not release them. An active scenario with only pending entries is not
+flat. Stop restoration still requires the original host stop_policy. EXIT is full
+closure intent, not an assertion that orders canceled or positions filled.
 """
 
 SELECT_PROMPT = """
@@ -50,8 +58,14 @@ prices, quantities, expiry or confidence; revised plans require a new research
 run, not an extra call here. Interpret trend, support/resistance, fill plausibility
 and supplied host calculations. Do not invent net profit or recompute supplied
 arithmetic. Risk reserves are NOT observed per-side fees or guaranteed losses.
-Gross target projections assume all proposed entries fill: a partial target is
+Flat-entry gross target projections assume all proposed entries fill: a partial target is
 not whole-scenario profit, and unknown future fees/funding remain unknown.
+For holdings distinguish confirmed_remaining projections from hypothetical_all_fills
+which additionally assume all pending and new entries fill. Never call hypothetical
+quantity held or add the two projections. Replacement target fractions start from
+confirmed remaining quantity, not the original pre-partial-exit position. Mark-based
+EXIT gross is an estimate, not fill or settlement evidence. Missing accounting stays
+unknown; a projection cannot replenish risk or grant stop-restoration permission.
 Unknown actual future fees alone are not a new automatic WAIT gate; evaluate the
 supplied reserve-based comparisons without inventing exact net profit or an edge.
 Pure wire/economic validation is NOT recovery authorization or execution evidence.
@@ -75,10 +89,14 @@ def _decimal(value):
     return Decimal(str(value))
 
 
-def _gross_projection(plan, context):
-    """All-entry-fill hypothetical arithmetic, not exchange allocation evidence."""
-    entries = plan["entries"]
+def _gross_projection(plan, context, *, lots=None,
+                      assumption="HYPOTHETICAL_ALL_ENTRIES_FILL_AT_LIMIT_NO_PRIOR_EXITS"):
+    """Separate confirmed/hypothetical lots; never exchange allocation evidence."""
+    entries = plan["entries"] if lots is None else lots
     quantity = sum((_decimal(row["quantity"]) for row in entries), Decimal(0))
+    if quantity == 0:
+        return dict(status="NO_POSITION_IN_THIS_ASSUMPTION", quantity=0,
+                    assumption=assumption, targets=[], actual_net_pnl=None)
     notional = sum((_decimal(row["price"]) * _decimal(row["quantity"])
                     for row in entries), Decimal(0))
     basis = notional / quantity
@@ -89,11 +107,15 @@ def _gross_projection(plan, context):
     if min(step, minimum, equity) <= 0:
         raise ValueError("invalid_calculation_input")
     targets = []
-    risk_per_btc = _decimal(plan["risk"]["remaining_risk"]) / quantity
+    lot_risk = risk_snapshot(initial_equity=context["initial_equity"], side=plan["side"],
+        hard_stop=plan["hard_stop"], positions=entries, pending_entries=[], entries=[],
+        realized_loss=0, fees_paid=0, funding_paid=0,
+        estimated_cost_rate=context["estimated_cost_rate"], slippage_bps=context["slippage_bps"])
+    risk_per_btc = _decimal(lot_risk["remaining_risk"]) / quantity
     for kind in ("take_profits", "partial_stops"):
         allocated = Decimal(0)
         for row in plan[kind]:
-            # Same initial allocation formula as execution: no target fills yet.
+            # New revision: prior reductions are already absent from supplied lots.
             qty = (max(Decimal(0), min(quantity - allocated,
                    quantity * _decimal(row["fraction"]))) / step).to_integral_value(
                        rounding=ROUND_DOWN) * step
@@ -108,15 +130,84 @@ def _gross_projection(plan, context):
                 gross_reward_to_reserved_risk_ratio=float(sign * (_decimal(row["price"]) - basis) / risk_per_btc)
                     if risk_per_btc > 0 else None))
     stop_gross = sign * (_decimal(plan["hard_stop"]) * quantity - notional)
-    return dict(assumption="HYPOTHETICAL_ALL_ENTRIES_FILL_AT_LIMIT_NO_PRIOR_EXITS",
+    return dict(assumption=assumption,
                 quantity=float(quantity), weighted_entry=float(basis),
                 notional=float(notional), gross_at_full_stop=float(stop_gross),
                 gross_at_full_stop_equity_percent=float(stop_gross / equity * 100),
                 targets=targets, target_paths="INDEPENDENT_NOT_ADDITIVE_WITH_FULL_STOP",
+                cost_basis="QUANTITY_WEIGHTED_REMAINING_LOTS_PRO_RATA_ESTIMATE",
+                future_target_fills_confirmed=False,
                 weighted_risk_per_btc=float(risk_per_btc),
                 ratio_semantics="GROSS_PRICE_REWARD_OVER_HOST_RESERVED_RISK_NOT_NET_EXPECTANCY",
                 actual_future_fees=None, actual_future_funding=None,
                 actual_net_pnl=None)
+
+
+def _holding_projection_values(plan, context):
+    unavailable = dict(status="UNAVAILABLE", reason="unconfirmed_accounting_or_position",
+                       actual_net_pnl=None)
+    if context.get("accounting_status") != "confirmed":
+        return unavailable
+    side = context.get("side")
+    if side not in ("LONG", "SHORT") or (context.get("current_plan") or {}).get("side", side) != side:
+        return dict(unavailable, reason="missing_or_conflicting_position_side")
+    lots = context["positions"]
+    if any(_decimal(row["price"]) <= 0 or _decimal(row["quantity"]) <= 0 for row in lots):
+        return unavailable
+    if plan["action"] == "EXIT":
+        mark = _decimal(context["mark_price"])
+        equity = _decimal(context["initial_equity"])
+        if min(mark, equity) <= 0:
+            return unavailable
+        sign = 1 if side == "LONG" else -1
+        gross = sum((sign * (mark - _decimal(row["price"])) * _decimal(row["quantity"])
+                     for row in lots), Decimal(0))
+        return dict(status="AVAILABLE", assumption="CONFIRMED_REMAINING_AT_MARK_NOT_ACTUAL_EXIT_FILL",
+            confirmed_quantity=float(sum((_decimal(row["quantity"]) for row in lots), Decimal(0))),
+            mark_price=float(mark), estimated_gross_at_mark=float(gross), actual_net_pnl=None,
+            estimated_gross_at_mark_equity_percent=float(gross / equity * 100),
+            actual_future_fees=None, actual_future_funding=None,
+            pending_entries_still_reserved=deepcopy(context["pending_entries"]),
+            pending_cancellation_confirmed=False, settlement_confirmed=False)
+    confirmed = _gross_projection(plan, context, lots=lots,
+        assumption="CONFIRMED_REMAINING_NEW_REVISION_NO_ADDITIONAL_FILLS")
+    hypothetical = _gross_projection(plan, context,
+        lots=lots + context["pending_entries"] + plan["entries"],
+        assumption="HYPOTHETICAL_CONFIRMED_PLUS_ALL_PENDING_AND_NEW_ENTRIES_FILL_NO_EXITS")
+    return dict(status="AVAILABLE", confirmed_remaining=confirmed,
+        hypothetical_all_fills=hypothetical,
+        pending_quantities_are="UNFILLED_REMAINDERS_NOT_ORIGINAL_ORDER_QUANTITIES",
+        pending_entries_still_reserved=deepcopy(context["pending_entries"]),
+        requested_cancellations_do_not_release_risk=True,
+        allocation_semantics="NEW_REVISION_REMAINING_BASIS_PRIOR_EXIT_FILLS_NOT_RECREATED",
+        actual_net_pnl=None)
+
+
+def _holding_projection(plan, context):
+    try:
+        return _holding_projection_values(plan, context)
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return dict(status="UNAVAILABLE", reason="incomplete_holding_projection_inputs", actual_net_pnl=None)
+
+
+def _current_reserved_risk(context):
+    try:
+        result = risk_snapshot(initial_equity=context["initial_equity"], side=context["side"],
+            hard_stop=context["previous_hard_stop"], positions=context["positions"],
+            pending_entries=context["pending_entries"], entries=[],
+            risk_fraction=context.get("scenario_risk_fraction", .02),
+            **{key: context[key] for key in ("realized_loss", "fees_paid", "funding_paid",
+                                            "estimated_cost_rate", "slippage_bps")})
+        return dict(status="AVAILABLE", **result, reservation_release_confirmed=False)
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return dict(status="UNAVAILABLE", reservation_release_confirmed=False)
+
+
+def _check_lifecycle_context(context):
+    if not isinstance(context.get("positions"), list) or not isinstance(context.get("pending_entries"), list):
+        raise ValueError("research_missing_exposure_context")
+    if context.get("scenario_id") is None and (context["positions"] or context["pending_entries"]):
+        raise ValueError("research_flat_only")
 
 
 def _entry_risk_components(plan, context):
@@ -165,9 +256,7 @@ def _supplied_instrument_filters(plan, context):
 
 def calculate_candidate(wire, context, *, candidate_id):
     """Return rejected candidates too; never repair model prices or quantities."""
-    if (context.get("scenario_id") is not None or context.get("positions") != []
-            or context.get("pending_entries") != []):
-        raise ValueError("research_flat_only")
+    _check_lifecycle_context(context)
     raw = deepcopy(wire)
     receipt = dict(id=candidate_id, raw_proposal=raw, raw_sha256=receipt_hash(raw),
                    context_sha256=receipt_hash(context),
@@ -180,13 +269,21 @@ def calculate_candidate(wire, context, *, candidate_id):
                        actual_future_fees=None, actual_future_funding=None))
     try:
         normalized = validate_wire_proposal(raw, context)
-        if normalized["action"] != "OPEN":
-            raise ValueError("candidate_not_open")
+        if normalized["action"] not in ("OPEN", "ADJUST", "EXIT"):
+            raise ValueError("candidate_not_actionable")
         core = {key: value for key, value in normalized.items()
                 if key not in {"review", "recovery"}}
-        # Compute raw risk before validation so an oversized candidate is visible.
+        if core["action"] == "EXIT":
+            effective = validate_execution_prices(core, context)
+            receipt.update(effective_plan=effective, effective_sha256=receipt_hash(effective),
+                current_reserved_risk=_current_reserved_risk(context),
+                projection=_holding_projection(effective, context), eligible=True)
+            receipt["receipt_sha256"] = receipt_hash(receipt)
+            return receipt
+        # Canceled orders retain their reservation until confirmed by the host.
         receipt["raw_risk"] = risk_snapshot(initial_equity=context["initial_equity"],
-            side=core["side"], hard_stop=core["hard_stop"], positions=[], pending_entries=[],
+            side=core["side"], hard_stop=core["hard_stop"], positions=context["positions"],
+            pending_entries=context["pending_entries"],
             entries=core["entries"], risk_fraction=context.get("scenario_risk_fraction", .02),
             **{key: context[key] for key in ("realized_loss", "fees_paid", "funding_paid",
                                             "estimated_cost_rate", "slippage_bps")})
@@ -196,7 +293,8 @@ def calculate_candidate(wire, context, *, candidate_id):
         _supplied_instrument_filters(effective, context)
         receipt.update(effective_plan=effective, effective_sha256=receipt_hash(effective),
             effective_per_entry_risk=_entry_risk_components(effective, context),
-            projection=_gross_projection(effective, context), eligible=True)
+            projection=_holding_projection(effective, context) if context.get("scenario_id") is not None
+                else _gross_projection(effective, context), eligible=True)
     except ScenarioValidationError as exc:
         receipt["rejection"] = str(exc)
     except ValueError as exc:
@@ -211,7 +309,11 @@ def calculate_candidate(wire, context, *, candidate_id):
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
     model_context = deepcopy(context)
     model_context["ma_structure"] = build_ma_structure_context(snapshot, context)
-    model_context["current_primary_frame_facts"] = scenario_llm._current_primary_frame_facts(snapshot)
+    if context.get("scenario_id") is None:
+        model_context["current_primary_frame_facts"] = scenario_llm._current_primary_frame_facts(snapshot)
+    if isinstance(context.get("current_plan"), dict):
+        model_context["current_plan"] = {key: value for key, value in context["current_plan"].items()
+                                         if key != "rationale"}
     for field in ("recent_waits", "recent_actions"):
         if isinstance(context.get(field), list):
             model_context[field] = [{key: value for key, value in row.items() if key != "rationale"}
@@ -235,9 +337,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         raise ValueError("production_wire_capture_forbidden")
     if not callable(generate) or not callable(record):
         raise ValueError("explicit_research_dependencies_required")
-    if (context.get("scenario_id") is not None or context.get("positions") != []
-            or context.get("pending_entries") != []):
-        raise ValueError("research_flat_only")
+    _check_lifecycle_context(context)
     started = clock()
     original = receipt_hash(dict(snapshot=snapshot, context=context,
                                  response_contract=response_contract))
@@ -261,14 +361,16 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             raise ValueError("research_input_mutated")
         return now
 
-    base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT + scenario_llm.FLAT_ENTRY_PROMPT
+    base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
+    if context.get("scenario_id") is None:
+        base += scenario_llm.FLAT_ENTRY_PROMPT
     fresh()
     payload = _model_payload(frozen_snapshot, frozen_context, contract)
     schema = response_schema(frozen_context)
     wait_schema = deepcopy(schema)
     wait_schema["properties"]["action"]["enum"] = ["WAIT"]
     candidate_schema = deepcopy(schema)
-    candidate_schema["properties"]["action"]["enum"] = ["OPEN"]
+    candidate_schema["properties"]["action"]["enum"] = ["OPEN"] if context.get("scenario_id") is None else ["ADJUST", "EXIT"]
     first_observation = schema["properties"]["action"]["enum"] == ["WAIT"]
     draft_schema = _object(dict(wait_proposal=wait_schema,
         candidates=dict(type="array", maxItems=0 if schema["properties"]["action"]["enum"] == ["WAIT"] else 2,

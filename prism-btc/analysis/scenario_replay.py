@@ -194,6 +194,17 @@ class Driver:
         self._value()
 
 
+def _single_pass_audit_rows(conn, slot):
+    rows = conn.execute("SELECT kind,body FROM llm_scenario_recovery_events WHERE slot=? AND kind IN ('MODEL_REQUEST','MODEL_RAW') ORDER BY rowid", (slot,)).fetchall()
+    groups = {kind: [body for row_kind, body in rows if row_kind == kind]
+              for kind in ('MODEL_REQUEST', 'MODEL_RAW')}
+    if (any(len(group) > 1 for group in groups.values())
+            or any('calculated_review_version' in json.loads(body) or 'phase' in json.loads(body)
+                   for _, body in rows)):
+        raise TapeMismatch('multi_phase_review_requires_exact_review_tape')
+    return tuple((groups[kind][0],) if groups[kind] else None for kind in ('MODEL_REQUEST', 'MODEL_RAW'))
+
+
 class Decisions:
     def __init__(self,tape,driver,mode,*,policy=None,model_generator=None,fixed_latency_ms=2000):
         self.tape,self.driver,self.mode=tape,driver,mode
@@ -226,6 +237,9 @@ class Decisions:
                     "ScenarioModelError:snapshot_unavailable", "ScenarioModelError:snapshot_stale"}):
                 from live import scenario_contract  # noqa: F401
             audit=record.get("raw_response")
+            if isinstance(audit,dict) and any(key in audit for key in ('calculated_review_version','phase','operations')):
+                self.fatal='multi_phase_review_requires_exact_review_tape'
+                raise TapeMismatch(self.fatal)
             if isinstance(audit,dict) and audit.get("request"):
                 if scenario_recovery.digest(audit["request"]) != audit.get("request_hash"):
                     self.fatal="tape_request_audit_mismatch"
@@ -276,7 +290,11 @@ class Decisions:
         latency=self.fixed_latency_ms if self.policy is not None else max(1,int((time.monotonic()-started)*1000))
         if latency>75000:error="ScenarioModelError:late_response"
         slot=int(context["now"]//300)
-        request_row=self.driver.conn.execute("SELECT body FROM llm_scenario_recovery_events WHERE slot=? AND kind='MODEL_REQUEST' ORDER BY rowid DESC LIMIT 1",(slot,)).fetchone()
+        try:
+            request_row,wire_row=_single_pass_audit_rows(self.driver.conn,slot)
+        except TapeMismatch as exc:
+            self.fatal=str(exc)
+            raise
         request=None;request_hash=None
         if request_row:
             body=json.loads(request_row[0])
@@ -286,7 +304,6 @@ class Decisions:
             if scenario_recovery.digest(request)!=request_hash:
                 self.fatal="model_request_audit_mismatch"
                 raise TapeMismatch(self.fatal)
-        wire_row=self.driver.conn.execute("SELECT body FROM llm_scenario_recovery_events WHERE slot=? AND kind='MODEL_RAW' ORDER BY rowid DESC LIMIT 1",(slot,)).fetchone()
         wire=json.loads(wire_row[0]) if wire_row else None
         self.tape.append(snapshot,context,response,latency,error=error,
                          raw_response={"request":request,"request_hash":request_hash,

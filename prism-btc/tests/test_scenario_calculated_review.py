@@ -137,7 +137,7 @@ def test_second_failure_does_not_fallback_or_return_first_proposal():
 
 @pytest.mark.parametrize("field,value", [("account_captured_at", None), ("account_captured_at", 879),
     ("account_captured_at", 1001), ("input_captured_at", 879), ("positions", [{"quantity": 1}]),
-    ("pending_entries", [{"quantity": 1}]), ("scenario_id", "active")])
+    ("pending_entries", [{"quantity": 1}]), ("positions", None)])
 def test_missing_stale_or_nonflat_rejects_without_call(field, value):
     ctx = context()
     ctx[field] = value
@@ -447,3 +447,200 @@ def test_retained_row17_size_boundary_without_dropping_evidence_or_raising_cap()
     second = restore_model_input(json.loads(calls[1]["user_prompt"]))
     assert second["contract_context"]["retained_evidence"] == ctx["retained_evidence"]
     assert second["calculated_candidates"] == result["candidates"]
+
+
+def holding(side="LONG"):
+    ctx = context()
+    ctx.update(scenario_id="active", revision=3, side=side, accounting_status="confirmed",
+        positions=[dict(price=83000, quantity=.06)], previous_hard_stop=82500 if side == "LONG" else 83500,
+        mark_price=83400 if side == "LONG" else 82600,
+        current_plan=dict(side=side, entries=[dict(price=83000, quantity=.1)],
+                          rationale="Do not recycle old history"),
+        target_status=[dict(id="old_tp", filled_quantity=.04, status="TERMINAL")],
+        realized_loss=3, fees_paid=2, funding_paid=.5)
+    return ctx
+
+
+def holding_wire(ctx, action="ADJUST"):
+    p = wire(ctx)
+    p["action"] = action
+    if action == "ADJUST":
+        p.update(side=ctx["side"], hard_stop=ctx["previous_hard_stop"],
+            chase=dict(max_bps=0, max_reprices=0),
+            take_profits=[dict(id="new_tp", price=84000 if ctx["side"] == "LONG" else 82000, fraction=.5)])
+    if (ctx.get("stop_policy") or {}).get("version") == 1:
+        p["stop_revision"] = None
+    return p
+
+
+@pytest.mark.parametrize("side", ["LONG", "SHORT"])
+def test_holding_tp_uses_remaining_not_original_pre_partial_exit_size(side):
+    ctx = holding(side)
+    r = calculate_candidate(holding_wire(ctx), ctx, candidate_id="c0")
+    assert r["eligible"]
+    actual = r["projection"]["confirmed_remaining"]
+    assert actual["quantity"] == .06
+    assert actual["targets"][0]["quantity"] == .03
+    assert actual["targets"][0]["gross_pnl"] == 30
+    assert r["raw_risk"]["consumed"] == 5.5
+    assert r["projection"]["hypothetical_all_fills"]["quantity"] == .06
+    assert "old_tp" not in [x["id"] for x in actual["targets"]]
+
+
+def test_partially_filled_entry_and_cancellation_keep_only_pending_remainder_reserved():
+    ctx = holding()
+    # A .1 BTC entry has filled .04; only its .06 remainder is pending.
+    ctx.update(positions=[dict(price=83000, quantity=.04)],
+        pending_entries=[dict(id="original_entry", price=83000, quantity=.06)])
+    p = holding_wire(ctx)
+    p["cancel_entry_ids"] = ["original_entry"]
+    r = calculate_candidate(p, ctx, candidate_id="c0")
+    assert r["eligible"]
+    assert r["projection"]["confirmed_remaining"]["quantity"] == .04
+    assert r["projection"]["confirmed_remaining"]["targets"][0]["quantity"] == .02
+    assert r["projection"]["hypothetical_all_fills"]["quantity"] == .1
+    assert r["raw_risk"]["remaining_risk"] == pytest.approx(.1 * (500 + 166 + 165))
+    without_cancel = calculate_candidate(dict(p, cancel_entry_ids=[]), ctx, candidate_id="c1")
+    assert r["raw_risk"] == without_cancel["raw_risk"]
+
+
+def test_pending_add_new_incremental_entry_is_hypothetical_not_current_position():
+    ctx = holding()
+    ctx["pending_entries"] = [dict(id="pending", price=83100, quantity=.01)]
+    p = holding_wire(ctx)
+    p["entries"] = [dict(id="new", price=83200, quantity=.02)]
+    r = calculate_candidate(p, ctx, candidate_id="c0")
+    assert r["eligible"]
+    assert r["projection"]["confirmed_remaining"]["quantity"] == .06
+    assert r["projection"]["hypothetical_all_fills"]["quantity"] == .09
+    assert r["projection"]["hypothetical_all_fills"]["targets"][0]["quantity"] == .045
+    assert r["raw_risk"]["consumed"] == 5.5
+    assert r["raw_risk"]["proposed_risk"] == pytest.approx(.02 * (700 + 166.4 + 165))
+
+
+def test_pending_only_active_is_not_flat_and_does_not_invent_confirmed_position():
+    ctx = holding()
+    ctx.update(positions=[], pending_entries=[dict(id="pending", price=83000, quantity=.04)])
+    r = calculate_candidate(holding_wire(ctx), ctx, candidate_id="c0")
+    assert r["eligible"]
+    assert r["projection"]["confirmed_remaining"]["status"] == "NO_POSITION_IN_THIS_ASSUMPTION"
+    assert r["projection"]["hypothetical_all_fills"]["quantity"] == .04
+
+
+@pytest.mark.parametrize("side", ["LONG", "SHORT"])
+def test_holding_tightening_and_bounded_restoration_use_host_policy(side):
+    ctx = holding(side)
+    p = holding_wire(ctx)
+    p["hard_stop"] = 82800 if side == "LONG" else 83200
+    assert calculate_candidate(p, ctx, candidate_id="c0")["eligible"]
+    p["hard_stop"] = 82400 if side == "LONG" else 83600
+    rejected = calculate_candidate(p, ctx, candidate_id="c0")
+    assert not rejected["eligible"] and "stop widening forbidden" in rejected["rejection"]
+    ctx["stop_policy"] = dict(version=1, anchor_available=True, widening_eligible=True,
+                               initial_hard_stop=82000 if side == "LONG" else 84000)
+    p["stop_revision"] = dict(reason="가격 구조 유지", structure_reference="30m MA35", input_id=ctx["input_id"])
+    assert calculate_candidate(p, ctx, candidate_id="c0")["eligible"]
+    p["hard_stop"] = 81900 if side == "LONG" else 84100
+    assert not calculate_candidate(p, ctx, candidate_id="c0")["eligible"]
+
+
+@pytest.mark.parametrize("side", ["LONG", "SHORT"])
+def test_exit_mark_projection_is_estimate_and_cancellation_does_not_release_risk(side):
+    ctx = holding(side)
+    ctx["pending_entries"] = [dict(id="pending", price=83000, quantity=.01)]
+    p = holding_wire(ctx, "EXIT")
+    p["cancel_entry_ids"] = ["pending"]
+    r = calculate_candidate(p, ctx, candidate_id="c0")
+    assert r["eligible"] and r["effective_plan"]["action"] == "EXIT"
+    assert r["projection"]["estimated_gross_at_mark"] == 24
+    assert r["projection"]["confirmed_quantity"] == .06
+    assert not r["projection"]["settlement_confirmed"]
+    assert not r["projection"]["pending_cancellation_confirmed"]
+    assert r["current_reserved_risk"]["remaining_risk"] > 0
+    assert r["projection"]["actual_net_pnl"] is None
+
+
+def test_unknown_accounting_does_not_become_zero_or_block_core_exit():
+    ctx = holding()
+    ctx.update(accounting_status="pending", fees_paid=None, realized_loss=None, funding_paid=None)
+    r = calculate_candidate(holding_wire(ctx, "EXIT"), ctx, candidate_id="c0")
+    assert r["eligible"]
+    assert r["projection"]["status"] == "UNAVAILABLE"
+    assert r["current_reserved_risk"]["status"] == "UNAVAILABLE"
+    assert r["projection"]["actual_net_pnl"] is None
+    assert not calculate_candidate(holding_wire(ctx), ctx, candidate_id="c0")["eligible"]
+
+
+def test_projection_missing_mark_or_side_stays_unknown_without_rejecting_exit():
+    for missing in ("mark_price", "side"):
+        ctx = holding()
+        del ctx[missing]
+        r = calculate_candidate(holding_wire(ctx, "EXIT"), ctx, candidate_id="c0")
+        assert r["eligible"] and r["projection"]["status"] == "UNAVAILABLE"
+
+
+def test_realized_profit_does_not_replenish_budget_and_opposite_adjustment_rejected():
+    ctx = holding()
+    ctx["realized_net_profit"] = 1000
+    p = holding_wire(ctx)
+    p["entries"] = [dict(id="new", price=83200, quantity=1)]
+    assert not calculate_candidate(p, ctx, candidate_id="c0")["eligible"]
+    p = holding_wire(ctx)
+    p.update(side="SHORT", hard_stop=83500, take_profits=[dict(id="tp", price=82000, fraction=.5)])
+    r = calculate_candidate(p, ctx, candidate_id="c0")
+    assert not r["eligible"] and "opposite side" in r["rejection"]
+
+
+def test_holding_research_two_phase_preserves_candidates_and_excludes_flat_prompt():
+    from live.scenario_llm import FLAT_ENTRY_PROMPT
+    ctx = holding()
+    calls = []
+    def generate(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            answer = dict(wait_proposal=holding_wire(ctx, "WAIT"),
+                candidates=[holding_wire(ctx), holding_wire(ctx, "EXIT")],
+                no_candidate_category="CANDIDATES_PROVIDED", no_candidate_reason="")
+        else:
+            token = next(x for x in kw["response_schema"]["properties"]["selection_token"]["enum"] if x.startswith("c1:"))
+            answer = dict(selection_token=token, rationale="추세 이탈 근거로 전량 청산 검토")
+        return SimpleNamespace(text=json.dumps(answer))
+    result = research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
+        generate=generate, record=lambda e: None, clock=lambda: 1000)
+    assert result["selected"]["raw_proposal"]["action"] == "EXIT"
+    assert not result["executable"]
+    assert FLAT_ENTRY_PROMPT not in calls[0]["system_prompt"]
+    assert calls[0]["response_schema"]["properties"]["candidates"]["items"]["properties"]["action"]["enum"] == ["ADJUST", "EXIT"]
+    presented = json.loads(calls[0]["user_prompt"])["contract_context"]
+    assert "rationale" not in presented["current_plan"]
+    assert presented["positions"] == ctx["positions"]
+
+
+def test_multiple_remaining_lots_target_projection_is_explicit_pro_rata_not_realized():
+    ctx = holding()
+    ctx["positions"] = [dict(price=83000, quantity=.02), dict(price=83200, quantity=.04)]
+    r = calculate_candidate(holding_wire(ctx), ctx, candidate_id="c0")
+    assert r["eligible"]
+    p = r["projection"]["confirmed_remaining"]
+    assert p["weighted_entry"] == pytest.approx(83133.33333333333)
+    assert p["targets"][0]["quantity"] == .03
+    assert p["targets"][0]["gross_pnl"] == pytest.approx(26)
+    assert p["cost_basis"] == "QUANTITY_WEIGHTED_REMAINING_LOTS_PRO_RATA_ESTIMATE"
+    assert p["future_target_fills_confirmed"] is False
+
+
+def test_active_wait_preserves_lifecycle_without_flat_facts_or_old_rationale():
+    from live.scenario_llm import FLAT_ENTRY_PROMPT
+    ctx = holding()
+    calls = []
+    def generate(**kw):
+        calls.append(kw)
+        return SimpleNamespace(text=json.dumps(dict(wait_proposal=holding_wire(ctx, "WAIT"),
+            candidates=[], no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="기존 보호 유지 근거")))
+    result = research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
+        generate=generate, record=lambda e: None, clock=lambda: 1000)
+    assert result["calls"] == 1 and result["selection"]["selection"] == "WAIT"
+    assert FLAT_ENTRY_PROMPT not in calls[0]["system_prompt"]
+    presented = json.loads(calls[0]["user_prompt"])["contract_context"]
+    assert "current_primary_frame_facts" not in presented
+    assert "rationale" not in presented["current_plan"]

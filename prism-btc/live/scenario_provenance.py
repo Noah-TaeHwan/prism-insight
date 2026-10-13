@@ -20,6 +20,7 @@ import uuid
 import ast
 import types
 import importlib.metadata
+import importlib
 import inspect
 
 MAX_RECORD_BYTES = 512 * 1024
@@ -27,6 +28,28 @@ MAX_RUN_BYTES = 4 * 1024 * 1024
 MAX_EVENTS = 128
 MAX_REVIEW_BYTES = 16 * 1024
 _current = ContextVar('scenario_audit', default=None)
+
+
+def review_policy_binding():
+    """Opt-in identity, separate from the default legacy policy manifest."""
+    root = Path(__file__).resolve().parents[1]
+    names = ('analysis/scenario_review_tape.py', 'backtest/scenario_tape.py',
+             'live/scenario_calculated_review.py', 'live/scenario_review_adapter.py',
+             'live/scenario_review_guard.py', 'live/scenario_llm.py',
+             'live/scenario_contract.py', 'live/scenario_model_input.py',
+             'live/scenario_preview.py', 'core/scenario_limit_prices.py',
+             'core/llm_scenario.py', 'core/scenario_stop_policy.py',
+             'engine/scenario_ma_context.py', 'live/scenario_runtime.py',
+             'live/scenario_provenance.py')
+    sources, parity = {}, {}
+    for name in names:
+        importlib.import_module(name.removesuffix('.py').replace('/', '.'))
+        source = (root / name).read_text()
+        sources[name] = hashlib.sha256(source.encode()).hexdigest()
+        parity[name] = _loaded_parity(name, source)
+    if set(parity.values()) != {'VERIFIED'}:
+        raise ValueError('review_mixed_loaded_policy')
+    return dict(policy='calculated-review-v1', source_sha256=sources, loaded_parity=parity)
 
 
 def _gap():
