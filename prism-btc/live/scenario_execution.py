@@ -340,10 +340,12 @@ class ScenarioExecution:
         self.conn.commit()
         return self._query_child(next(c for c in self.children() if c["link_id"]==link))
 
-    def _cancel(self, child):
+    def _cancel(self, child, *, before_cancel=None):
         child = self._query_child(child)
         if child["status"] == "TERMINAL":
             return child
+        if before_cancel is not None:
+            before_cancel(child)
         # Cancel ACK is never sufficient to release outstanding risk.
         try:
             self._write("cancel_order",category="linear",symbol="BTCUSDT",orderLinkId=child["link_id"],orderId=child["order_id"])
