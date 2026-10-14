@@ -83,6 +83,26 @@ def test_unknown_submission_survives_restart_without_resubmit(setup):
     assert b.executed == ["action-1"]
 
 
+@pytest.mark.parametrize("action", ["EXIT", "ADJUST"])
+@pytest.mark.parametrize("known_pending", [True, False])
+def test_only_acknowledged_exit_cancellation_is_pending_not_unknown(setup, action, known_pending):
+    from live.scenario_broker import BrokerCancellationPending, BrokerNotReady
+    r,b,now,_=setup
+    assert r.tick()["status"] == "intent_pending"
+    b.ctx["positions"]=[dict(price=100,quantity=1)]
+    b.evidence=dict(intents=[terminal()])
+    now[0]+=300
+    r.propose=lambda s,c: (dict(wait_proposal(s,c),action="EXIT",action_id="action-2")
+                          if action == "EXIT" else dict(proposal(s,c),action=action,action_id="action-2",entries=[]))
+    def execute(payload, ident):
+        raise (BrokerCancellationPending if known_pending else BrokerNotReady)("cancel_not_confirmed")
+    b.execute=execute
+    result=r.tick()
+    assert result["status"] == "intent_pending"
+    assert result["reason"] == ("awaiting_cancellation" if action == "EXIT" and known_pending else "submission_unknown")
+    assert r.conn.execute("SELECT status FROM llm_scenario_intents WHERE id='action-2'").fetchone() == ("PENDING",)
+
+
 def test_intent_is_committed_before_submit(setup):
     r, b, _, path = setup
     def execute(payload, ident):

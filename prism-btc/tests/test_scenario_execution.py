@@ -1123,6 +1123,57 @@ def delayed_exit(live):
     return b,e,tp
 
 
+@pytest.mark.parametrize("ack", ["exact", "missing", "wrong", "timeout", "rejected"])
+def test_pending_cancel_requires_exact_successful_ack_and_durable_receipt(live, ack):
+    b,e,tp=delayed_exit(live)
+    def cancel(**kw):
+        if ack == "timeout":
+            raise TimeoutError("unknown")
+        return dict(retCode=1 if ack == "rejected" else 0,
+                    result={} if ack == "missing" else dict(orderId=tp["order_id"] if ack != "wrong" else "other",
+                                                            orderLinkId=tp["link_id"]))
+    e.cancel_order=cancel
+    with pytest.raises(BrokerNotReady) as caught:
+        b._cancel(tp)
+    assert (type(caught.value).__name__ == "BrokerCancellationPending") is (ack == "exact")
+    rows=b.conn.execute("SELECT body FROM llm_scenario_broker_evidence WHERE kind='cancel_ack_pending'").fetchall()
+    assert len(rows) == (1 if ack == "exact" else 0)
+    if rows:
+        assert json.loads(rows[0][0])["link_id"] == tp["link_id"]
+    assert not any(c["kind"] == "exit" for c in b.children())
+    assert e.orders["native"]["orderStatus"] == "Untriggered"
+
+
+def test_pending_cancel_receipt_failure_is_not_known_pending(live):
+    b,e,tp=delayed_exit(live)
+    e.cancel_order=lambda **kw: dict(retCode=0,result=dict(orderId=tp["order_id"],orderLinkId=tp["link_id"]))
+    original=b._save
+    def save(kind, body):
+        if kind == "cancel_ack_pending":
+            raise OSError("durability failure")
+        return original(kind,body)
+    b._save=save
+    with pytest.raises(OSError,match="durability failure"):
+        b._cancel(tp)
+    assert not any(c["kind"] == "exit" for c in b.children())
+
+
+def test_exact_cancel_ack_with_failed_terminal_query_stays_unknown(live):
+    b,e,tp=delayed_exit(live)
+    e.cancel_order=lambda **kw: dict(retCode=0,result=dict(orderId=tp["order_id"],orderLinkId=tp["link_id"]))
+    original=b._query_child
+    calls=[]
+    def query(child):
+        calls.append(child["link_id"])
+        if len(calls) == 2:
+            raise BrokerNotReady("evidence_query_failed")
+        return original(child)
+    b._query_child=query
+    with pytest.raises(BrokerNotReady,match="evidence_query_failed"):
+        b._cancel(tp)
+    assert not b.conn.execute("SELECT 1 FROM llm_scenario_broker_evidence WHERE kind='cancel_ack_pending'").fetchone()
+
+
 @pytest.mark.parametrize("race",["cancelled","tp_fill","native_flat","ack_loss","crash"])
 def test_delayed_exit_continues_once_from_exact_remaining_exposure(live,race):
     b,e,tp=delayed_exit(live)

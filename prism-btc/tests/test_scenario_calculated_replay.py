@@ -148,6 +148,52 @@ def test_single_pass_synthetic_policy_exact_not_semantic(tmp_path):
         policy_profile="single-pass-economic-v4")
 
 
+@pytest.mark.parametrize("profile", ["single-pass-economic-v4", "calculated-economic-v4"])
+@pytest.mark.parametrize("cancel_ack", ["exact", "timeout", "missing_identity"])
+def test_exit_cancel_latency_is_not_submission_failure_and_replays_exactly(tmp_path, monkeypatch, profile, cancel_ack):
+    from backtest.scenario_exchange import ScenarioExchange
+    original=ScenarioExchange.cancel_order
+    def cancel(self, **params):
+        response=original(self,**params)
+        if cancel_ack == "timeout":
+            raise TimeoutError("unknown cancellation")
+        if cancel_ack == "missing_identity":
+            return dict(retCode=0,result={})
+        return response
+    monkeypatch.setattr(ScenarioExchange,"cancel_order",cancel)
+    bundle,market=inputs(1200000)
+    wall=[0.]
+    def generate(**request):
+        wall[0]+=1
+        payload=json.loads(request["user_prompt"])
+        ctx=payload["contract_context"]
+        if "selection_token" in request["response_schema"]["properties"]:
+            receipts=payload["calculated_candidates"]
+            selected=next((r for r in receipts["candidates"] if r["eligible"]),receipts["wait"])
+            result=dict(selection_token=f"{selected['id']}:{selected['receipt_sha256']}",rationale="fixture")
+        else:
+            action="EXIT" if ctx.get("scenario_id") else ("OPEN" if ctx["now"] < bundle["start_ms"]/1000+300 else "WAIT")
+            result=wire(ctx,action)
+            result["expires_at"]=ctx["now"]+1200
+            if "wait_proposal" in request["response_schema"]["properties"]:
+                result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[result] if action != "WAIT" else [],no_candidate_reason="fixture")
+        return SimpleNamespace(text=json.dumps(result))
+    with network_boundary("frozen") as blocked:
+        fresh=run_replay(bundle,market,tmp_path/"fresh",mode="fixture",tape_path=tmp_path/"tape",
+            policy_profile=profile,model_generator=generate,clock_monotonic=lambda:wall[0])
+        frozen=run_replay(bundle,market,tmp_path/"frozen",mode="frozen",tape_path=tmp_path/"tape",policy_profile=profile)
+    assert not blocked
+    outcomes=[json.loads(line).get("outcome",{}) for line in (tmp_path/"tape").read_text().splitlines()]
+    expected_reason="awaiting_cancellation" if cancel_ack == "exact" else "submission_unknown"
+    assert any(row.get("reason") == expected_reason for row in outcomes)
+    assert fresh["execution_status"] == ("COMPLETE" if cancel_ack == "exact" else "STOPPED")
+    assert fresh["result_hash"] == frozen["result_hash"]
+    assert fresh["economic"]["completed_scenarios"] == 1
+    with sqlite3.connect(tmp_path/"fresh/replay.sqlite") as conn:
+        assert conn.execute("SELECT count(*) FROM llm_scenario_children WHERE kind='exit'").fetchone()[0] == 1
+    assert frozen["execution_metadata"]["actual_model_calls"] == 0
+
+
 @pytest.mark.parametrize("profile,fail_at", [("single-pass-economic-v4",1),
     ("calculated-economic-v4",1),("calculated-economic-v4",2)])
 def test_first_transport_failure_stops_new_calls_and_frozen_drains_identically(tmp_path,profile,fail_at):

@@ -717,10 +717,13 @@ class ScenarioRuntime:
                     self.conn.commit()
                 try:
                     self.broker.execute(validated, ident)
-                except Exception:
+                except Exception as exc:
+                    from live.scenario_broker import BrokerCancellationPending
                     self._notice("unknown:"+ident,dict(kind="PENDING",timestamp=self.clock()))
                     self.conn.commit()
-                    return {"status": "intent_pending", "reason": "submission_unknown",
+                    reason = ("awaiting_cancellation" if validated["action"] == "EXIT"
+                              and isinstance(exc, BrokerCancellationPending) else "submission_unknown")
+                    return {"status": "intent_pending", "reason": reason,
                             "review_update_receipt": receipt}
                 return {"status": "intent_pending", "reason": "awaiting_exact_evidence",
                         "review_update_receipt": receipt}
