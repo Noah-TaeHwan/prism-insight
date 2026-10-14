@@ -22,14 +22,15 @@ SUPPORTED_MODELS = frozenset({"gpt-5.6-sol", "gpt-6-astra", "gpt-6.1-sol"})
 SUPPORTED_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
 MAX_TIMEOUT_SECONDS = 600
 
-# Minimum BUY time budget per reasoning effort. The account mapping can raise effort
+# Minimum BUY/SELL time budget per reasoning effort. The account mapping can raise effort
 # (medium -> xhigh) while the configured timeout stays sized for the lower effort.
 # db-server 2026-10-01..10-10, gpt-6.1-sol xhigh with MCP tools: BUY successes p50
 # 207s / p95 289s with 14 of 46 KR+US calls cut at 300s and decided by the older
 # mcp-agent fallback model instead. Model thinking was ~90% of each call (startup
 # ~14s, tools <10s), so a longer budget, not a retry, is what lets it finish.
-# BUY settings also drive the re-entry recheck. SELL is deliberately untouched.
-BUY_EFFORT_TIMEOUT_FLOOR_SECONDS = {"xhigh": 480.0, "max": 600.0, "ultra": 600.0}
+# BUY settings also drive the re-entry recheck. SELL hit the same cut at xhigh
+# (2026-10-14 US: successes 160-217s, IOVA cut at the 240s cron budget).
+EFFORT_TIMEOUT_FLOOR_SECONDS = {"xhigh": 480.0, "max": 600.0, "ultra": 600.0}
 
 
 def validate_timeout(value: object) -> float:
@@ -102,8 +103,7 @@ def _resolve_codex_settings(side: str, environ: Mapping[str, str] | None) -> Cod
     timeout = validate_timeout(env.get(
         f"PRISM_{side}_CODEX_TIMEOUT", env.get("PRISM_CODEX_FAST_TIMEOUT", "90"),
     ))
-    if side == "BUY":  # SELL budget is owned by the sell-side work (see floor comment)
-        timeout = max(timeout, BUY_EFFORT_TIMEOUT_FLOOR_SECONDS.get(effort or "", 0.0))
+    timeout = max(timeout, EFFORT_TIMEOUT_FLOOR_SECONDS.get(effort or "", 0.0))
     return CodexSettings(model, effort, timeout)
 
 
