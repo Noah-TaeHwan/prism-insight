@@ -100,7 +100,7 @@ def test_delayed_receipt_still_rejects_real_quote_drift_and_never_double_pads():
         if len(calls)==1:
             wall[0]+=20
             result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[wire(ctx,"OPEN")],
-                no_candidate_category="CANDIDATES_PROVIDED",no_candidate_reason="")
+                no_candidate_reason="")
         else:
             wall[0]+=1
             candidate=json.loads(request["user_prompt"])["calculated_candidates"]["candidates"][0]
@@ -139,7 +139,7 @@ def test_original_pricing_reference_cannot_extend_review_expiry_or_75_seconds(fa
             if fault=="expired_candidate":
                 candidate["expires_at"]=1010
             result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[candidate],
-                no_candidate_category="CANDIDATES_PROVIDED",no_candidate_reason="")
+                no_candidate_reason="")
         else:
             bundle=json.loads(request["user_prompt"])["calculated_candidates"]
             assert bundle["candidates"][0]["eligible"] is False
@@ -188,7 +188,7 @@ def test_native_round_delayed_draft_selected_open_and_exact_frozen(tmp_path,side
             proposal.update(side=side,hard_stop=98 if side=="LONG" else 102)
             proposal["entries"][0].update(price=101 if side=="LONG" else 99,trigger_price=101 if side=="LONG" else 99)
             proposal["take_profits"][0]["price"]=raw_tp
-            result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[proposal],no_candidate_category="CANDIDATES_PROVIDED",no_candidate_reason="")
+            result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[proposal],no_candidate_reason="")
         return SimpleNamespace(text=json.dumps(result))
     tape=tmp_path/"tape"
     with network_boundary("frozen") as blocked:

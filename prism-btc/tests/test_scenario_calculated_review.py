@@ -40,8 +40,6 @@ def run(ctx=None, candidates=None, *, mutate=None, clock=lambda: 1000, fail_seco
         calls.append(kwargs)
         if len(calls) == 1:
             result = dict(wait_proposal=wire(ctx), candidates=candidates,
-                          no_candidate_category="CANDIDATES_PROVIDED" if candidates else "FIRST_OBSERVATION"
-                          if (ctx.get("recovery") or {}).get("first_observation") else "NO_STRUCTURAL_SETUP",
                           no_candidate_reason="가격 구조 근거 부족" if not candidates else "")
         else:
             if fail_second:
@@ -244,8 +242,7 @@ def test_recorder_cannot_mutate_selected_receipts():
     def generate(**kw):
         data = json.loads(kw["user_prompt"])
         if "calculated_candidates" not in data:
-            answer = dict(wait_proposal=wire(ctx), candidates=[wire(ctx, "LONG")], no_candidate_reason="",
-                          no_candidate_category="CANDIDATES_PROVIDED")
+            answer = dict(wait_proposal=wire(ctx), candidates=[wire(ctx, "LONG")], no_candidate_reason="")
         else:
             c = data["calculated_candidates"]["candidates"][0]
             answer = dict(selection_token=f"c0:{c['receipt_sha256']}", rationale="판단 근거")
@@ -304,7 +301,7 @@ def test_slow_recording_reduces_sent_timeout_and_blocks_late_final_result():
     def generate(**kw):
         calls.append(kw)
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=wire(ctx), candidates=[],
-            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="구조 근거 부족")))
+             no_candidate_reason="구조 근거 부족")))
     with pytest.raises(ValueError, match="research_deadline"):
         research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
             generate=generate, record=record, clock=lambda: now[0])
@@ -320,7 +317,7 @@ def test_receipt_hash_binds_snapshot_even_when_input_id_and_plan_are_same():
     hashes = []
     def generate(**kw):
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=wire(ctx), candidates=[],
-            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="구조 근거 부족")))
+             no_candidate_reason="구조 근거 부족")))
     for snapshot in (dict(valid=True, as_of_ms=1000000), dict(valid=True, as_of_ms=1000000, extra=1)):
         result = research_review(snapshot, ctx, response_contract(ctx), generate=generate,
                                  record=lambda e: None, clock=lambda: 1000)
@@ -408,7 +405,7 @@ def test_market_account_candidates_preserved_and_each_phase_uses_its_own_schema(
     assert all("research_response_contract" not in p for p in payloads)
     assert restored[0]["response_contract"] == response_contract(context())
     assert set(calls[0]["response_schema"]["properties"]) == {
-        "wait_proposal", "candidates", "no_candidate_category", "no_candidate_reason"}
+        "wait_proposal", "candidates", "no_candidate_reason"}
     assert restored[1]["response_contract"] == calls[1]["response_schema"]
     assert "wait_proposal" not in calls[1]["response_schema"]["properties"]
 
@@ -432,7 +429,7 @@ def test_retained_row17_size_boundary_without_dropping_evidence_or_raising_cap()
         calls.append(kw)
         if len(calls) == 1:
             answer = dict(wait_proposal=wire(ctx), candidates=[p],
-                no_candidate_category="CANDIDATES_PROVIDED", no_candidate_reason="")
+                 no_candidate_reason="")
         else:
             token = kw["response_schema"]["properties"]["selection_token"]["enum"][0]
             answer = dict(selection_token=token, rationale="프로토콜 검증")
@@ -600,7 +597,7 @@ def test_holding_research_two_phase_preserves_candidates_and_excludes_flat_promp
         if len(calls) == 1:
             answer = dict(wait_proposal=holding_wire(ctx, "WAIT"),
                 candidates=[holding_wire(ctx), holding_wire(ctx, "EXIT")],
-                no_candidate_category="CANDIDATES_PROVIDED", no_candidate_reason="")
+                 no_candidate_reason="")
         else:
             token = next(x for x in kw["response_schema"]["properties"]["selection_token"]["enum"] if x.startswith("c1:"))
             answer = dict(selection_token=token, rationale="추세 이탈 근거로 전량 청산 검토")
@@ -636,7 +633,7 @@ def test_active_wait_preserves_lifecycle_without_flat_facts_or_old_rationale():
     def generate(**kw):
         calls.append(kw)
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=holding_wire(ctx, "WAIT"),
-            candidates=[], no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="기존 보호 유지 근거")))
+            candidates=[],  no_candidate_reason="기존 보호 유지 근거")))
     result = research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
         generate=generate, record=lambda e: None, clock=lambda: 1000)
     assert result["calls"] == 1 and result["selection"]["selection"] == "WAIT"
@@ -653,7 +650,7 @@ def test_wait_schema_expresses_existing_inactive_protection_rules_only():
     def generate(**kw):
         calls.append(kw)
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=holding_wire(ctx, "WAIT"),
-            candidates=[], no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="보호 유지")))
+            candidates=[],  no_candidate_reason="보호 유지")))
     research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
         generate=generate, record=lambda e: None, clock=lambda: 1000)
     properties = calls[0]["response_schema"]["properties"]
@@ -682,7 +679,7 @@ def test_invalid_wait_output_is_rejected_by_schema_before_second_call(field, val
         wait = holding_wire(ctx, "WAIT")
         wait[field] = value
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=wait, candidates=[],
-            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="보호 유지")))
+             no_candidate_reason="보호 유지")))
     with pytest.raises(ValueError, match="research_response_contract"):
         research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
             generate=generate, record=lambda e: None, clock=lambda: 1000)
@@ -698,7 +695,7 @@ def test_valid_holding_cancel_only_wait_keeps_current_protection_and_metadata():
     wait.update(cancel_entry_ids=["pending"], review=dict(conditions=[], acknowledgements=[]), recovery=None)
     result = research_review(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
         generate=lambda **kw: SimpleNamespace(text=json.dumps(dict(wait_proposal=wait, candidates=[],
-            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="추가 진입 취소, 기존 보호 유지"))),
+             no_candidate_reason="추가 진입 취소, 기존 보호 유지"))),
         record=lambda e: None, clock=lambda: 1000)
     assert ctx == original
     assert result["selected"]["raw_proposal"] == wait

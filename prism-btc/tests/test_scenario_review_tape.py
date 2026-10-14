@@ -42,7 +42,6 @@ def recorded(*, empty=False, fail_second=False, fail_record=False):
         now[0] += 2.5
         if len(calls) == 1:
             result = dict(wait_proposal=wire(ctx), candidates=[] if empty else [wire(ctx, "LONG")],
-                no_candidate_category="NO_STRUCTURAL_SETUP" if empty else "CANDIDATES_PROVIDED",
                 no_candidate_reason="구조 없음" if empty else "")
         else:
             if fail_second:

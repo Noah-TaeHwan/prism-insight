@@ -46,7 +46,6 @@ def taped(ctx=None, action="OPEN"):
         if len(calls) == 1:
             result = dict(wait_proposal=wire(ctx, "WAIT"),
                 candidates=[] if action == "WAIT" else [wire(ctx, action)],
-                no_candidate_category="NO_STRUCTURAL_SETUP" if action == "WAIT" else "CANDIDATES_PROVIDED",
                 no_candidate_reason="근거 없음" if action == "WAIT" else "")
         else:
             bundle = json.loads(request["user_prompt"])["calculated_candidates"]

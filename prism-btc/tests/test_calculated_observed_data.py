@@ -518,7 +518,7 @@ def test_observed_release_fresh_frozen_full_runtime_packet_identity(tmp_path, pr
         ctx = payload["contract_context"]
         assert int(ctx["now"] * 1000) % 300000 == 10000
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=wire(ctx, "WAIT"), candidates=[],
-            no_candidate_category="NO_STRUCTURAL_SETUP", no_candidate_reason="관측 fixture")))
+             no_candidate_reason="관측 fixture")))
 
     kwargs = dict(policy_profile=profile, observed_packet=path, observed_packet_sha256=pin,
                   market_input_mode="observed")

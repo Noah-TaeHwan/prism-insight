@@ -25,6 +25,9 @@ the normal single-proposal output shape and overrides preceding instructions to
 personally compute costs/reward/risk. All trading safety rules remain unchanged.
 Return wait_proposal (a normal WAIT wire proposal), zero to two independent normal
 wire candidates (OPEN when flat, ADJUST/EXIT when active), and no_candidate_reason.
+wait_proposal is the WAIT fallback, not a global WAIT-only instruction: follow
+the separate candidates schema and its cap. baseline_kind describes the stored
+baseline's origin; the current first-observation flag is recovery.first_observation.
 Choose strategic direction, entry,
 SL, TP, quantities and fractions yourself from supplied market evidence; the host
 does not choose these. Candidates are mutually exclusive alternatives, never a
@@ -32,12 +35,11 @@ combined portfolio. Do not calculate reward/risk, costs or projected PnL yoursel
 the host will calculate your exact proposals for subsequent comparison. Do not
 shrink a structural SL to make size fit. A candidate may fail host risk validation;
 it will remain visible but cannot be selected. If no grounded candidate exists,
-return an empty candidates list, category NO_STRUCTURAL_SETUP and a qualitative
+return an empty candidates list and a qualitative
 reason identifying missing structure or evidence, not invented arithmetic.
 Economic objections alone must submit a candidate for host calculation, not use
-NO_STRUCTURAL_SETUP to bypass calculation. Nonempty candidates require category
-CANDIDATES_PROVIDED. First recovery observation stays WAIT only, empty candidates
-and category FIRST_OBSERVATION. Candidate submission is not an order or permission
+an empty list to bypass calculation. First recovery observation stays WAIT only,
+with empty candidates. Candidate submission is not an order or permission
 to trade. Unknown real fees never authorize invented net-reward arithmetic.
 For an active scenario keep its side and original risk budget. ADJUST entries are
 incremental only; exit targets are the complete replacement protection. Existing
@@ -385,11 +387,11 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         wait_schema["properties"][field]["maxItems"] = 0
     candidate_schema = deepcopy(schema)
     candidate_schema["properties"]["action"]["enum"] = ["OPEN"] if context.get("scenario_id") is None else ["ADJUST", "EXIT"]
-    first_observation = schema["properties"]["action"]["enum"] == ["WAIT"]
+    wait_only = schema["properties"]["action"]["enum"] == ["WAIT"]
+    first_observation = (frozen_context.get("recovery") or {}).get("first_observation") is True
     draft_schema = _object(dict(wait_proposal=wait_schema,
-        candidates=dict(type="array", maxItems=0 if schema["properties"]["action"]["enum"] == ["WAIT"] else 2,
-                        items=candidate_schema), no_candidate_reason=dict(type="string"),
-        no_candidate_category=dict(type="string", enum=["FIRST_OBSERVATION", "NO_STRUCTURAL_SETUP", "CANDIDATES_PROVIDED"])))
+        candidates=dict(type="array", maxItems=0 if wait_only or first_observation else 2,
+                        items=candidate_schema), no_candidate_reason=dict(type="string")))
 
     def call(phase, appendix, data, output_schema):
         now = fresh()
@@ -425,9 +427,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return parsed
 
     draft = call("candidate", DRAFT_PROMPT, payload, draft_schema)
-    expected_category = "CANDIDATES_PROVIDED" if draft["candidates"] else "FIRST_OBSERVATION" if first_observation else "NO_STRUCTURAL_SETUP"
-    if draft["no_candidate_category"] != expected_category:
-        raise ValueError("research_candidate_category")
+    category = "FIRST_OBSERVATION" if first_observation else "CANDIDATES_PROVIDED" if draft["candidates"] else "NO_CANDIDATES_SUPPLIED"
     if len(draft["no_candidate_reason"]) > 2000 or (not draft["candidates"] and not draft["no_candidate_reason"].strip()):
         raise ValueError("research_missing_candidate_reason")
     now_context = dict(frozen_context, now=fresh())
@@ -444,7 +444,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         del receipt["receipt_sha256"]
         receipt["receipt_sha256"] = receipt_hash(receipt)
     bundle = dict(wait=wait_receipt, candidates=receipts, input_sha256=original,
-                  no_candidate_category=draft["no_candidate_category"],
+                  no_candidate_category=category, category_source="HOST_DERIVED_FROM_STATE_AND_ARRAY",
                   no_candidate_reason=draft["no_candidate_reason"],
                   qualitative_reason_truth="NOT_MECHANICALLY_VERIFIED")
     bundle_sha = receipt_hash(bundle)

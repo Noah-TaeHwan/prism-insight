@@ -320,9 +320,7 @@ def test_real_runner_coordinator_zero_network_wait_http_artifacts_and_strict_com
         properties = payload["text"]["format"]["schema"]["properties"]
         assert "selection_token" not in properties  # no-candidate B uses one draft
         wait = wire(ctx, "WAIT")
-        first = properties.get("candidates", {}).get("maxItems") == 0
-        category = "FIRST_OBSERVATION" if first else "NO_STRUCTURAL_SETUP"
-        response = (dict(wait_proposal=wait, candidates=[], no_candidate_category=category,
+        response = (dict(wait_proposal=wait, candidates=[],
                          no_candidate_reason="관측 fixture, 거래 없음") if "wait_proposal" in properties else wait)
         opened.append((request, timeout))
         wall[0] += 1.

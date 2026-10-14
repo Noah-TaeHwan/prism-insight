@@ -67,8 +67,7 @@ def runtime(tmp_path, *, change=None, tape_change=None, fail_second=False, empty
             first = captured.get("recovery", {}).get("first_observation", False)
             result = dict(wait_proposal=wire(captured, "WAIT"),
                 candidates=[] if empty or first else [wire(captured, "OPEN")],
-                no_candidate_reason="첫 관측 또는 구조 부족" if empty or first else "",
-                no_candidate_category="FIRST_OBSERVATION" if first else "NO_STRUCTURAL_SETUP" if empty else "CANDIDATES_PROVIDED")
+                no_candidate_reason="첫 관측 또는 구조 부족" if empty or first else "")
         else:
             if fail_second:
                 raise RuntimeError("model failed")

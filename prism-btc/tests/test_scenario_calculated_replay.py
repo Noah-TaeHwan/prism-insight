@@ -111,7 +111,6 @@ def test_zero_network_native_economic_fresh_frozen_exact_full_tick(tmp_path, pat
                 if candidates:
                     candidates[0]["entries"][0]["quantity"] = quantity
             result = dict(wait_proposal=wire(ctx, "WAIT"), candidates=candidates,
-                no_candidate_category="CANDIDATES_PROVIDED" if candidates else "NO_STRUCTURAL_SETUP",
                 no_candidate_reason="" if candidates else "기존 포지션 유지")
         else:
             action = "EXIT" if ctx.get("scenario_id") and ctx["now"] >= bundle["start_ms"]/1000 + 600 else "WAIT" if ctx.get("scenario_id") else "OPEN"
@@ -161,7 +160,7 @@ def test_first_transport_failure_stops_new_calls_and_frozen_drains_identically(t
             raise RuntimeError("fixture_transport_failure")
         ctx=json.loads(request["user_prompt"])["contract_context"]
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=wire(ctx,"WAIT"),
-            candidates=[wire(ctx,"OPEN")],no_candidate_category="CANDIDATES_PROVIDED",no_candidate_reason="")))
+            candidates=[wire(ctx,"OPEN")],no_candidate_reason="")))
     tape=tmp_path/"tape"
     fresh=run_replay(bundle,market,tmp_path/"one",mode="fixture",tape_path=tape,
         policy_profile=profile,model_generator=generate,clock_monotonic=lambda:wall[0],
@@ -195,7 +194,7 @@ def test_post_review_durable_record_delay_cannot_extend_deadline(tmp_path,monkey
         else:
             ctx=payload["contract_context"]
             result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[wire(ctx,"OPEN")],
-                no_candidate_category="CANDIDATES_PROVIDED",no_candidate_reason="")
+                no_candidate_reason="")
         return SimpleNamespace(text=json.dumps(result))
     tape=tmp_path/"tape"
     fresh=run_replay(bundle,market,tmp_path/"one",mode="fixture",tape_path=tape,
@@ -220,7 +219,7 @@ def test_durable_attempt_latency_rechecks_dispatch_before_any_generator(tmp_path
         wall[0]+=1
         ctx=json.loads(request["user_prompt"])["contract_context"]
         return SimpleNamespace(text=json.dumps(dict(wait_proposal=wire(ctx,"WAIT"),candidates=[],
-            no_candidate_category="NO_STRUCTURAL_SETUP",no_candidate_reason="구조 없음")))
+            no_candidate_reason="구조 없음")))
     fresh=run_replay(bundle,market,tmp_path/"one",mode="fixture",tape_path=tmp_path/"tape",
         policy_profile="calculated-economic-v4",model_generator=generate,
         before_http=attempt,clock_monotonic=lambda:wall[0])
@@ -263,7 +262,7 @@ def test_final_guard_validation_latency_is_not_invisible(tmp_path,monkeypatch):
         else:
             ctx=payload["contract_context"]
             result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=[wire(ctx,"OPEN")],
-                no_candidate_category="CANDIDATES_PROVIDED",no_candidate_reason="")
+                no_candidate_reason="")
         return SimpleNamespace(text=json.dumps(result))
     fresh=run_replay(bundle,market,tmp_path/"one",mode="fixture",tape_path=tmp_path/"tape",
         policy_profile="calculated-economic-v4",model_generator=generate,clock_monotonic=lambda:wall[0])
@@ -359,10 +358,8 @@ def test_consumed_recovery_exact_all_runtime_review_exchange_tables(tmp_path,pro
                 proposal["recovery"]=wire(ctx,"EXIT")["recovery"]
             for entry in proposal["entries"]:
                 entry["trigger_price"]=None
-            first=request["response_schema"]["properties"]["candidates"]["maxItems"]==0
             candidates=[] if proposal["action"]=="WAIT" else [proposal]
             result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=candidates,
-                no_candidate_category="CANDIDATES_PROVIDED" if candidates else "FIRST_OBSERVATION" if first else "NO_STRUCTURAL_SETUP",
                 no_candidate_reason="" if candidates else "첫 관측")
         return SimpleNamespace(text=json.dumps(result))
     tape=tmp_path/"tape"
@@ -426,7 +423,6 @@ def test_observing_post_record_stop_crossing_never_consumes_permit(tmp_path,monk
             result=dict(selection_token=f"{candidate['id']}:{candidate['receipt_sha256']}",rationale="계산 확인")
         else:
             ctx=data["contract_context"]
-            first=request["response_schema"]["properties"]["candidates"]["maxItems"]==0
             candidates=[]
             if ctx["now"]==stop_minute/1000:
                 proposal=policy(data["market_snapshot"],ctx)
@@ -438,7 +434,6 @@ def test_observing_post_record_stop_crossing_never_consumes_permit(tmp_path,monk
                     entry["trigger_price"]=None
                 candidates=[proposal]
             result=dict(wait_proposal=wire(ctx,"WAIT"),candidates=candidates,
-                no_candidate_category="CANDIDATES_PROVIDED" if candidates else "FIRST_OBSERVATION" if first else "NO_STRUCTURAL_SETUP",
                 no_candidate_reason="" if candidates else "관측 유지")
         return SimpleNamespace(text=json.dumps(result))
     fresh=run_replay(bundle,market,tmp_path/"one",mode="fixture",tape_path=tmp_path/"tape",
@@ -479,9 +474,7 @@ wall=[0.]
 def generate(**request):
     wall[0]+=1.25
     ctx=json.loads(request['user_prompt'])['contract_context']
-    first=request['response_schema']['properties']['candidates']['maxItems']==0
-    result=dict(wait_proposal=wire(ctx,'WAIT'),candidates=[],no_candidate_reason='관측 유지',
-        no_candidate_category='FIRST_OBSERVATION' if first else 'NO_STRUCTURAL_SETUP')
+    result=dict(wait_proposal=wire(ctx,'WAIT'),candidates=[],no_candidate_reason='관측 유지')
     return SimpleNamespace(text=json.dumps(result))
 b,m=inputs()
 with network_boundary('frozen') as blocked:
