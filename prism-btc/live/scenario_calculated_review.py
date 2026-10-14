@@ -11,7 +11,7 @@ import math
 import time
 
 from core.llm_scenario import ScenarioValidationError, risk_snapshot, validate_scenario
-from core.scenario_limit_prices import validate_execution_prices
+from core.scenario_limit_prices import preview_execution_prices
 from engine.scenario_ma_context import build_ma_structure_context
 from live import scenario_llm
 from live.scenario_contract import _matches, _object, response_schema, validate_wire_proposal
@@ -254,9 +254,10 @@ def _supplied_instrument_filters(plan, context):
                     raise ValueError("entry_below_minimum")
 
 
-def calculate_candidate(wire, context, *, candidate_id):
+def calculate_candidate(wire, context, *, candidate_id, original_input_now=None):
     """Return rejected candidates too; never repair model prices or quantities."""
     _check_lifecycle_context(context)
+    original_now=context["now"] if original_input_now is None else original_input_now
     raw = deepcopy(wire)
     receipt = dict(id=candidate_id, raw_proposal=raw, raw_sha256=receipt_hash(raw),
                    context_sha256=receipt_hash(context),
@@ -274,7 +275,11 @@ def calculate_candidate(wire, context, *, candidate_id):
         core = {key: value for key, value in normalized.items()
                 if key not in {"review", "recovery"}}
         if core["action"] == "EXIT":
-            effective = validate_execution_prices(core, context)
+            effective = preview_execution_prices(core,context,original_input_now=original_now)
+            quotes=context.get("limit_price_quotes")
+            receipt["pricing_basis"]=dict(kind="ORIGINAL_INPUT_HYPOTHETICAL",
+                original_input_now=original_now,quote_captured_at=quotes.get("captured_at") if isinstance(quotes,dict) else None,
+                validation_now=context["now"],execution_authorized=False)
             receipt.update(effective_plan=effective, effective_sha256=receipt_hash(effective),
                 current_reserved_risk=_current_reserved_risk(context),
                 projection=_holding_projection(effective, context), eligible=True)
@@ -289,7 +294,11 @@ def calculate_candidate(wire, context, *, candidate_id):
                                             "estimated_cost_rate", "slippage_bps")})
         receipt["raw_per_entry_risk"] = _entry_risk_components(core, context)
         _supplied_instrument_filters(core, context)
-        effective = validate_execution_prices(core, context)
+        effective = preview_execution_prices(core,context,original_input_now=original_now)
+        quotes=context.get("limit_price_quotes")
+        receipt["pricing_basis"]=dict(kind="ORIGINAL_INPUT_HYPOTHETICAL",
+            original_input_now=original_now,quote_captured_at=quotes.get("captured_at") if isinstance(quotes,dict) else None,
+            validation_now=context["now"],execution_authorized=False)
         _supplied_instrument_filters(effective, context)
         receipt.update(effective_plan=effective, effective_sha256=receipt_hash(effective),
             effective_per_entry_risk=_entry_risk_components(effective, context),
@@ -427,7 +436,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     validate_scenario({k: v for k, v in wait_normalized.items() if k not in {"review", "recovery"}}, now_context)
     wait_receipt = dict(id="WAIT", raw_proposal=wait_wire, input_sha256=original)
     wait_receipt["receipt_sha256"] = receipt_hash(wait_receipt)
-    receipts = [calculate_candidate(wire, now_context, candidate_id=f"c{index}")
+    receipts = [calculate_candidate(wire, now_context, candidate_id=f"c{index}",
+                                   original_input_now=frozen_context["now"])
                 for index, wire in enumerate(draft["candidates"])]
     for receipt in receipts:
         receipt["input_sha256"] = original
