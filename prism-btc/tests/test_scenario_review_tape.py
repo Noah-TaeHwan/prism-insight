@@ -179,3 +179,19 @@ def test_size_limit_precedes_generator(monkeypatch):
     with pytest.raises(TapeMismatch, match="size"):
         record_review(lambda *_: pytest.fail("no execution"), {}, {}, {},
                       generate=None, record=None, clock=None)
+
+
+def test_economic_replay_effects_once_then_guard_replay_is_pure():
+    envelope,snapshot,ctx,contract,*_=recorded()
+    clocks=iter(op["value"] for op in envelope["operations"] if op["kind"]=="clock")
+    events,boundaries=[],[]
+    result=replay_review(envelope,research_review,snapshot,ctx,contract,
+        bindings={"source":"pinned-source"},economic_clock=lambda:next(clocks),
+        economic_record=events.append,operation_complete=boundaries.append)
+    assert result==envelope["outcome"]
+    assert events==[op["event"] for op in envelope["operations"] if op["kind"]=="record"]
+    assert boundaries.count("generate_return")==2
+    before=deepcopy((events,boundaries))
+    assert replay_review(envelope,research_review,snapshot,ctx,contract,
+        bindings={"source":"pinned-source"})==result
+    assert (events,boundaries)==before

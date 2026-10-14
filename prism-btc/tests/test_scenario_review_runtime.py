@@ -110,7 +110,9 @@ def test_optin_complete_proof_before_simulated_intent(tmp_path):
     assert broker.executed[0]["rationale"] == "검산 확인"
     assert tape["outcome"]["result"]["selected"]["raw_proposal"]["rationale"] == "구조 판단"
     assert r.conn.execute("SELECT COUNT(*) FROM llm_scenario_intents").fetchone()[0] == 1
-    assert json.loads(r.conn.execute("SELECT body FROM llm_scenario_review_events ORDER BY sequence DESC LIMIT 1").fetchone()[0])["kind"] == "FRESH_REVIEW_RECEIPT"
+    final_receipt = json.loads(r.conn.execute("SELECT body FROM llm_scenario_review_events ORDER BY sequence DESC LIMIT 1").fetchone()[0])
+    assert final_receipt["kind"] == "FINAL_FRESH_REVIEW_RECEIPT"
+    assert final_receipt["atomic_with_intent"] is True
 
 
 @pytest.mark.parametrize("change", [

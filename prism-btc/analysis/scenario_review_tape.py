@@ -103,7 +103,8 @@ def record_review(review, snapshot, context, contract, *, generate, record, cloc
     return envelope
 
 
-def replay_review(envelope, review, snapshot, context, contract, *, bindings=None):
+def replay_review(envelope, review, snapshot, context, contract, *, bindings=None,
+                  economic_clock=None, economic_record=None, operation_complete=None):
     """No external generator, recorder or wall clock exists on the frozen path."""
     _bound(envelope)
     frozen = deepcopy(envelope)
@@ -120,7 +121,7 @@ def replay_review(envelope, review, snapshot, context, contract, *, bindings=Non
     index, calls, previous_time = 0, 0, None
     mismatches = []
 
-    def take(kind, key=None, value=None):
+    def take(kind, key=None, value=None, *, raise_error=True):
         nonlocal index
         if index >= len(operations):
             mismatches.append("missing")
@@ -130,7 +131,7 @@ def replay_review(envelope, review, snapshot, context, contract, *, bindings=Non
         if operation.get("kind") != kind or (key is not None and operation.get(key) != value):
             mismatches.append("changed")
             raise TapeMismatch("review_tape_operation_mismatch")
-        if "error" in operation:
+        if raise_error and "error" in operation:
             error = operation["error"]
             # Names/messages are evidence, never imported or evaluated as code.
             raise type(error["type"], (Exception,), {})(error["message"])
@@ -143,10 +144,22 @@ def replay_review(envelope, review, snapshot, context, contract, *, bindings=Non
             mismatches.append("clock")
             raise TapeMismatch("review_tape_invalid_clock")
         previous_time = value
+        if economic_clock is not None and economic_clock() != value:
+            mismatches.append("economic_clock")
+            raise TapeMismatch("review_tape_economic_clock")
         return value
 
     def replay_record(event):
-        take("record", "event", event)
+        try:
+            operation = take("record", "event", event, raise_error=False)
+            if economic_record is not None:
+                economic_record(deepcopy(event))
+            if "error" in operation:
+                error=operation["error"]
+                raise type(error["type"], (Exception,), {})(error["message"])
+        finally:
+            if operation_complete is not None:
+                operation_complete("record_return")
 
     def replay_generate(**request):
         nonlocal calls
@@ -154,7 +167,11 @@ def replay_review(envelope, review, snapshot, context, contract, *, bindings=Non
         if calls > 2:
             mismatches.append("calls")
             raise TapeMismatch("review_tape_call_limit")
-        return SimpleNamespace(text=take("generate", "request", request)["text"])
+        try:
+            return SimpleNamespace(text=take("generate", "request", request)["text"])
+        finally:
+            if operation_complete is not None:
+                operation_complete("generate_return")
 
     outcome = _outcome(lambda: review(snapshot, context, contract, generate=replay_generate,
                                       record=replay_record, clock=replay_clock))

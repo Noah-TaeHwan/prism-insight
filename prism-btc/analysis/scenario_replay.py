@@ -39,6 +39,8 @@ ROOT=Path(__file__).resolve().parents[2]
 POLICY_PROFILES = {
     "current-live-v2": {"recovery_enabled": True, "automatic_normalization_enabled": True},
     "legacy-no-recovery": {"recovery_enabled": False, "automatic_normalization_enabled": False},
+    "single-pass-economic-v4": {"recovery_enabled": True, "automatic_normalization_enabled": True},
+    "calculated-economic-v4": {"recovery_enabled": True, "automatic_normalization_enabled": True},
 }
 _identity_scope_lock = threading.Lock()
 INPUT_PREPARATION_CODES = {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
@@ -57,7 +59,7 @@ def _replay_uuid_factory(name):
 
 
 @contextmanager
-def replay_identity_scope():
+def replay_identity_scope(*, economic=False):
     """Replay-only IDs, not authority: restore module adapters even after failure.
 
     Namespace counters by call site so extra audit events cannot alter permit IDs.
@@ -70,7 +72,11 @@ def replay_identity_scope():
     originals = []
     try:
         from live import scenario_runtime, scenario_recovery
-        for module in (scenario_runtime, scenario_recovery):
+        modules = [scenario_runtime, scenario_recovery]
+        if economic:
+            from live import scenario_execution
+            modules.append(scenario_execution)
+        for module in modules:
             originals.append((module, module.uuid))
             module.uuid = SimpleNamespace(uuid4=_replay_uuid_factory(module.__name__))
         yield
@@ -106,17 +112,22 @@ def network_boundary(mode,endpoint=None):
 
 
 def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy_profile="current-live-v2",
-                 initial_state="fresh-unblocked"):
+                 initial_state="fresh-unblocked", *, observed_manifest=None,
+                 market_input_mode="historical", allow_input_gaps=False):
     if policy_profile not in POLICY_PROFILES:
         raise ValueError("explicit_replay_policy_profile_required")
     if initial_state not in {"fresh-unblocked","recovery-stage0"}:
         raise ValueError("explicit_replay_initial_state_required")
-    if initial_state=="recovery-stage0" and policy_profile!="current-live-v2":
+    if initial_state=="recovery-stage0" and policy_profile=="legacy-no-recovery":
         raise ValueError("recovery_seed_requires_current_live_v2")
+    if observed_manifest is None and market_input_mode != "historical":
+        raise ValueError("observed_input_contract_required")
+    if observed_manifest is not None and market_input_mode not in {"observed", "reconstructed_at_observed_schedule"}:
+        raise ValueError("explicit_observed_input_mode_required")
     package=ROOT/"prism-btc"
     sources={str(p.relative_to(package)):hashlib.sha256(p.read_bytes()).hexdigest()
              for p in sorted(package.rglob("*.py")) if "tests" not in p.relative_to(package).parts}
-    return dict(schema=2,kind="SIMULATED_LLM_SCENARIO",decision_origin=origin,data_hash=bundle["data_hash"],
+    contract = dict(schema=2,kind="SIMULATED_LLM_SCENARIO",decision_origin=origin,data_hash=bundle["data_hash"],
         policy_profile=policy_profile,runtime_flags=dict(POLICY_PROFILES[policy_profile]),
         initial_state=dict(profile=initial_state,
             provenance="SYNTHETIC_INITIAL_SOFT_LATCH_NO_PRIOR_PNL" if initial_state=="recovery-stage0" else "FRESH_UNBLOCKED_NO_SYNTHETIC_LOSSES",
@@ -136,6 +147,37 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
         latencies=dict(entry=5000,market=5000,cancel=2000,amend=2000,model="measured_and_taped_ms"),
         decision_interval_ms=300000,protection_interval_ms=60000,
         terminal_policy="NO_FORCED_CLOSE_MARK_OPEN_POSITION",liquidity="previous_minute_volume_shared_across_four_path_points")
+    if policy_profile in {"single-pass-economic-v4", "calculated-economic-v4"}:
+        import inspect
+        from live.scenario_contract import response_schema
+        contract.update(schema=4,
+            economic_clock_contract="NATIVE_MONOTONIC_INTEGER_MS_FULL_TICK_V1",
+            identity_scheme="EXACT_REPLAY_UUID5_MODULE_CALLSITE_SEQUENCE_V1",
+            review_binding=None,
+            phase_contracts={"profile":policy_profile,
+                "schema_builder_sha256":hashlib.sha256(inspect.getsource(response_schema).encode()).hexdigest(),
+                "SINGLE_PASS":hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()})
+        if policy_profile == "calculated-economic-v4":
+            from live.scenario_calculated_review import DRAFT_PROMPT, SELECT_PROMPT, research_review
+            from live.scenario_provenance import review_policy_binding
+            contract["review_binding"] = review_policy_binding()
+            contract["context_contracts"]["calculated_review_version"] = 1
+            contract["phase_contracts"] = dict(profile=policy_profile,
+                DRAFT=hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest(),
+                SELECT=hashlib.sha256(SELECT_PROMPT.encode()).hexdigest(),
+                schema_builder_sha256=hashlib.sha256(inspect.getsource(research_review).encode()).hexdigest(),
+                wire_schema_builder_sha256=contract["phase_contracts"]["schema_builder_sha256"],
+                actual_phase_schema_binding="EXACT_GENERATE_REQUEST_RESPONSE_SCHEMA_IN_FULL_INPUT_TAPE")
+        contract["observed_data"] = dict(mode=market_input_mode, provider_manifest=observed_manifest,
+            allow_input_gaps=allow_input_gaps, clock="OBSERVED_AVAILABILITY_BEFORE_SIMULATED_CONTEXT",
+            account_source="INDEPENDENT_SIMULATED_ACCOUNT_ONLY")
+    elif observed_manifest is not None:
+        contract.update(schema=3, market_input=dict(mode=market_input_mode,
+            provider_manifest=observed_manifest, allow_input_gaps=allow_input_gaps,
+            clock="OBSERVED_AVAILABILITY_BEFORE_SIMULATED_CONTEXT",
+            account_source="INDEPENDENT_SIMULATED_ACCOUNT_ONLY"),
+            replay_scope="HYBRID_OBSERVED_INPUT_ASSUMED_EXECUTION")
+    return contract
 
 
 class Driver:
@@ -144,6 +186,8 @@ class Driver:
         self.events=[];self.index=0;self.capacity={};self.curve=[];self.protection=Counter()
         self.next_protect=bundle["start_ms"]+15000
         self.end=bundle["end_ms"]
+        self._advance_depth = 0
+        self.strict_protection = False
         keys=("open","high","low","close") if path=="OHLC" else ("open","low","high","close")
         funding_times={f["timestamp"] for f in bundle["funding"]}
         for i,(when,bar) in enumerate(market.source.iterrows()):
@@ -167,6 +211,15 @@ class Driver:
         self.curve.append((self.session.ts_ms,value))
 
     def advance_to(self,target):
+        if self._advance_depth:
+            raise ValueError("replay_advance_recursion")
+        self._advance_depth += 1
+        try:
+            return self._advance_to(target)
+        finally:
+            self._advance_depth -= 1
+
+    def _advance_to(self,target):
         target=min(int(target),self.end)
         if target<self.session.ts_ms:
             raise ValueError("replay_clock_reversal")
@@ -190,6 +243,8 @@ class Driver:
                     self.protection["confirmed" if evidence.get("protection_confirmed") else "unconfirmed"]+=1
                 except Exception:
                     self.protection["failed"]+=1
+                    if self.strict_protection:
+                        raise ValueError("economic_protection_failed") from None
         self.session.elapse(target)
         self._value()
 
@@ -321,17 +376,22 @@ class Decisions:
 
 
 def run_replay(bundle,market,output,**kwargs):
-    with replay_identity_scope():
+    with replay_identity_scope(economic=kwargs.get("policy_profile", "").endswith("economic-v4")):
         return _run_replay(bundle,market,output,**kwargs)
 
 
 def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplier=1.,
                initial_equity=10000.,policy=None,model_generator=None,max_decisions=288,
-               policy_profile="current-live-v2",initial_state="fresh-unblocked"):
+               policy_profile="current-live-v2",initial_state="fresh-unblocked",clock_monotonic=None,
+               observed_packet=None,observed_packet_sha256=None,market_input_mode="historical",
+               allow_input_gaps=False,before_http=None,failure_callback=None):
     """No production paths accepted; fresh DB per run and explicit data provenance."""
     if mode not in {"fresh","frozen","fixture"} or path not in {"OHLC","OLHC"}:
         raise ValueError("explicit_replay_mode_required")
-    if mode=="fixture" and policy is None:raise ValueError("fixture_policy_required")
+    if mode=="fixture" and policy is None and not (policy_profile.endswith("economic-v4") and model_generator is not None):
+        raise ValueError("fixture_policy_required")
+    if mode=="fixture" and policy_profile=="calculated-economic-v4" and model_generator is None:
+        raise ValueError("calculated_fixture_generator_required")
     if mode!="fixture" and policy is not None:raise ValueError("fixture_must_not_be_labeled_llm")
     if type(max_decisions) is not int or not 1<=max_decisions<=288:
         raise ValueError("bounded_decision_count_required")
@@ -341,20 +401,48 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
         raise ValueError("minute_btc_bundle_required")
     if not 0<cost_multiplier<=3 or not math.isfinite(initial_equity) or initial_equity<=0:
         raise ValueError("invalid_replay_cost_or_equity")
+    observed = None
+    schedule = None
+    if market_input_mode == "historical":
+        if observed_packet is not None or observed_packet_sha256 is not None or allow_input_gaps:
+            raise ValueError("explicit_observed_input_mode_required")
+    elif market_input_mode in {"observed", "reconstructed_at_observed_schedule"}:
+        if observed_packet is None or not observed_packet_sha256:
+            raise ValueError("observed_packet_and_external_pin_required")
+        from backtest.observed_scenario_data import ObservedScenarioData
+        observed = ObservedScenarioData(observed_packet,observed_packet_sha256,allow_gaps=allow_input_gaps)
+        schedule = observed.schedule(bundle["start_ms"],bundle["end_ms"])
+        for item in schedule:
+            if item["status"] == "AVAILABLE":
+                observed.snapshot(item["available_at_ms"])
+                if market_input_mode == "reconstructed_at_observed_schedule":
+                    captured = market.snapshot(item["slot"]*300000)
+                    if (not captured.get("valid") or any(
+                        item["available_at_ms"]-captured["timeframes"][tf]["forming"]["observed_at_ms"] > 120000
+                        for tf in ("15m","30m","1h"))):
+                        raise ValueError("reconstructed_snapshot_stale_at_observed_schedule")
+    else:
+        raise ValueError("explicit_observed_input_mode_required")
     origin="fixture" if mode=="fixture" else "luna"
     if mode=="frozen":
         header=json.loads(Path(tape_path).read_text().splitlines()[0])
-        if header["contract"].get("schema") != 2:
+        if header["contract"].get("schema") != (4 if policy_profile.endswith("economic-v4") else 3 if observed is not None else 2):
             raise TapeMismatch("legacy_tape_requires_original_code; record_explicit_legacy-no-recovery_profile_for_new_comparison")
         origin=header["contract"]["decision_origin"]
         if origin not in {"fixture","luna"}:raise ValueError("unknown_decision_origin")
-    contract=contract_for(bundle,path,cost_multiplier,initial_equity,origin,policy_profile,initial_state)
+    contract=contract_for(bundle,path,cost_multiplier,initial_equity,origin,policy_profile,initial_state,
+        observed_manifest=observed.manifest() if observed is not None else None,
+        market_input_mode=market_input_mode,allow_input_gaps=allow_input_gaps)
     output=Path(output).resolve()
     if output.exists():raise ValueError("never_overwrite_replay")
     if any(p in output.parts for p in ("state","logs","trading")):
         raise ValueError("dedicated_research_directory_required")
     output.mkdir(parents=True)
-    tape=DecisionTape(tape_path,"frozen" if mode=="frozen" else "record",contract)
+    economic_profile = policy_profile.endswith("economic-v4")
+    if economic_profile:
+        from analysis.scenario_calculated_replay import EconomicTape, EconomicClock, EconomicDecisions
+    tape_type = EconomicTape if economic_profile else DecisionTape
+    tape=tape_type(tape_path,"frozen" if mode=="frozen" else "record",contract)
     conn=sqlite3.connect(output/"replay.sqlite")
     from live import tracking
     tracking.ensure_schema(conn)
@@ -367,9 +455,21 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
         raise ValueError("offline_exchange_required")
     broker=ScenarioDemoBroker(conn,session=session,expected_main_uid="42",clock=session.clock,execution_enabled=True)
     driver=Driver(bundle,market,session,path,broker,conn)
-    provider=Decisions(tape,driver,mode,policy=policy,model_generator=model_generator)
-    runtime=ScenarioRuntime(conn,broker,provider,lambda:market.snapshot((session.ts_ms//300000)*300000),
-                            clock=session.clock,**POLICY_PROFILES[policy_profile])
+    driver.strict_protection = economic_profile
+    clock = (EconomicClock(driver,tape,monotonic=clock_monotonic or time.monotonic)
+             if economic_profile else session.clock)
+    provider=(EconomicDecisions(tape,driver,mode,clock,policy=policy,model_generator=model_generator,
+                               before_http=before_http)
+              if economic_profile else Decisions(tape,driver,mode,policy=policy,model_generator=model_generator))
+    def snapshot():
+        if observed is None:
+            return market.snapshot((session.ts_ms//300000)*300000)
+        captured = observed.snapshot(session.ts_ms)
+        return captured if market_input_mode == "observed" else market.snapshot((session.ts_ms//300000)*300000)
+    runtime=ScenarioRuntime(conn,broker,provider,snapshot,
+                            clock=clock,**POLICY_PROFILES[policy_profile],
+                            calculated_review_enabled=policy_profile=="calculated-economic-v4",
+                            calculated_review_propose=provider.calculated if policy_profile=="calculated-economic-v4" else None)
     if initial_state=="recovery-stage0":
         with mutation_lock(conn):
             state=runtime.state()
@@ -382,17 +482,70 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
             runtime._save(state)
     statuses=Counter();outcome_reasons=Counter();start=bundle["start_ms"];end=bundle["end_ms"]
     decisions=list(range(start,end,300000))
+    stopped = None
+    drain_status = "COMPLETE"
     if len(decisions)>max_decisions:raise ValueError("decision_budget_exceeded")
     try:
         for i,at in enumerate(decisions):
-            driver.advance_to(at)
-            result=runtime.tick();statuses[result["status"]]+=1
+            release = at if schedule is None else schedule[i]["available_at_ms"]
+            if not at <= release < min(at+300000,end):
+                raise ValueError("observed_release_outside_decision_window")
+            driver.advance_to(release)
+            if schedule is not None and schedule[i]["status"] == "MISSING":
+                statuses["INPUT_GAP"] += 1
+                outcome_reasons["INPUT_GAP:observed_snapshot_missing"] += 1
+                continue
+            if economic_profile:
+                tape.begin(at);clock.begin()
+            try:
+                result=runtime.tick()
+            except Exception as exc:
+                if not economic_profile:
+                    raise
+                provider.fatal = clock.fatal or type(exc).__name__
+                result = dict(status="blocked",reason="economic_tick_failed",
+                              failure_code=provider.fatal)
+            statuses[result["status"]]+=1
+            if economic_profile:
+                clock.finish();tape.finish(result)
+                if clock.fatal:
+                    provider.fatal = clock.fatal
             reason=result.get("failure_code") or result.get("reason")
             if isinstance(reason,str):outcome_reasons[result["status"]+":"+reason]+=1
-            if provider.fatal:raise TapeMismatch(provider.fatal)
+            if economic_profile:
+                technical_reason = provider.fatal
+                if (result.get("reason") in {"submission_unknown", "llm_call_failed",
+                        "llm_output_contract_failed", "llm_input_preparation_failed"}
+                        or result.get("failure_code") in {"review_deadline_failure",
+                            "review_contract_failure", "review_tape_failure"}
+                        or (result.get("reason") == "reconciliation_or_proposal_failed"
+                            and result.get("failure_code") != "fresh_safety_rejection")
+                        or result.get("status") == "lock_busy"):
+                    technical_reason = technical_reason or result.get("failure_code") or result.get("reason")
+                if technical_reason:
+                    stopped = dict(status="STOPPED_TECHNICAL_FAILURE", reason=technical_reason,
+                        slot_ms=at, economic_time_ms=session.ts_ms, profile=policy_profile,
+                        remaining_decision_slots=len(decisions)-i-1,
+                        protect_only_end_ms=end, new_model_calls_forbidden=True)
+                    if failure_callback is not None:
+                        failure_callback(dict(stopped))
+                    break
+            elif provider.fatal:
+                raise TapeMismatch(provider.fatal)
             if (i+1)%12==0:print(json.dumps({"progress":i+1,"total":len(decisions),"status":result["status"]}),flush=True)
-        driver.advance_to(end)
-        with mutation_lock(conn):runtime._reconcile(runtime.state())
+        try:
+            driver.advance_to(end)
+            with mutation_lock(conn):runtime._reconcile(runtime.state())
+        except Exception:
+            if not economic_profile:
+                raise
+            drain_status = "INCOMPLETE_PROTECTION_OR_SETTLEMENT"
+            if stopped is None:
+                stopped = dict(status="STOPPED_TECHNICAL_FAILURE",reason="economic_terminal_drain_failed",
+                    slot_ms=None,economic_time_ms=session.ts_ms,profile=policy_profile,
+                    remaining_decision_slots=0,protect_only_end_ms=end,new_model_calls_forbidden=True)
+                if failure_callback is not None:
+                    failure_callback(dict(stopped))
         tape.assert_exhausted()
         settlements=[json.loads(r[0]) for r in conn.execute("SELECT evidence FROM llm_scenario_settlements ORDER BY rowid")]
         completed=[r for r in settlements if r.get("execution_ids")]
@@ -421,6 +574,8 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
             halted_field_basis="HISTORICAL_BREAKER_LATCH_NOT_EFFECTIVE_ENTRY_PERMISSION",
             scenario_loss_budget_breaches=sum(r['net_pnl'] < -budgets[r['scenario_id']] for r in completed),
             scenario_risk_budgets=budgets)
+        if economic_profile:
+            economic["terminal_mark_price"] = str(session.mark_price)
         report=dict(schema=1,contract=contract,contract_hash=digest(contract),data_coverage=market.manifest(),
             simulated_only=True,mode="SYNTHETIC_FIXTURE" if origin=="fixture" else "HISTORICAL_LLM_RESEARCH",
             decisions=len(decisions),model_decisions=len(tape.rows),
@@ -441,13 +596,39 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
         if provider.input_failures:reasons.append("INPUT_PREPARATION_FAILURES")
         if economic["unclosed_scenario"] or economic["pending_intents"]:reasons.append("UNSETTLED_END_STATE")
         if economic["unknown_exchange_children"]:reasons.append("UNKNOWN_EXECUTION_EVIDENCE")
+        if observed is not None and not observed.manifest()["input_coverage_eligible"]:
+            reasons.append("OBSERVED_INPUT_COVERAGE_INELIGIBLE")
         if statuses.get("fenced"):reasons.append("FENCED_OBSERVATIONS")
         report["readiness"]={"profitability_proven":False,"insufficiency_reasons":reasons}
+        if economic_profile:
+            report["final_state_hash"] = digest(state)
+            report["economic_clock_trace_hash"] = digest([row["trace"] for row in tape.ticks])
+            event_tables = {}
+            for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'llm_scenario%' ORDER BY name"):
+                quoted = '"' + name.replace('"','""') + '"'
+                cursor = conn.execute(f"SELECT * FROM {quoted} ORDER BY rowid")
+                event_tables[name] = dict(columns=[field[0] for field in cursor.description],
+                                         rows=cursor.fetchall())
+            report["runtime_event_hash"] = digest(event_tables)
+            report["execution_status"] = "STOPPED" if stopped else "COMPLETE"
+            report["failure_evidence"] = stopped
+            report["coverage"] = dict(planned_slots=len(decisions),processed_slots=sum(statuses.values()),
+                model_free_drain_status=drain_status,model_free_drain_end_ms=end,
+                final_economic_time_ms=session.ts_ms,eligible=stopped is None and drain_status=="COMPLETE")
+            if stopped:
+                report["readiness"]["insufficiency_reasons"].append("STOPPED_TECHNICAL_FAILURE")
         report["result_hash"]=digest(report)
         # Run mechanics are outside the reproducible economic result hash.
         report["execution_metadata"]={"mode":mode,"actual_model_calls":provider.model_calls,
                                       "synthetic_policy_calls":provider.calls if policy is not None else 0,
                                       "tape_records_consumed":len(tape.used)}
+        if economic_profile:
+            report["execution_metadata"]["fixture_generator_calls"] = provider.fixture_generator_calls
+            report["execution_metadata"]["model_generator_dispatches"] = provider.model_calls
+            actual_count = getattr(model_generator,"actual_http_calls",None)
+            report["execution_metadata"]["actual_model_calls"] = (
+                0 if mode in {"fixture","frozen"} or provider.model_calls==0 else
+                actual_count-provider.initial_http_calls if type(actual_count) is int and type(provider.initial_http_calls) is int else None)
         (output/"report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False))
         (output/"exchange.json").write_text(json.dumps(session.snapshot(),indent=2,allow_nan=False))
         (output/"equity.json").write_text(json.dumps(driver.curve))
@@ -466,12 +647,18 @@ def main():
     parser.add_argument("--max-decisions",type=int,default=288)
     parser.add_argument("--policy-profile",choices=tuple(POLICY_PROFILES),default="current-live-v2")
     parser.add_argument("--initial-state",choices=("fresh-unblocked","recovery-stage0"),default="fresh-unblocked")
+    parser.add_argument("--observed-packet",type=Path)
+    parser.add_argument("--observed-packet-sha256")
+    parser.add_argument("--market-input-mode",choices=("historical","observed","reconstructed_at_observed_schedule"),default="historical")
+    parser.add_argument("--allow-input-gaps",action="store_true")
     args=parser.parse_args()
     bundle,market=load_bundle(args.input)
     with network_boundary(args.mode,os.environ.get("PRISM_BTC_SCENARIO_OAUTH_URL")) as blocked:
         report=run_replay(bundle,market,args.output,mode=args.mode,tape_path=args.tape,path=args.path,
             cost_multiplier=args.cost_multiplier,max_decisions=args.max_decisions,policy_profile=args.policy_profile,
-            initial_state=args.initial_state)
+            initial_state=args.initial_state,observed_packet=args.observed_packet,
+            observed_packet_sha256=args.observed_packet_sha256,market_input_mode=args.market_input_mode,
+            allow_input_gaps=args.allow_input_gaps)
         if blocked:raise RuntimeError("forbidden_network_attempt_detected")
     print(json.dumps({"status":"complete","result_hash":report["result_hash"],"economic":report["economic"],
                       "execution_metadata":report["execution_metadata"]},ensure_ascii=False))
