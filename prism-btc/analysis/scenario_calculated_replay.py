@@ -11,7 +11,12 @@ import time
 
 from backtest.scenario_tape import TapeMismatch, digest
 
-ECONOMIC_PROFILES = {"single-pass-economic-v4", "calculated-economic-v4"}
+ALLOCATION_PROFILES = {
+    "allocation-single-economic-v1": "allocation-single",
+    "allocation-calculated-economic-v1": "allocation-calculated",
+}
+ECONOMIC_PROFILES = {"single-pass-economic-v4", "calculated-economic-v4", *ALLOCATION_PROFILES}
+REVIEW_PROFILES = {"calculated-economic-v4", *ALLOCATION_PROFILES}
 
 
 class EconomicTape:
@@ -211,7 +216,13 @@ class EconomicDecisions:
         from live.scenario_preview import response_contract
         from live.scenario_provenance import review_policy_binding
         row = self._inputs(snapshot, context)
-        contract, bindings = response_contract(context), review_policy_binding()
+        research_mode = ALLOCATION_PROFILES.get(self.tape.contract["policy_profile"], "legacy")
+        if research_mode != "legacy":
+            from functools import partial
+            research_review = partial(research_review, research_mode=research_mode)
+        contract = response_contract(context)
+        bindings = (review_policy_binding() if research_mode == "legacy"
+                    else review_policy_binding(research_mode=research_mode))
         def durable(event):
             effect=dict(event_sha256=digest(event),durable_applied=False)
             row.setdefault("record_effects",[]).append(effect)

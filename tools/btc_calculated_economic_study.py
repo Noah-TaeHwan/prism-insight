@@ -34,6 +34,10 @@ from tools.compare_btc_scenario_replays import (
 ORDER = ("A_OHLC", "B_OHLC", "B_OLHC", "A_OLHC")
 MAX_HTTP = 24
 STAGES = {1: (0, 4, 24), 2: (4, 24, 144)}
+PROTOCOLS = {
+    "legacy": ("single-pass-economic-v4", "calculated-economic-v4"),
+    "risk-allocation-v1": ("allocation-single-economic-v1", "allocation-calculated-economic-v1"),
+}
 
 
 def predecessor_manifest(root, registry_sha256):
@@ -156,17 +160,19 @@ def _oracle(market, bundle):
 
 
 def prepare(root, market_path, observed_path, observed_sha256, source_reference, *, initial_equity=10000.,
-            stage=1, predecessor_root=None, predecessor_registry_sha256=None):
+            stage=1, predecessor_root=None, predecessor_registry_sha256=None, protocol="legacy"):
     """Freeze original files and the registered fixed stage window before calls."""
     root, market_path, observed_path = map(lambda p: Path(p).resolve(), (root, market_path, observed_path))
     require(not root.exists(), "never_overwrite_study")
     require(type(stage) is int and stage in STAGES, "fixed_stage_required")
+    require(protocol in PROTOCOLS, "registered_protocol_required")
     offset, slots, cap = STAGES[stage]
     predecessor = None
     if stage == 2:
         require(predecessor_root is not None, "stage_two_predecessor_required")
         require(Path(predecessor_root).resolve() not in root.parents, "never_write_inside_predecessor")
         previous_registry, predecessor = predecessor_manifest(predecessor_root, predecessor_registry_sha256)
+        require(previous_registry.get("protocol", "legacy") == protocol, "predecessor_protocol_changed")
     else:
         require(predecessor_root is None and predecessor_registry_sha256 is None, "stage_one_has_no_predecessor")
     require(isinstance(source_reference, str) and bool(source_reference), "source_reference_required")
@@ -189,7 +195,7 @@ def prepare(root, market_path, observed_path, observed_sha256, source_reference,
     pilot["data_hash"] = digest({k: v for k, v in pilot.items() if k not in {"data_hash", "coverage", "provenance"}})
     variants, contracts = [], {}
     for name in ORDER:
-        profile = "single-pass-economic-v4" if name.startswith("A_") else "calculated-economic-v4"
+        profile = PROTOCOLS[protocol][0 if name.startswith("A_") else 1]
         path = name.split("_")[1]
         variants.append(dict(name=name, path=path, cost_multiplier=1, profile=profile))
         contracts[name] = contract_for(pilot, path, 1., initial_equity, origin="luna", policy_profile=profile,
@@ -227,6 +233,8 @@ def prepare(root, market_path, observed_path, observed_sha256, source_reference,
             variant_fields=list(CALCULATED_VARIANT_FIELDS), expected_common_contract=common,
             expected_arm_contracts={name: {k: c[k] for k in CALCULATED_ARM_FIELDS} for name, c in contracts.items()},
             expected_variant_contracts={name: {k: c[k] for k in CALCULATED_VARIANT_FIELDS} for name, c in contracts.items()}))
+    if protocol != "legacy":
+        registry["protocol"] = protocol
     if stage == 2:
         registry.update(predecessor=predecessor, purpose="DEVELOPMENT_COMPARISON_NOT_INDEPENDENT_OOS_OR_M5_PROOF",
             trial_ledger=[dict(stage=1, root=predecessor["root"], registry_sha256=predecessor["registry_sha256"], max_http_calls=24),
@@ -296,6 +304,11 @@ def run(root, *, replay=run_replay, model_factory=GuardedModelCall):
     """One explicit serial run. An existing start marker forbids all restarts."""
     root = Path(root).resolve()
     registry = json.loads((root / "registry.json").read_text())
+    protocol = registry.get("protocol", "legacy")
+    require(protocol in PROTOCOLS, "registered_protocol_required")
+    require([v["name"] for v in registry["variants"]] == list(ORDER)
+            and all(v["profile"] == PROTOCOLS[protocol][0 if v["name"].startswith("A_") else 1]
+                    for v in registry["variants"]), "registered_protocol_profiles_required")
     require(type(registry["stage"]) is int and registry["stage"] in STAGES, "fixed_stage_required")
     _, slots, cap = STAGES[registry["stage"]]
     require(registry["max_http_calls"] == cap
@@ -412,6 +425,7 @@ def main():
     prep.add_argument("--source-reference", required=True)
     prep.add_argument("--initial-equity", type=float, default=10000.)
     prep.add_argument("--stage", type=int, choices=(1, 2), default=1)
+    prep.add_argument("--protocol", choices=tuple(PROTOCOLS), default="legacy")
     prep.add_argument("--predecessor-root", type=Path)
     prep.add_argument("--predecessor-registry-sha256")
     execute = subs.add_parser("run")
@@ -421,7 +435,7 @@ def main():
         result = prepare(args.root, args.market, args.observed, args.observed_sha256,
                          args.source_reference, initial_equity=args.initial_equity, stage=args.stage,
                          predecessor_root=args.predecessor_root,
-                         predecessor_registry_sha256=args.predecessor_registry_sha256)
+                         predecessor_registry_sha256=args.predecessor_registry_sha256, protocol=args.protocol)
         print(json.dumps(dict(status="PREPARED_ZERO_CALLS", registry_sha256=sha(args.root / "registry.json"),
                               registry_canonical_sha256=digest(result))))
     else:

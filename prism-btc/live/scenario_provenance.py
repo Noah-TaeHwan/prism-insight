@@ -29,7 +29,7 @@ MAX_REVIEW_BYTES = 16 * 1024
 _current = ContextVar('scenario_audit', default=None)
 
 
-def review_policy_binding():
+def review_policy_binding(*, research_mode="legacy"):
     """Opt-in identity, separate from the default legacy policy manifest."""
     # Literal, opt-in imports keep this loader independent of supplied names.
     from analysis import scenario_review_tape
@@ -58,6 +58,12 @@ def review_policy_binding():
         'live/scenario_runtime.py': scenario_runtime,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+        raise ValueError('research_review_mode')
+    if research_mode != "legacy":
+        from live import scenario_risk_allocation, scenario_execution
+        modules['live/scenario_risk_allocation.py'] = scenario_risk_allocation
+        modules['live/scenario_execution.py'] = scenario_execution
     sources, parity = {}, {}
     for name, module in modules.items():
         if sys.modules.get(name.removesuffix('.py').replace('/', '.')) is not module:
@@ -67,7 +73,8 @@ def review_policy_binding():
         parity[name] = _loaded_parity(name, source)
     if set(parity.values()) != {'VERIFIED'}:
         raise ValueError('review_mixed_loaded_policy')
-    return dict(policy='calculated-review-v1', source_sha256=sources, loaded_parity=parity)
+    return dict(policy='calculated-review-v1' if research_mode == "legacy" else research_mode,
+                source_sha256=sources, loaded_parity=parity)
 
 
 def _gap():

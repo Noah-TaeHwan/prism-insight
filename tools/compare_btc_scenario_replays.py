@@ -108,7 +108,8 @@ def verify_calculated_registry_contract(contract, registry, variant):
         expected.update(value)
     require(type(contract["schema"]) is int and contract["schema"] == 4,
             "calculated_contract_schema_required")
-    require(contract["policy_profile"] in {"single-pass-economic-v4", "calculated-economic-v4"},
+    require(contract["policy_profile"] in {"single-pass-economic-v4", "calculated-economic-v4",
+            "allocation-single-economic-v1", "allocation-calculated-economic-v1"},
             "unregistered_economic_profile")
     require(contract["economic_clock_contract"] == "NATIVE_MONOTONIC_INTEGER_MS_FULL_TICK_V1",
             "economic_clock_contract_mismatch")

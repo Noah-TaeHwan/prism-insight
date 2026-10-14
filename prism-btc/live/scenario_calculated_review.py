@@ -336,14 +336,93 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
     return project_model_input(payload)[0]
 
 
+ALLOCATION_SINGLE_PROMPT = """
+Research allocation contract: choose direction, strategic prices, SL, TP,
+confidence and allocation_fraction for each NEW entry. Do not emit entry quantity.
+The host converts allocation fractions to BTC using supplied costs, the original
+budget, confidence and existing consumed/reserved risk; total new-entry fractions
+must not exceed one. Fractions allocate the remaining confidence-limited NEW risk
+budget, not equity, margin, existing holdings or TP quantities. Never raise
+confidence to fit size. Cancellations retain reservations until confirmed.
+Positive authorized chase is reserved at the worst permitted price for the whole
+new batch. Host size may therefore be smaller; partial fills do not replenish this allocation.
+No automatic price, stop, confidence or allocation repair is permitted. Below-minimum
+sizes or post-price-adjustment budget excess are rejected, not resized.
+Existing position quantities are observations, not fields for you to rewrite.
+"""
+
+
+def calculate_allocation_candidate(raw, context, *, candidate_id, original_input_now=None):
+    """Keep model allocation and host quantity wire distinct and hash-bound."""
+    from live.scenario_risk_allocation import allocate_entry_risk, validate_allocation_prices
+    original = deepcopy(raw)
+    try:
+        if not _matches(original, allocation_response_schema(context)):
+            raise ValueError("research_allocation_contract")
+        wire, allocation = allocate_entry_risk(original, context)
+        receipt = calculate_candidate(wire, context, candidate_id=candidate_id,
+                                      original_input_now=original_input_now)
+        receipt.update(raw_allocation_proposal=original, raw_allocation_sha256=receipt_hash(original),
+                       allocation_receipt=allocation, allocation_sha256=receipt_hash(allocation))
+        if receipt["eligible"]:
+            validate_allocation_prices(receipt["effective_plan"], allocation, context)
+    except (ScenarioValidationError, ValueError) as exc:
+        if "receipt" not in locals():
+            receipt = dict(id=candidate_id, raw_allocation_proposal=original,
+                raw_allocation_sha256=receipt_hash(original), execution_authorized=False)
+        receipt.update(eligible=False, rejection=str(exc))
+    receipt.pop("receipt_sha256", None)
+    receipt["receipt_sha256"] = receipt_hash(receipt)
+    return receipt
+
+
+def allocation_response_schema(context):
+    """Research-only entry schema; the legacy wire contract is untouched."""
+    schema = deepcopy(response_schema(context))
+    row = schema["properties"]["entries"]["items"]
+    row["properties"].pop("quantity")
+    row["properties"]["allocation_fraction"] = {"type": "number"}
+    row["required"] = ["allocation_fraction" if key == "quantity" else key for key in row["required"]]
+    if (context.get("recovery") or {}).get("first_observation") is True:
+        schema["properties"]["action"]["enum"] = ["WAIT"]
+        for field in ("entries", "take_profits", "partial_stops"):
+            schema["properties"][field]["maxItems"] = 0
+    return schema
+
+
+def allocation_system_prompt(base):
+    # Replace only new-entry sizing instructions; holding/exit quantities and
+    # all directional, lifecycle and safety instructions remain unchanged.
+    base = base.replace("Leverage is FIXED 10, not confidence-dependent. Allocate less quantity to weaker\n"
+        "evidence. Set the structural invalidation first, then size down for the host\n"
+        "risk cap including costs; recovery reduces quantity, not automatically the",
+        "Leverage is FIXED 10, not confidence-dependent. Allocate less new-entry risk to weaker\n"
+        "evidence. Set structural invalidation first, then choose allocation_fraction;\n"
+        "the host calculates size including costs; recovery reduces size, not automatically the")
+    base = base.replace("quantity must be a multiple of quantity_step and satisfy minimum_quantity and\n"
+        "minimum_notional. Round proposed quantity DOWN, never squeeze SL to fit more size.",
+        "the host checks quantity_step, minimum_quantity and minimum_notional after sizing.\n"
+        "Choose allocation_fraction for new entries; never squeeze SL to fit more size.")
+    base = base.replace("Existing sizing cap: sum(new-entry risk) <= min(original_budget*confidence,\n"
+        "budget remaining after consumed/reserved risk). Per-BTC risk is positive entry-to-SL\n"
+        "distance + entry*estimated_cost_rate + hard_stop*slippage_bps/10000; round quantity\n"
+        "DOWN to quantity_step. Never raise confidence or widen SL merely to fit quantity.",
+        "The host computes the new-entry budget and quantity including costs and reserved risk.\n"
+        "Choose allocation_fraction without performing BTC sizing arithmetic. Never raise confidence\n"
+        "or widen SL merely to fit size.")
+    return base
+
+
 def research_review(snapshot, context, response_contract, *, generate, record,
-                    clock=time.time):
+                    clock=time.time, research_mode="legacy"):
     """At most two no-retry calls, original 75-second budget; never an order API.
 
     record(event_dict) must durably preserve evidence or raise. Historical callers
     supply a clock mapped to that observation, including actual elapsed latency.
     """
     from live.scenario_recovery import _wire
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+        raise ValueError("research_review_mode")
     if _wire.get() is not None:
         raise ValueError("production_wire_capture_forbidden")
     if not callable(generate) or not callable(record):
@@ -375,9 +454,12 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
     if context.get("scenario_id") is None:
         base += scenario_llm.FLAT_ENTRY_PROMPT
+    allocation = research_mode != "legacy"
+    if allocation:
+        base = allocation_system_prompt(base)
     fresh()
-    payload = _model_payload(frozen_snapshot, frozen_context, contract)
-    schema = response_schema(frozen_context)
+    schema = allocation_response_schema(frozen_context) if allocation else response_schema(frozen_context)
+    payload = _model_payload(frozen_snapshot, frozen_context, schema if allocation else contract)
     wait_schema = deepcopy(schema)
     wait_schema["properties"]["action"]["enum"] = ["WAIT"]
     for field in ("side", "hard_stop", "chase", "stop_revision"):
@@ -426,7 +508,45 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             raise ValueError("research_response_contract")
         return parsed
 
-    draft = call("candidate", DRAFT_PROMPT, payload, draft_schema)
+    if research_mode == "allocation-single":
+        raw = call("single", ALLOCATION_SINGLE_PROMPT, payload, schema)
+        now_context = dict(frozen_context, now=fresh())
+        if raw["action"] == "WAIT":
+            normalized = validate_wire_proposal(raw, now_context)
+            validate_scenario({k: v for k, v in normalized.items() if k not in {"review", "recovery"}}, now_context)
+            selected = dict(id="WAIT", raw_proposal=raw, input_sha256=original)
+            selected["receipt_sha256"] = receipt_hash(selected)
+        else:
+            selected = calculate_allocation_candidate(raw, now_context, candidate_id="c0",
+                                                     original_input_now=frozen_context["now"])
+            if not selected["eligible"]:
+                record(deepcopy(dict(kind="CALCULATED_CANDIDATE_REJECTED", body=selected)))
+                raise ValueError("research_allocation_rejected:" + selected["rejection"])
+            selected["input_sha256"] = original
+            del selected["receipt_sha256"]
+            selected["receipt_sha256"] = receipt_hash(selected)
+        bundle = dict(wait=selected if raw["action"] == "WAIT" else None,
+                      candidates=[] if raw["action"] == "WAIT" else [selected], input_sha256=original)
+        bundle_sha = receipt_hash(bundle)
+        record(deepcopy(dict(kind="CALCULATED_CANDIDATES", body=bundle, sha256=bundle_sha)))
+        final = dict(selection=selected["id"], receipt_sha256=selected["receipt_sha256"], rationale=raw["rationale"])
+        if not isinstance(final["rationale"], str) or not 1 <= len(final["rationale"].strip()) <= 2000:
+            raise ValueError("research_selection_rationale")
+        if raw["expires_at"] <= fresh():
+            raise ValueError("research_selected_expired")
+        result = dict(mode="ORDER_FREE_ALLOCATION_SINGLE", executable=False, orders_submitted=0,
+            calls=1, selection=final, selected=selected, candidates=bundle, bundle_sha256=bundle_sha,
+            elapsed_seconds=clock()-started, recovery_authorization="NOT_EVALUATED",
+            fresh_execution_validation="NOT_PERFORMED")
+        record(deepcopy(dict(kind="RESEARCH_RESULT", pending_post_record_time_check=True, body=result)))
+        if raw["expires_at"] <= fresh():
+            raise ValueError("research_selected_expired")
+        return deepcopy(result)
+    draft_prompt = DRAFT_PROMPT
+    if allocation:
+        draft_prompt = draft_prompt.replace("SL, TP, quantities and fractions yourself", "SL, TP, confidence and entry allocation_fraction yourself") + ALLOCATION_SINGLE_PROMPT
+        payload = _model_payload(frozen_snapshot, frozen_context, draft_schema)
+    draft = call("candidate", draft_prompt, payload, draft_schema)
     category = "FIRST_OBSERVATION" if first_observation else "CANDIDATES_PROVIDED" if draft["candidates"] else "NO_CANDIDATES_SUPPLIED"
     if len(draft["no_candidate_reason"]) > 2000 or (not draft["candidates"] and not draft["no_candidate_reason"].strip()):
         raise ValueError("research_missing_candidate_reason")
@@ -436,7 +556,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     validate_scenario({k: v for k, v in wait_normalized.items() if k not in {"review", "recovery"}}, now_context)
     wait_receipt = dict(id="WAIT", raw_proposal=wait_wire, input_sha256=original)
     wait_receipt["receipt_sha256"] = receipt_hash(wait_receipt)
-    receipts = [calculate_candidate(wire, now_context, candidate_id=f"c{index}",
+    calculator = calculate_allocation_candidate if allocation else calculate_candidate
+    receipts = [calculator(wire, now_context, candidate_id=f"c{index}",
                                    original_input_now=frozen_context["now"])
                 for index, wire in enumerate(draft["candidates"])]
     for receipt in receipts:
@@ -480,6 +601,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
                   candidates=bundle, bundle_sha256=bundle_sha,
                   elapsed_seconds=clock() - started,
                   recovery_authorization="NOT_EVALUATED", fresh_execution_validation="NOT_PERFORMED")
+    if allocation:
+        result["mode"] = "ORDER_FREE_ALLOCATION_CALCULATED"
     record(deepcopy(dict(kind="RESEARCH_RESULT", pending_post_record_time_check=True, body=result)))
     if selected["raw_proposal"]["expires_at"] <= fresh():
         raise ValueError("research_selected_expired")

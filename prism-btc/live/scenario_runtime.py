@@ -104,7 +104,13 @@ def _economic_evidence(item):
 class ScenarioRuntime:
     def __init__(self, conn, broker, propose, snapshot, *, clock=time.time,
                  recovery_enabled=False, automatic_normalization_enabled=False,
-                 calculated_review_enabled=False, calculated_review_propose=None):
+                 calculated_review_enabled=False, calculated_review_propose=None,
+                 research_review_mode="legacy"):
+        if research_review_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+            raise ValueError("research_review_mode")
+        if research_review_mode != "legacy" and not calculated_review_enabled:
+            raise ValueError("allocation_review_requires_explicit_enable")
+        self.research_review_mode = research_review_mode
         if type(calculated_review_enabled) is not bool:
             raise ValueError("calculated_review_flag_must_be_bool")
         if calculated_review_enabled and not callable(calculated_review_propose):
@@ -499,7 +505,7 @@ class ScenarioRuntime:
                 from live.scenario_contract import validate_wire_proposal
                 from live.scenario_provenance import review_policy_binding
                 from analysis.scenario_review_tape import MAX_BYTES
-                review_bindings = review_policy_binding()
+                review_bindings = review_policy_binding(research_mode=self.research_review_mode)
                 review_envelope = self.calculated_review_propose(snap, ctx,
                     record=lambda event: self._record_calculated_review(slot, event))
                 envelope_body = _json(review_envelope)
@@ -572,10 +578,10 @@ class ScenarioRuntime:
                     from live.scenario_review_guard import guard_review
                     from live.scenario_preview import response_contract
                     from live.scenario_provenance import review_policy_binding
-                    if review_policy_binding() != review_bindings:
+                    if review_policy_binding(research_mode=self.research_review_mode) != review_bindings:
                         raise ValueError("review_policy_changed")
                     guarded = guard_review(snap, ctx, response_contract(ctx), review_envelope,
-                                           fresh, bindings=review_bindings)
+                                           fresh, bindings=review_bindings, research_mode=self.research_review_mode)
                     payload, validated = guarded["payload"], guarded["validated"]
                     self._record_calculated_review(slot, dict(kind="FRESH_REVIEW_RECEIPT",
                                                              receipt=guarded["receipt"]))
@@ -600,7 +606,7 @@ class ScenarioRuntime:
                     self._assert_calculated_review_time(review_envelope, ctx, fresh, payload)
                     # Complete all elapsed review/journal I/O before the atomic
                     # observation/intent cut, while authority is still untouched.
-                    if review_policy_binding() != review_bindings:
+                    if review_policy_binding(research_mode=self.research_review_mode) != review_bindings:
                         raise ValueError("review_policy_changed")
                     commit_at = self.clock()
                     self._reconcile(state, observed_at=commit_at)
@@ -611,7 +617,8 @@ class ScenarioRuntime:
                     # Reprice ORIGINAL raw, not the effective plan. The bounded
                     # post-validation clock/fact check below is the final cut.
                     final_guard = guard_review(snap,ctx,response_contract(ctx),review_envelope,
-                                               commit_context,bindings=review_bindings)
+                                               commit_context,bindings=review_bindings,
+                                               research_mode=self.research_review_mode)
                     self._assert_calculated_review_time(review_envelope,ctx,commit_context,payload,
                                                         observed_at=commit_at)
                     # Pure verification has real latency too. Advance once after

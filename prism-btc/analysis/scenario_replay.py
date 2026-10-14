@@ -33,6 +33,7 @@ from live.scenario_runtime import ScenarioRuntime
 from live.scenario_preview import response_contract
 from live.scenario_llm import propose,SYSTEM_PROMPT,FLAT_ENTRY_PROMPT,MA_STRUCTURE_PROMPT,ScenarioModelError
 from core.scenario_limit_prices import POLICY_VERSION
+from analysis.scenario_calculated_replay import ALLOCATION_PROFILES, ECONOMIC_PROFILES, REVIEW_PROFILES
 from live.shared_entry_coordinator import mutation_lock
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -41,6 +42,8 @@ POLICY_PROFILES = {
     "legacy-no-recovery": {"recovery_enabled": False, "automatic_normalization_enabled": False},
     "single-pass-economic-v4": {"recovery_enabled": True, "automatic_normalization_enabled": True},
     "calculated-economic-v4": {"recovery_enabled": True, "automatic_normalization_enabled": True},
+    "allocation-single-economic-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
+    "allocation-calculated-economic-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
 }
 _identity_scope_lock = threading.Lock()
 INPUT_PREPARATION_CODES = {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
@@ -185,7 +188,7 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
         latencies=dict(entry=5000,market=5000,cancel=2000,amend=2000,model="measured_and_taped_ms"),
         decision_interval_ms=300000,protection_interval_ms=60000,
         terminal_policy="NO_FORCED_CLOSE_MARK_OPEN_POSITION",liquidity="previous_minute_volume_shared_across_four_path_points")
-    if policy_profile in {"single-pass-economic-v4", "calculated-economic-v4"}:
+    if policy_profile in ECONOMIC_PROFILES:
         import inspect
         from live.scenario_contract import response_schema
         contract.update(schema=4,
@@ -195,7 +198,7 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
             phase_contracts={"profile":policy_profile,
                 "schema_builder_sha256":hashlib.sha256(inspect.getsource(response_schema).encode()).hexdigest(),
                 "SINGLE_PASS":hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()})
-        if policy_profile == "calculated-economic-v4":
+        if policy_profile in REVIEW_PROFILES:
             from live.scenario_calculated_review import DRAFT_PROMPT, SELECT_PROMPT, research_review
             from live.scenario_provenance import review_policy_binding
             contract["review_binding"] = review_policy_binding()
@@ -206,6 +209,23 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
                 schema_builder_sha256=hashlib.sha256(inspect.getsource(research_review).encode()).hexdigest(),
                 wire_schema_builder_sha256=contract["phase_contracts"]["schema_builder_sha256"],
                 actual_phase_schema_binding="EXACT_GENERATE_REQUEST_RESPONSE_SCHEMA_IN_FULL_INPUT_TAPE")
+            if policy_profile in ALLOCATION_PROFILES:
+                from live.scenario_calculated_review import (
+                    allocation_response_schema, allocation_system_prompt, ALLOCATION_SINGLE_PROMPT,
+                )
+                research_mode = ALLOCATION_PROFILES[policy_profile]
+                contract["review_binding"] = review_policy_binding(research_mode=research_mode)
+                allocation_draft = DRAFT_PROMPT.replace("SL, TP, quantities and fractions yourself",
+                    "SL, TP, confidence and entry allocation_fraction yourself") + ALLOCATION_SINGLE_PROMPT
+                phase_prompts = ({"SINGLE": ALLOCATION_SINGLE_PROMPT} if research_mode == "allocation-single"
+                                 else {"DRAFT": allocation_draft, "SELECT": SELECT_PROMPT})
+                contract["phase_contracts"] = dict(profile=policy_profile, research_mode=research_mode,
+                    max_model_calls=1 if research_mode == "allocation-single" else 2,
+                    **{key: hashlib.sha256(value.encode()).hexdigest() for key, value in phase_prompts.items()},
+                    base_transform_sha256=hashlib.sha256(inspect.getsource(allocation_system_prompt).encode()).hexdigest(),
+                    schema_builder_sha256=hashlib.sha256(inspect.getsource(research_review).encode()).hexdigest(),
+                    wire_schema_builder_sha256=hashlib.sha256(inspect.getsource(allocation_response_schema).encode()).hexdigest(),
+                    actual_phase_schema_binding="EXACT_GENERATE_REQUEST_RESPONSE_SCHEMA_IN_FULL_INPUT_TAPE")
         contract["observed_data"] = dict(mode=market_input_mode, provider_manifest=observed_manifest,
             allow_input_gaps=allow_input_gaps, clock="OBSERVED_AVAILABILITY_BEFORE_SIMULATED_CONTEXT",
             account_source="INDEPENDENT_SIMULATED_ACCOUNT_ONLY")
@@ -414,7 +434,7 @@ class Decisions:
 
 
 def run_replay(bundle,market,output,**kwargs):
-    with replay_identity_scope(economic=kwargs.get("policy_profile", "").endswith("economic-v4")):
+    with replay_identity_scope(economic=kwargs.get("policy_profile", "") in ECONOMIC_PROFILES):
         return _run_replay(bundle,market,output,**kwargs)
 
 
@@ -426,9 +446,9 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
     """No production paths accepted; fresh DB per run and explicit data provenance."""
     if mode not in {"fresh","frozen","fixture"} or path not in {"OHLC","OLHC"}:
         raise ValueError("explicit_replay_mode_required")
-    if mode=="fixture" and policy is None and not (policy_profile.endswith("economic-v4") and model_generator is not None):
+    if mode=="fixture" and policy is None and not (policy_profile in ECONOMIC_PROFILES and model_generator is not None):
         raise ValueError("fixture_policy_required")
-    if mode=="fixture" and policy_profile=="calculated-economic-v4" and model_generator is None:
+    if mode=="fixture" and policy_profile in REVIEW_PROFILES and model_generator is None:
         raise ValueError("calculated_fixture_generator_required")
     if mode!="fixture" and policy is not None:raise ValueError("fixture_must_not_be_labeled_llm")
     if type(max_decisions) is not int or not 1<=max_decisions<=288:
@@ -464,7 +484,7 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
     origin="fixture" if mode=="fixture" else "luna"
     if mode=="frozen":
         header=json.loads(Path(tape_path).read_text().splitlines()[0])
-        if header["contract"].get("schema") != (4 if policy_profile.endswith("economic-v4") else 3 if observed is not None else 2):
+        if header["contract"].get("schema") != (4 if policy_profile in ECONOMIC_PROFILES else 3 if observed is not None else 2):
             raise TapeMismatch("legacy_tape_requires_original_code; record_explicit_legacy-no-recovery_profile_for_new_comparison")
         origin=header["contract"]["decision_origin"]
         if origin not in {"fixture","luna"}:raise ValueError("unknown_decision_origin")
@@ -476,7 +496,7 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
     if any(p in output.parts for p in ("state","logs","trading")):
         raise ValueError("dedicated_research_directory_required")
     output.mkdir(parents=True)
-    economic_profile = policy_profile.endswith("economic-v4")
+    economic_profile = policy_profile in ECONOMIC_PROFILES
     if economic_profile:
         from analysis.scenario_calculated_replay import EconomicTape, EconomicClock, EconomicDecisions
     tape_type = EconomicTape if economic_profile else DecisionTape
@@ -506,8 +526,10 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
         return captured if market_input_mode == "observed" else market.snapshot((session.ts_ms//300000)*300000)
     runtime=ScenarioRuntime(conn,broker,provider,snapshot,
                             clock=clock,**POLICY_PROFILES[policy_profile],
-                            calculated_review_enabled=policy_profile=="calculated-economic-v4",
-                            calculated_review_propose=provider.calculated if policy_profile=="calculated-economic-v4" else None)
+                            calculated_review_enabled=policy_profile in REVIEW_PROFILES,
+                            calculated_review_propose=provider.calculated if policy_profile in REVIEW_PROFILES else None,
+                            **({"research_review_mode": ALLOCATION_PROFILES[policy_profile]}
+                               if policy_profile in ALLOCATION_PROFILES else {}))
     if initial_state=="recovery-stage0":
         with mutation_lock(conn):
             state=runtime.state()

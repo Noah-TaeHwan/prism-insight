@@ -1,5 +1,6 @@
 """Fresh-state check of a completely replayed review, never order authorization."""
 from copy import deepcopy
+from functools import partial
 import math
 
 from analysis.scenario_review_tape import replay_review
@@ -39,13 +40,16 @@ def _meaningful(plan):
 
 
 def guard_review(snapshot, original_context, response_contract, envelope, fresh_context,
-                 *, bindings=None):
+                 *, bindings=None, research_mode="legacy"):
     """Replay exact evidence, then reprice the original wire once on fresh facts.
 
     The caller still owns locking, recovery authorization and broker preflight.
     A receipt here does not assert any order was submitted or protection exists.
     """
-    outcome = replay_review(envelope, research_review, snapshot, original_context,
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+        raise ValueError("research_review_mode")
+    review = research_review if research_mode == "legacy" else partial(research_review, research_mode=research_mode)
+    outcome = replay_review(envelope, review, snapshot, original_context,
                             response_contract, bindings=bindings)
     if outcome.get("status") != "COMPLETE":
         raise ValueError("review_guard_incomplete_review")
@@ -95,6 +99,9 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     if actionable:
         _supplied_instrument_filters(core, fresh)
     validated = validate_execution_prices(core, fresh)
+    if research_mode != "legacy" and selected["id"] != "WAIT":
+        from live.scenario_risk_allocation import validate_allocation_prices
+        validate_allocation_prices(validated, selected["allocation_receipt"], fresh)
     if actionable:
         _supplied_instrument_filters(validated, fresh)
     if core["action"] != "WAIT":

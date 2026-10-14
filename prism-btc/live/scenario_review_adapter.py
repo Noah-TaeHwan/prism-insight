@@ -1,11 +1,14 @@
 """Explicit, default-off callback for calculated reviews; never submits orders."""
 from analysis.scenario_review_tape import record_review
+from functools import partial
 from live.scenario_calculated_review import research_review
 from live.scenario_preview import response_contract
 from live.scenario_provenance import review_policy_binding
 
 
-def make_calculated_review_proposer(*, generate, clock):
+def make_calculated_review_proposer(*, generate, clock, research_mode="legacy"):
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+        raise ValueError("research_review_mode")
     if not callable(generate) or not callable(clock):
         raise ValueError("review_dependencies_required")
 
@@ -15,8 +18,9 @@ def make_calculated_review_proposer(*, generate, clock):
                 raise ValueError("review_retry_forbidden")
             return generate(**request)
 
-        return record_review(research_review, snapshot, context, response_contract(context),
+        review = research_review if research_mode == "legacy" else partial(research_review, research_mode=research_mode)
+        return record_review(review, snapshot, context, response_contract(context),
             generate=no_retry_generate, record=record, clock=clock,
-            bindings=review_policy_binding())
+            bindings=review_policy_binding(research_mode=research_mode))
 
     return propose
