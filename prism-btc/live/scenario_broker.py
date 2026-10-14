@@ -480,6 +480,38 @@ class ScenarioDemoBroker(ScenarioExecution):
             estimated_cost_rate=.002,slippage_bps=20,
             **{k:daily[k] for k in ("day","day_start_equity","daily_net_pnl")})
 
+    def _cleanup_flat_exits(self, active):
+        """Cancel only owned partial exits after all possible entries ended.
+
+        Full native stops are never cancelled here. The final account and exact
+        child queries, not cancellation ACKs, remain settlement prerequisites.
+        """
+        with mutation_lock(self.conn):
+            def verify_flat(child):
+                current = self._active()
+                observed = self.capture_account()
+                children = self.children(active["scenario_id"])
+                if (not self.execution_enabled or not current or
+                        current["scenario_id"] != active["scenario_id"] or
+                        not observed["exchange_flat"] or observed["legacy_fenced"] or
+                        any(not c["evidence"] or c["status"] == "UNKNOWN" or
+                            (c["kind"] not in ("tp", "partial_sl") and c["status"] != "TERMINAL")
+                            for c in children)):
+                    raise BrokerNotReady("flat_exit_cleanup_not_ready")
+                order = child["evidence"]["order"]
+                if (child["scenario_id"] != active["scenario_id"] or
+                        child["kind"] not in ("tp", "partial_sl") or
+                        child["request"].get("reduceOnly") is not True or
+                        order.get("reduceOnly") is not True or
+                        order.get("orderId") != child["order_id"] or
+                        order.get("orderLinkId") != child["link_id"]):
+                    raise BrokerNotReady("flat_exit_cleanup_identity_conflict")
+
+            for child in self.children(active["scenario_id"]):
+                if child["kind"] in ("tp", "partial_sl") and child["status"] != "TERMINAL":
+                    self._cancel(child, before_cancel=verify_flat)
+            return self.capture_account()
+
     def reconcile(self):
         observed=self.capture_account()
         active=self._active()
@@ -643,6 +675,18 @@ class ScenarioDemoBroker(ScenarioExecution):
                         unknown=True
                     break
             children=self.children(active["scenario_id"])
+        if (self.execution_enabled and not unknown and observed["exchange_flat"]
+                and not observed["legacy_fenced"]
+                and any(c["kind"] in ("tp", "partial_sl") and c["status"] != "TERMINAL" for c in children)
+                and all(c["evidence"] and c["status"] != "UNKNOWN" and
+                    (c["kind"] in ("tp", "partial_sl") or c["status"] == "TERMINAL")
+                    for c in children)):
+            try:
+                observed = self._cleanup_flat_exits(active)
+                protection = self._verify_protection(observed, active["hard_stop"], active["side"])
+            except Exception:
+                unknown = True
+            children = self.children(active["scenario_id"])
         items=[]
         for (ident,body) in self.conn.execute("SELECT id,payload FROM llm_scenario_intents WHERE scenario_id=?",(active["scenario_id"],)).fetchall():
             payload=json.loads(body)
