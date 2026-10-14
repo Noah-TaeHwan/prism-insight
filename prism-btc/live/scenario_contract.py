@@ -74,13 +74,19 @@ def response_schema(context):
                 "disposition": {"type": "string", "enum": ["hold", "replace"]},
                 "reason": {"type": "string"}})}}), {"type": "null"}]}
     if context.get("recovery_contract_version") in (1, 2):
+        recovery = context.get("recovery") or {}
+        changes = recovery.get("changed_evidence") or {}
+        paths = sorted(changes) if isinstance(changes, dict) else []
+        evidence_item = {"type": "string"}
+        if paths:
+            evidence_item["enum"] = paths
         properties["recovery"] = {"anyOf": [_object({
             "decision": {"type": "string", "enum": ["OBSERVE", "PROBE"]},
             "reason": {"type": "string"},
-            "changed_evidence": {"type": "array", "maxItems": 8, "items": {"type": "string"}},
+            "changed_evidence": {"type": "array", "maxItems": 8 if paths else 0,
+                                 "items": evidence_item},
             "counterevidence": {"type": "string"},
             "invalidation": {"type": "string"}}), {"type": "null"}]}
-        recovery = context.get("recovery") or {}
         if recovery.get("phase") == "OBSERVING" and recovery.get("first_observation") is True:
             properties["action"]["enum"] = ["WAIT"]
     return _object(properties)
