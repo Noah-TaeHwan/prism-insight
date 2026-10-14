@@ -20,7 +20,6 @@ import uuid
 import ast
 import types
 import importlib.metadata
-import importlib
 import inspect
 
 MAX_RECORD_BYTES = 512 * 1024
@@ -32,18 +31,37 @@ _current = ContextVar('scenario_audit', default=None)
 
 def review_policy_binding():
     """Opt-in identity, separate from the default legacy policy manifest."""
+    # Literal, opt-in imports keep this loader independent of supplied names.
+    from analysis import scenario_review_tape
+    from backtest import scenario_tape
+    from live import (scenario_calculated_review, scenario_review_adapter,
+                      scenario_review_guard, scenario_llm, scenario_contract,
+                      scenario_model_input, scenario_preview, scenario_runtime)
+    from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
+    from engine import scenario_ma_context
+
     root = Path(__file__).resolve().parents[1]
-    names = ('analysis/scenario_review_tape.py', 'backtest/scenario_tape.py',
-             'live/scenario_calculated_review.py', 'live/scenario_review_adapter.py',
-             'live/scenario_review_guard.py', 'live/scenario_llm.py',
-             'live/scenario_contract.py', 'live/scenario_model_input.py',
-             'live/scenario_preview.py', 'core/scenario_limit_prices.py',
-             'core/llm_scenario.py', 'core/scenario_stop_policy.py',
-             'engine/scenario_ma_context.py', 'live/scenario_runtime.py',
-             'live/scenario_provenance.py')
+    modules = {
+        'analysis/scenario_review_tape.py': scenario_review_tape,
+        'backtest/scenario_tape.py': scenario_tape,
+        'live/scenario_calculated_review.py': scenario_calculated_review,
+        'live/scenario_review_adapter.py': scenario_review_adapter,
+        'live/scenario_review_guard.py': scenario_review_guard,
+        'live/scenario_llm.py': scenario_llm,
+        'live/scenario_contract.py': scenario_contract,
+        'live/scenario_model_input.py': scenario_model_input,
+        'live/scenario_preview.py': scenario_preview,
+        'core/scenario_limit_prices.py': scenario_limit_prices,
+        'core/llm_scenario.py': llm_scenario,
+        'core/scenario_stop_policy.py': scenario_stop_policy,
+        'engine/scenario_ma_context.py': scenario_ma_context,
+        'live/scenario_runtime.py': scenario_runtime,
+        'live/scenario_provenance.py': sys.modules[__name__],
+    }
     sources, parity = {}, {}
-    for name in names:
-        importlib.import_module(name.removesuffix('.py').replace('/', '.'))
+    for name, module in modules.items():
+        if sys.modules.get(name.removesuffix('.py').replace('/', '.')) is not module:
+            raise ValueError('review_mixed_loaded_policy')
         source = (root / name).read_text()
         sources[name] = hashlib.sha256(source.encode()).hexdigest()
         parity[name] = _loaded_parity(name, source)
