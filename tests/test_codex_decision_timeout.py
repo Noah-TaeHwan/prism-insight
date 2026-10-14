@@ -16,7 +16,7 @@ import pytest
 from prism_core.codex_config import (
     CodexFastError,
     CodexFastTimeout,
-    BUY_EFFORT_TIMEOUT_FLOOR_SECONDS,
+    EFFORT_TIMEOUT_FLOOR_SECONDS,
     resolve_buy_codex_settings,
     resolve_sell_codex_settings,
 )
@@ -35,13 +35,13 @@ def _auth_file(tmp_path, email):
 
 # --- budget ------------------------------------------------------------------
 
-def test_account_raised_xhigh_lifts_buy_timeout_only(tmp_path):
+def test_account_raised_xhigh_lifts_buy_and_sell_timeouts(tmp_path):
     env = {**CRON, "PRISM_BUY_CODEX_EFFORT": "medium", "PRISM_SELL_CODEX_EFFORT": "medium",
            "PRISM_CODEX_EFFORT_BY_ACCOUNT": "reporter@example.com=medium,trader@example.com=xhigh",
            "PRISM_CODEX_AUTH_FILE": _auth_file(tmp_path, "trader@example.com")}
     buy, sell = resolve_buy_codex_settings(env), resolve_sell_codex_settings(env)
     assert (buy.reasoning_effort, buy.timeout) == ("xhigh", 480)
-    assert (sell.reasoning_effort, sell.timeout) == ("xhigh", 180)  # SELL budget untouched
+    assert (sell.reasoning_effort, sell.timeout) == ("xhigh", 480)
 
 
 def test_medium_account_keeps_configured_timeouts(tmp_path):
@@ -61,7 +61,7 @@ def test_floor_only_raises_and_never_exceeds_cap(effort, configured, expected):
     if effort:
         env["PRISM_BUY_CODEX_EFFORT"] = effort
     assert resolve_buy_codex_settings(env).timeout == expected
-    assert max(BUY_EFFORT_TIMEOUT_FLOOR_SECONDS.values()) <= 600
+    assert max(EFFORT_TIMEOUT_FLOOR_SECONDS.values()) <= 600
 
 
 # --- distinguishable timeout -----------------------------------------------------
@@ -145,9 +145,9 @@ async def test_test_runs_never_send_real_alerts(spool, monkeypatch):
 
 # --- wired into the BUY paths only ------------------------------------------------
 
-@pytest.mark.parametrize("effort", ["xhigh", "max", "ultra"])
-def test_sell_settings_ignore_the_buy_floor(effort):
-    assert resolve_sell_codex_settings({"PRISM_SELL_CODEX_EFFORT": effort, "PRISM_SELL_CODEX_TIMEOUT": "180"}).timeout == 180
+@pytest.mark.parametrize("effort,expected", [("high", 180), ("xhigh", 480), ("max", 600), ("ultra", 600)])
+def test_sell_settings_use_the_same_floor(effort, expected):
+    assert resolve_sell_codex_settings({"PRISM_SELL_CODEX_EFFORT": effort, "PRISM_SELL_CODEX_TIMEOUT": "180"}).timeout == expected
 
 
 @pytest.mark.parametrize("path", ["stock_tracking_enhanced_agent.py", "prism-us/us_stock_tracking_agent.py"])

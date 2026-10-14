@@ -37,7 +37,8 @@ def method(filename, name):
         "effects_for": effects.effects_for, "EffectsFailure": effects.EffectsFailure,
         "ExecutionService": SimpleNamespace(domestic=forbidden, us=forbidden),
         "get_us_existing_position_for_ticker": schema.get_us_existing_position_for_ticker,
-        "traceback": SimpleNamespace(format_exc=lambda: "unit failure")}
+        "traceback": SimpleNamespace(format_exc=lambda: "unit failure"),
+        "defer_exit_capture": lambda fn: fn}
     exec(compile(ast.Module(body=[node], type_ignores=[]), filename, "exec"), namespace)
     return namespace[name]
 
