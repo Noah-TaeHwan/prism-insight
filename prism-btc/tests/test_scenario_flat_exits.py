@@ -152,3 +152,34 @@ def test_unfilled_flat_entry_is_not_cancelled_as_orphan(live):
     writes = list(exchange.writes)
     assert broker.reconcile()["settlement"] is None
     assert exchange.writes == writes
+
+
+def add_known_order(broker, exchange, template, *, scenario_id, kind, link):
+    order = dict(exchange.orders[template["link_id"]], orderId=link, orderLinkId=link,
+                 reduceOnly=kind != "entry")
+    request = dict(template["request"], reduceOnly=kind != "entry")
+    evidence = dict(order=order, executions=[])
+    broker.conn.execute("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (link, template["intent_id"], scenario_id, kind, link, json.dumps(request),
+         "LIVE", link, json.dumps(evidence), broker.clock()))
+    broker.conn.commit()
+    exchange.orders[link] = order
+
+
+@pytest.mark.parametrize("kind", ["entry", "tp", "partial_sl"])
+def test_flat_cleanup_blocks_known_other_scenario_order(live, kind):
+    broker, exchange, orphan = closed_with_orphan(live)
+    # This ID is known globally, so capture_account's legacy fence is not enough.
+    add_known_order(broker, exchange, orphan, scenario_id="other", kind=kind, link="other-order")
+    writes = list(exchange.writes)
+    assert broker.reconcile()["settlement"] is None
+    assert exchange.writes == writes
+    assert exchange.orders[orphan["link_id"]]["orderStatus"] == "New"
+
+
+def test_flat_cleanup_accepts_multiple_current_scenario_orphans(live):
+    broker, exchange, orphan = closed_with_orphan(live)
+    add_known_order(broker, exchange, orphan, scenario_id="s1", kind="tp", link="another-exit")
+    assert broker.reconcile()["settlement"] is not None
+    assert exchange.orders[orphan["link_id"]]["orderStatus"] == "Cancelled"
+    assert exchange.orders["another-exit"]["orderStatus"] == "Cancelled"

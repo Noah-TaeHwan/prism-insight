@@ -495,6 +495,9 @@ class ScenarioDemoBroker(ScenarioExecution):
                 current = self._active()
                 observed = self.capture_account()
                 children = self.children(active["scenario_id"])
+                owned_exits = {(c["order_id"], c["link_id"]) for c in children
+                    if c["kind"] in ("tp", "partial_sl") and c["status"] == "LIVE"
+                    and c["request"].get("reduceOnly") is True}
                 if (not self.execution_enabled or not current or
                         current["scenario_id"] != active["scenario_id"] or
                         not observed["exchange_flat"] or observed["legacy_fenced"] or
@@ -502,6 +505,12 @@ class ScenarioDemoBroker(ScenarioExecution):
                             (c["kind"] not in ("tp", "partial_sl") and c["status"] != "TERMINAL")
                             for c in children)):
                     raise BrokerNotReady("flat_exit_cleanup_not_ready")
+                # capture_account knows IDs from all historical scenarios.
+                # Even a known foreign order can refill a flat account; only
+                # this scenario's exact reduce-only partial exits may remain.
+                if any((o.get("orderId"), o.get("orderLinkId")) not in owned_exits
+                       or o.get("reduceOnly") is not True for o in observed["open_orders"]):
+                    raise BrokerNotReady("flat_exit_cleanup_foreign_order")
                 order = child["evidence"]["order"]
                 if (child["scenario_id"] != active["scenario_id"] or
                         child["kind"] not in ("tp", "partial_sl") or
