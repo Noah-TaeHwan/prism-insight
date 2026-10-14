@@ -3619,16 +3619,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             # already removed, so skip them when the loop reaches them.
             fully_exited_tickers: set = set()
 
-            oneil_observations = []
-            for stock in holdings:
+            from prism_core import runner_hold_live
+
+            async def _review(stock):
                 ticker = stock.get('ticker')
-                company_name = stock.get('company_name')
-
-                # FIX 1: skip rows whose ticker was already fully exited this pass.
-                if ticker in fully_exited_tickers:
-                    logger.info(f"{ticker} already fully exited this pass — skipping remaining row")
-                    continue
-
                 # Query current stock price
                 current_price = effects.quote(ticker) if effects is not None else await self._get_current_stock_price(ticker)
 
@@ -3638,23 +3632,47 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     current_price = old_price
 
                 stock['current_price'] = current_price
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 # Runner hold rule (docs/RUNNER_HOLD_RULE_ko.md): detect/persist the runner and its
                 # breakeven stop first; a verified runner exit sells deterministically, and any other
                 # sell of a protected runner is turned into a hold after the decision.
-                from prism_core import runner_hold_live
                 runner_exit = None
                 if effects is None:
                     runner_exit = await runner_hold_live.review_holding(self, "US", stock, logger=logger)
                 if runner_exit:
-                    should_sell, sell_reason = True, runner_exit
-                else:
-                    # Analyze sell decision
-                    should_sell, sell_reason = await self._analyze_sell_decision(stock)
-                    if effects is None:
-                        should_sell, sell_reason = runner_hold_live.guard_result(
-                            self, "US", stock, should_sell, sell_reason, logger=logger)
+                    return runner_exit, True, runner_exit
+                # Analyze sell decision
+                should_sell, sell_reason = await self._analyze_sell_decision(stock)
+                if effects is None:
+                    should_sell, sell_reason = runner_hold_live.guard_result(
+                        self, "US", stock, should_sell, sell_reason, logger=logger)
+                return runner_exit, should_sell, sell_reason
+
+            # Each review is a slow, independent LLM call (2026-10-14: 6 holdings took 21 min
+            # one by one), so decide them concurrently; orders below still run in holding order.
+            # Isolated replays (effects) stay sequential to keep their event order.
+            semaphore = asyncio.Semaphore(US_TRADING_ANALYSIS_CONCURRENCY if effects is None else 1)
+
+            async def _bounded_review(stock):
+                async with semaphore:
+                    return await _review(stock)
+
+            logger.info("US sell review: %s holdings, concurrency=%s",
+                        len(holdings), US_TRADING_ANALYSIS_CONCURRENCY if effects is None else 1)
+            reviews = await asyncio.gather(*(_bounded_review(stock) for stock in holdings))
+
+            oneil_observations = []
+            for stock, (runner_exit, should_sell, sell_reason) in zip(holdings, reviews):
+                ticker = stock.get('ticker')
+                company_name = stock.get('company_name')
+
+                # FIX 1: skip rows whose ticker was already fully exited this pass.
+                if ticker in fully_exited_tickers:
+                    logger.info(f"{ticker} already fully exited this pass — skipping remaining row")
+                    continue
+
+                current_price = stock['current_price']
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if effects is None:  # observation only: every review, hold or sell, in time order
                     try:
                         from observability.holding_decisions import emit_holding_evaluation
