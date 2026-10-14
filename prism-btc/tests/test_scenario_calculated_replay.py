@@ -22,6 +22,71 @@ def wire(ctx, action):
     return result
 
 
+def test_runtime_event_hash_literal_queries_preserve_all_columns_and_rowid_order():
+    from analysis.scenario_replay import _runtime_event_hash
+    from backtest.scenario_tape import digest
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE llm_scenario_state (key TEXT, business_time REAL, body TEXT)")
+        conn.execute("CREATE TABLE llm_scenario_recovery_events (kind TEXT, call_id TEXT, amount REAL)")
+        conn.execute("INSERT INTO llm_scenario_state VALUES('z',1000.001,'original')")
+        conn.execute("INSERT INTO llm_scenario_state VALUES('a',1000.002,'later')")
+        conn.execute("INSERT INTO llm_scenario_recovery_events VALUES('EXCHANGE_REQUEST','exact-call',1.25)")
+        expected={
+            "llm_scenario_recovery_events":dict(columns=["kind","call_id","amount"],
+                rows=[("EXCHANGE_REQUEST","exact-call",1.25)]),
+            "llm_scenario_state":dict(columns=["key","business_time","body"],
+                rows=[("z",1000.001,"original"),("a",1000.002,"later")]),
+        }
+        assert _runtime_event_hash(conn)==digest(expected)
+
+
+@pytest.mark.parametrize("create_statement", [
+    'CREATE TABLE llm_scenario_unknown (value INTEGER)',
+    'CREATE TABLE "llm_scenario_unknown""quote" (value INTEGER)',
+    'CREATE TABLE "llm_scenario_unknown""; DROP TABLE llm_scenario_state; --" (value INTEGER)',
+])
+def test_runtime_event_hash_rejects_unknown_quoted_or_injection_table(create_statement):
+    from analysis.scenario_replay import _runtime_event_hash
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE llm_scenario_state (value INTEGER)")
+        conn.execute("INSERT INTO llm_scenario_state VALUES(7)")
+        conn.execute(create_statement)
+        statements=[]
+        conn.set_trace_callback(statements.append)
+        with pytest.raises(TapeMismatch,match="unknown_runtime_event_table"):
+            _runtime_event_hash(conn)
+        assert all(statement in {
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'llm_scenario%' ORDER BY name",
+            "SELECT * FROM llm_scenario_state ORDER BY rowid",
+        } for statement in statements)
+        assert conn.execute("SELECT value FROM llm_scenario_state").fetchone()==(7,)
+
+
+def test_runtime_event_query_map_is_complete_literal_sql_without_formatting():
+    import ast
+    import inspect
+    from pathlib import Path
+    import re
+    import analysis.scenario_replay as module
+    tree=ast.parse(inspect.getsource(module))
+    assignment=next(node for node in tree.body if isinstance(node,ast.Assign)
+        and any(isinstance(target,ast.Name) and target.id=="RUNTIME_EVENT_QUERIES" for target in node.targets))
+    assert isinstance(assignment.value,ast.Dict)
+    for key,value in zip(assignment.value.keys,assignment.value.values):
+        assert isinstance(key,ast.Constant) and isinstance(value,ast.Constant)
+        assert isinstance(key.value,str) and isinstance(value.value,str)
+        assert value.value.split()==["SELECT","*","FROM",key.value,"ORDER","BY","rowid"]
+    helper=ast.parse(inspect.getsource(module._runtime_event_hash))
+    assert not any(isinstance(node,(ast.JoinedStr,ast.BinOp)) for node in ast.walk(helper))
+    assert not any(isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute)
+        and node.func.attr in {"format","replace","join"} for node in ast.walk(helper))
+    live=Path(module.__file__).resolve().parents[1]/"live"
+    declared=set()
+    for path in live.glob("*.py"):
+        declared.update(re.findall(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(llm_scenario_[A-Za-z_]+)",path.read_text(),re.IGNORECASE))
+    assert set(module.RUNTIME_EVENT_QUERIES)==declared
+
+
 @pytest.mark.parametrize("path", ["OHLC", "OLHC"])
 @pytest.mark.parametrize("profile", ["single-pass-economic-v4", "calculated-economic-v4"])
 @pytest.mark.parametrize("quantity", [.1, 6.])

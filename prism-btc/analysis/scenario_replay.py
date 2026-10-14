@@ -45,6 +45,44 @@ POLICY_PROFILES = {
 _identity_scope_lock = threading.Lock()
 INPUT_PREPARATION_CODES = {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
                            "invalid_input", "input_size"}
+RUNTIME_EVENT_QUERIES = {
+    "llm_scenario_audit_events": "SELECT * FROM llm_scenario_audit_events ORDER BY rowid",
+    "llm_scenario_audit_manifests": "SELECT * FROM llm_scenario_audit_manifests ORDER BY rowid",
+    "llm_scenario_broker_evidence": "SELECT * FROM llm_scenario_broker_evidence ORDER BY rowid",
+    "llm_scenario_broker_incidents": "SELECT * FROM llm_scenario_broker_incidents ORDER BY rowid",
+    "llm_scenario_broker_notices": "SELECT * FROM llm_scenario_broker_notices ORDER BY rowid",
+    "llm_scenario_children": "SELECT * FROM llm_scenario_children ORDER BY rowid",
+    "llm_scenario_control": "SELECT * FROM llm_scenario_control ORDER BY rowid",
+    "llm_scenario_daily_accounting": "SELECT * FROM llm_scenario_daily_accounting ORDER BY rowid",
+    "llm_scenario_daily_accounting_history": "SELECT * FROM llm_scenario_daily_accounting_history ORDER BY rowid",
+    "llm_scenario_decisions": "SELECT * FROM llm_scenario_decisions ORDER BY rowid",
+    "llm_scenario_execution_batches": "SELECT * FROM llm_scenario_execution_batches ORDER BY rowid",
+    "llm_scenario_exit_basis": "SELECT * FROM llm_scenario_exit_basis ORDER BY rowid",
+    "llm_scenario_intents": "SELECT * FROM llm_scenario_intents ORDER BY rowid",
+    "llm_scenario_model_incident": "SELECT * FROM llm_scenario_model_incident ORDER BY rowid",
+    "llm_scenario_notice_errors": "SELECT * FROM llm_scenario_notice_errors ORDER BY rowid",
+    "llm_scenario_notice_positions": "SELECT * FROM llm_scenario_notice_positions ORDER BY rowid",
+    "llm_scenario_outbox": "SELECT * FROM llm_scenario_outbox ORDER BY rowid",
+    "llm_scenario_recovery_events": "SELECT * FROM llm_scenario_recovery_events ORDER BY rowid",
+    "llm_scenario_review_events": "SELECT * FROM llm_scenario_review_events ORDER BY rowid",
+    "llm_scenario_review_tapes": "SELECT * FROM llm_scenario_review_tapes ORDER BY rowid",
+    "llm_scenario_runner_incident": "SELECT * FROM llm_scenario_runner_incident ORDER BY rowid",
+    "llm_scenario_settlements": "SELECT * FROM llm_scenario_settlements ORDER BY rowid",
+    "llm_scenario_slots": "SELECT * FROM llm_scenario_slots ORDER BY rowid",
+    "llm_scenario_state": "SELECT * FROM llm_scenario_state ORDER BY rowid",
+}
+
+
+def _runtime_event_hash(conn):
+    event_tables = {}
+    for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'llm_scenario%' ORDER BY name"):
+        # Schema completeness is part of the hash contract, not optional coverage.
+        if name not in RUNTIME_EVENT_QUERIES:
+            raise TapeMismatch("unknown_runtime_event_table")
+        cursor = conn.execute(RUNTIME_EVENT_QUERIES[name])
+        event_tables[name] = dict(columns=[field[0] for field in cursor.description],
+                                 rows=cursor.fetchall())
+    return digest(event_tables)
 
 
 def _replay_uuid_factory(name):
@@ -603,13 +641,7 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
         if economic_profile:
             report["final_state_hash"] = digest(state)
             report["economic_clock_trace_hash"] = digest([row["trace"] for row in tape.ticks])
-            event_tables = {}
-            for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'llm_scenario%' ORDER BY name"):
-                quoted = '"' + name.replace('"','""') + '"'
-                cursor = conn.execute(f"SELECT * FROM {quoted} ORDER BY rowid")
-                event_tables[name] = dict(columns=[field[0] for field in cursor.description],
-                                         rows=cursor.fetchall())
-            report["runtime_event_hash"] = digest(event_tables)
+            report["runtime_event_hash"] = _runtime_event_hash(conn)
             report["execution_status"] = "STOPPED" if stopped else "COMPLETE"
             report["failure_evidence"] = stopped
             report["coverage"] = dict(planned_slots=len(decisions),processed_slots=sum(statuses.values()),
