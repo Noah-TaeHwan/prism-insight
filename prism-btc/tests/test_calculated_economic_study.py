@@ -19,8 +19,8 @@ def save(path, value):
     path.write_text(json.dumps(value, allow_nan=False))
 
 
-def data_files(tmp_path):
-    bundle, market = inputs(2400000)
+def data_files(tmp_path, duration_ms=2400000):
+    bundle, market = inputs(duration_ms)
     def rows(frame):
         return [dict(open_time=int(at.value // 1_000_000),
                      **{key: float(row[key]) for key in ("open", "high", "low", "close", "volume")})
@@ -73,9 +73,10 @@ def fake_replay(*, fail_arm=None, mismatch_arm=None, over_cap=False):
             save(output / "report.json", report)
             return report
         output.mkdir()
-        call_count = 4 if name.startswith("A_") else 8
+        slots = kwargs["max_decisions"]
+        call_count = slots if name.startswith("A_") else slots * 2
         if over_cap:
-            call_count = 25
+            call_count = slots * 6 + 1
         for index in range(call_count):
             kwargs["before_http"]({"slot": index})
             schema = {"type": "object", "properties": {}}
@@ -90,16 +91,19 @@ def fake_replay(*, fail_arm=None, mismatch_arm=None, over_cap=False):
         equity, end = kwargs["initial_equity"], bundle["end_ms"]
         exchange = dict(simulation=True, timestamp_ms=end, equity=str(equity), cash=str(equity),
             position="0", average_price="0", executions=[], transactions=[])
-        coverage = dict(planned_slots=4, processed_slots=4, model_free_drain_status="COMPLETE",
+        coverage = dict(planned_slots=slots, processed_slots=slots, model_free_drain_status="COMPLETE",
             model_free_drain_end_ms=end, final_economic_time_ms=end, eligible=True)
-        report = dict(simulated_only=True, mode="HISTORICAL_LLM_RESEARCH", decisions=4,
-            decision_outcomes={"wait": 4}, contract=contract, contract_hash=study.digest(contract),
+        report = dict(simulated_only=True, mode="HISTORICAL_LLM_RESEARCH", decisions=slots,
+            decision_outcomes={"wait": slots}, contract=contract, contract_hash=study.digest(contract),
             exchange_hash=study.digest(exchange), economic=dict(final_equity=equity, net_change=0,
                 fees=0, funding_net=0, open_quantity=0, max_drawdown_pct=0, completed_scenarios=0,
                 terminal_mark_price="100.0"),
             readiness=dict(profitability_proven=False, insufficiency_reasons=[]), execution_status="COMPLETE",
             failure_evidence=None, coverage=coverage, model_failures=0, input_preparation_failures=0,
             protection_outcomes={})
+        ticks = [dict(kind="economic_tick", at_ms=bundle["start_ms"] + index * 300000,
+                      trace=[], decision=None, outcome={"status": "wait"}) for index in range(slots)]
+        report["tape_hash"] = study.digest(dict(contract=contract, ticks=ticks))
         if name == fail_arm:
             report.update(execution_status="STOPPED", failure_evidence={"reason": "fixture_failure"}, model_failures=1)
             coverage["eligible"] = False
@@ -109,7 +113,9 @@ def fake_replay(*, fail_arm=None, mismatch_arm=None, over_cap=False):
         save(output / "report.json", report)
         save(output / "exchange.json", exchange)
         save(output / "equity.json", [[bundle["start_ms"], equity], [end, equity]])
-        save(tape_path, {"fixture": True})
+        header = dict(kind="economic_header", schema=4, contract=contract, contract_hash=study.digest(contract))
+        lines = [header] + [dict(tick, sha256=study.digest(tick)) for tick in ticks]
+        Path(tape_path).write_text("".join(json.dumps(line) + "\n" for line in lines))
         return report
     return replay
 
@@ -302,9 +308,10 @@ def test_durable_record_failure_is_stopped_and_summary_is_best_effort(tmp_path, 
     assert (root / "study_result.json").exists()
 
 
-def test_real_runner_coordinator_zero_network_wait_http_artifacts_and_strict_comparison(tmp_path):
+@pytest.mark.parametrize("stage", [1, 2])
+def test_real_runner_coordinator_zero_network_wait_http_artifacts_and_strict_comparison(tmp_path, stage):
     from tests.test_scenario_calculated_replay import wire
-    root, _ = prepared(tmp_path)
+    root, _ = prepared(tmp_path) if stage == 1 else prepare_stage_two(tmp_path, stage_two_fixture(tmp_path))
     wall, opened = [0.], []
     def opener(request, timeout):
         payload = json.loads(request.data)
@@ -330,9 +337,10 @@ def test_real_runner_coordinator_zero_network_wait_http_artifacts_and_strict_com
     result = study.run(root, replay=replay, model_factory=factory)
     assert result["status"] == "COMPLETE_DEVELOPMENT_SMOKE", result
     assert result["comparison"]["comparison_complete"]
-    assert result["call_guard"]["actual_http_calls"] == len(opened) == 16
-    assert sum(result["per_arm_actual_http_calls"].values()) == 16
-    assert sum(result["per_arm_model_generator_dispatches"].values()) == 16
+    expected_calls = 16 if stage == 1 else 96
+    assert result["call_guard"]["actual_http_calls"] == len(opened) == expected_calls
+    assert sum(result["per_arm_actual_http_calls"].values()) == expected_calls
+    assert sum(result["per_arm_model_generator_dispatches"].values()) == expected_calls
     assert not result["profitability_proven"]
     for name in study.ORDER:
         fresh = json.loads((root / name / "fresh/report.json").read_text())
@@ -342,7 +350,7 @@ def test_real_runner_coordinator_zero_network_wait_http_artifacts_and_strict_com
         assert fresh["final_state_hash"] == frozen["final_state_hash"]
         assert fresh["economic_clock_trace_hash"] == frozen["economic_clock_trace_hash"]
         assert fresh["runtime_event_hash"] == frozen["runtime_event_hash"]
-        assert fresh["execution_metadata"]["actual_model_calls"] == 4
+        assert fresh["execution_metadata"]["actual_model_calls"] == (4 if stage == 1 else 24)
         assert frozen["execution_metadata"]["actual_model_calls"] == 0
         assert fresh["economic"]["open_quantity"] == 0
 
@@ -376,3 +384,174 @@ def test_real_runner_pre_http_durable_delay_counts_dispatch_but_zero_http_and_pr
     assert fresh["result_hash"] == frozen["result_hash"]
     assert result["per_arm_frozen_parity"]["A_OHLC"] == "VERIFIED_FAILED_ZERO_MODEL_CALLS"
     assert not result["comparison"]["comparison_complete"]
+
+
+def stage_two_fixture(tmp_path, slots=28):
+    market, observed, pin = data_files(tmp_path, duration_ms=slots * 300000)
+    previous = tmp_path / "stage_one"
+    study.prepare(previous, market, observed, pin, "fixture-stage-one")
+    result = study.run(previous, replay=fake_replay(), model_factory=fake_factory([]))
+    assert result["status"] == "COMPLETE_DEVELOPMENT_SMOKE"
+    external_pin = study.sha(previous / "registry.json")
+    return market, observed, pin, previous, external_pin
+
+
+def prepare_stage_two(tmp_path, fixture):
+    market, observed, pin, previous, external_pin = fixture
+    root = tmp_path / "stage_two"
+    registry = study.prepare(root, market, observed, pin, "fixture-stage-two", stage=2,
+        predecessor_root=previous, predecessor_registry_sha256=external_pin)
+    return root, registry
+
+
+def test_stage_two_fixed_next24_pins_predecessor_read_only_and_no_prepare_calls(tmp_path):
+    fixture = stage_two_fixture(tmp_path)
+    previous = fixture[3]
+    before = {str(p.relative_to(previous)): study.sha(p) for p in previous.rglob("*") if p.is_file()}
+    root, registry = prepare_stage_two(tmp_path, fixture)
+    after = {str(p.relative_to(previous)): study.sha(p) for p in previous.rglob("*") if p.is_file()}
+    assert before == after == registry["predecessor"]["artifacts"]
+    assert not (root / "call_guard").exists() and not (root / "model_events.jsonl").exists()
+    assert registry["slots"] == 24 and registry["max_http_calls"] == 144
+    prior = json.loads((previous / "registry.json").read_text())
+    assert registry["schedule"][0]["slot"] == prior["schedule"][-1]["slot"] + 1
+    assert registry["schedule"][-1]["slot"] - registry["schedule"][0]["slot"] == 23
+    assert registry["original_inputs"] == prior["original_inputs"]
+    assert registry["initial_state"] == "recovery-stage0" and registry["initial_equity"] == 10000
+    assert registry["contract_comparison"]["expected_arm_contracts"] == prior["contract_comparison"]["expected_arm_contracts"]
+    assert registry["inference_limits"]["development_period_count"] == 1
+    assert registry["inference_limits"]["historical_not_untouched"] is True
+    assert registry["inference_limits"]["independent_oos_samples"] == registry["inference_limits"]["forward_samples"] == 0
+    assert registry["inference_limits"]["power"] == "UNCOMPUTED"
+    assert len(registry["trial_ledger"]) == 2 and not registry["next_stage_automatic"]
+
+
+@pytest.mark.parametrize("fault", ["missing_root", "missing_external_pin", "wrong_external_pin", "not_completed",
+    "report", "exchange", "curve", "tape_missing", "ledger", "comparator_pin", "wrong_inputs", "core_changed",
+    "tape_truncated", "tape_corrupted", "tape_missing_tick", "response_missing", "result_missing", "response_hash", "result_text"])
+def test_stage_two_rejects_unverified_predecessor_before_writing_or_calls(tmp_path, fault, monkeypatch):
+    market, observed, pin, previous, external_pin = stage_two_fixture(tmp_path)
+    root = tmp_path / "stage_two"
+    if fault == "missing_root":
+        previous = None
+    elif fault == "missing_external_pin":
+        external_pin = None
+    elif fault == "wrong_external_pin":
+        external_pin = "f" * 64
+    elif fault == "not_completed":
+        value = json.loads((previous / "study_result.json").read_text())
+        value["status"] = "STOPPED"
+        save(previous / "study_result.json", value)
+    elif fault in {"report", "exchange", "curve"}:
+        filename = {"report": "report.json", "exchange": "exchange.json", "curve": "equity.json"}[fault]
+        save(previous / "A_OHLC/fresh" / filename, None)
+    elif fault == "tape_missing":
+        (previous / "B_OHLC/tape.jsonl").unlink()
+    elif fault in {"tape_truncated", "tape_corrupted", "tape_missing_tick"}:
+        path = previous / "B_OHLC/tape.jsonl"
+        lines = path.read_text().splitlines()
+        if fault == "tape_truncated":
+            lines[-1] = lines[-1][:-5]
+        elif fault == "tape_missing_tick":
+            lines.pop()
+        else:
+            value = json.loads(lines[-1])
+            value["at_ms"] += 1
+            lines[-1] = json.dumps(value)
+        path.write_text("\n".join(lines) + "\n")
+    elif fault in {"response_missing", "result_missing", "response_hash", "result_text"}:
+        path = previous / "model_events.jsonl"
+        events = [json.loads(line) for line in path.read_text().splitlines()]
+        kind = "HTTP_RESPONSE" if fault.startswith("response") else "MODEL_RESULT"
+        index = next(i for i, event in enumerate(events) if event["kind"] == kind)
+        if fault.endswith("missing"):
+            events.pop(index)
+        elif fault == "response_hash":
+            events[index]["raw_sha256"] = "f" * 64
+        else:
+            events[index]["text"] = "tampered"
+        path.write_text("".join(json.dumps(event) + "\n" for event in events))
+    elif fault == "ledger":
+        path = previous / "call_guard/attempts.jsonl"
+        path.write_text(path.read_text().splitlines()[0] + "\n")
+    elif fault == "comparator_pin":
+        value = json.loads((previous / "registry.json").read_text())
+        value["source_manifest"]["tools/compare_btc_scenario_replays.py"] = "f" * 64
+        save(previous / "registry.json", value)
+        external_pin = study.sha(previous / "registry.json")
+    elif fault == "wrong_inputs":
+        path = observed
+        path.write_text(path.read_text() + " ")
+        pin = study.sha(path)
+    elif fault == "core_changed":
+        original = study.contract_for
+        def contract(*args, **kwargs):
+            result = original(*args, **kwargs)
+            result["source_hashes"] = dict(result["source_hashes"], unknown="changed")
+            return result
+        monkeypatch.setattr(study, "contract_for", contract)
+    with pytest.raises((ValueError, TypeError, KeyError, RuntimeError)):
+        study.prepare(root, market, observed, pin, "fixture-stage-two", stage=2,
+            predecessor_root=previous, predecessor_registry_sha256=external_pin)
+    assert not root.exists()
+
+
+def test_stage_two_exactly144_fake_opener_entries_and_no_automatic_third_stage(tmp_path):
+    root, _ = prepare_stage_two(tmp_path, stage_two_fixture(tmp_path))
+    opened = []
+    result = study.run(root, replay=fake_replay(), model_factory=fake_factory(opened))
+    assert result["status"] == "COMPLETE_DEVELOPMENT_SMOKE", result
+    assert result["call_guard"]["actual_http_calls"] == len(opened) == 144
+    assert result["comparison"]["comparison_complete"]
+    assert not result["automatic_promotion"] and not result["profitability_proven"]
+    assert not result["next_stage_automatic"]
+
+
+@pytest.mark.parametrize("fault", ["first_error", "cap", "changed_predecessor", "arbitrary_slots", "arbitrary_cap"])
+def test_stage_two_fail_stop_and_fixed_caps_no_next_arm(tmp_path, fault):
+    root, registry = prepare_stage_two(tmp_path, stage_two_fixture(tmp_path))
+    if fault == "changed_predecessor":
+        path = Path(registry["predecessor"]["root"]) / "model_events.jsonl"
+        path.write_text(path.read_text() + " ")
+    elif fault in {"arbitrary_slots", "arbitrary_cap"}:
+        registry["slots" if fault == "arbitrary_slots" else "max_http_calls"] = 25 if fault == "arbitrary_slots" else 145
+        save(root / "registry.json", registry)
+    opened = []
+    if fault in {"arbitrary_slots", "arbitrary_cap"}:
+        with pytest.raises(ValueError):
+            study.run(root, replay=fake_replay(), model_factory=fake_factory(opened))
+    else:
+        result = study.run(root, replay=fake_replay(fail_arm="A_OHLC" if fault == "first_error" else None,
+                                                 over_cap=fault == "cap"), model_factory=fake_factory(opened))
+        assert result["status"] == "STOPPED" and result["call_guard"]["stopped"]
+        assert not (root / "B_OHLC").exists()
+        assert len(opened) <= 144
+    if fault in {"changed_predecessor", "arbitrary_slots", "arbitrary_cap"}:
+        assert not opened
+
+
+@pytest.mark.parametrize("wrong_offset", [0, 5])
+def test_stage_two_self_consistent_wrong_offset_rejected_before_dispatch(tmp_path, wrong_offset):
+    fixture = stage_two_fixture(tmp_path, slots=29)
+    root, registry = prepare_stage_two(tmp_path, fixture)
+    pilot = json.loads((root / "pilot.json").read_text())
+    original = json.loads(fixture[0].read_text())
+    start = original["start_ms"] + wrong_offset * 300000
+    pilot.update(start_ms=start, end_ms=start + 24 * 300000)
+    pilot["data_hash"] = study.digest({k: v for k, v in pilot.items() if k not in {"data_hash", "coverage", "provenance"}})
+    observed = study.ObservedScenarioData(fixture[1], fixture[2])
+    schedule = observed.schedule(pilot["start_ms"], pilot["end_ms"])
+    common = registry["contract_comparison"]["expected_common_contract"]
+    common.update(start_ms=pilot["start_ms"], end_ms=pilot["end_ms"], data_hash=pilot["data_hash"])
+    registry.update(schedule=schedule, pilot_data_hash=pilot["data_hash"], expected_data_hash=pilot["data_hash"],
+                    start=study.datetime.fromtimestamp(start / 1000, study.timezone.utc).isoformat().replace("+00:00", "Z"),
+                    end=study.datetime.fromtimestamp((start + 24 * 300000) / 1000, study.timezone.utc).isoformat().replace("+00:00", "Z"))
+    save(root / "pilot.json", pilot)
+    registry["pilot_file_sha256"] = study.sha(root / "pilot.json")
+    save(root / "registry.json", registry)
+    save(root / "registry.sha256.json", {"sha256": study.sha(root / "registry.json")})
+    opened = []
+    result = study.run(root, replay=fake_replay(), model_factory=fake_factory(opened))
+    assert result["status"] == "STOPPED" and result["call_guard"]["stopped"]
+    assert result["coordinator_error"]["reason"] == "fixed_stage_window_mismatch"
+    assert not opened
