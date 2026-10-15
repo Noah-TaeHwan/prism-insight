@@ -38,6 +38,11 @@ def _table_locations(payload):
             if isinstance(frame, dict):
                 for key in ("points", "transitions"):
                     yield f"contract_context.ma_structure.primary.{tf}.{key}", frame, key
+    if isinstance(structure, dict):
+        yield "contract_context.ma_structure.levels", structure, "levels"
+    recovery = context.get("recovery") if isinstance(context, dict) else None
+    if isinstance(recovery, dict):
+        yield "contract_context.recovery.changed_evidence", recovery, "changed_evidence"
 
 
 def _has_table_marker(value):
@@ -50,6 +55,115 @@ def _has_wrapper_marker(value):
     if isinstance(value, dict):
         return "$model_wrapper" in value or any(_has_wrapper_marker(v) for v in value.values())
     return isinstance(value, list) and any(_has_wrapper_marker(v) for v in value)
+
+
+def _has_proposal_marker(value):
+    if isinstance(value, dict):
+        return "$model_proposal" in value or any(_has_proposal_marker(v) for v in value.values())
+    return isinstance(value, list) and any(_has_proposal_marker(v) for v in value)
+
+
+def _has_receipt_marker(value):
+    if isinstance(value, dict):
+        return "$receipt_value" in value or any(_has_receipt_marker(v) for v in value.values())
+    return isinstance(value, list) and any(_has_receipt_marker(v) for v in value)
+
+
+def _receipt_locations(payload):
+    for path, receipt in _wrapper_locations(payload):
+        if isinstance(receipt, dict):
+            for field in ("allocation_receipt", "cost_semantics", "effective_per_entry_risk",
+                          "raw_per_entry_risk", "raw_risk", "pricing_basis", "projection",
+                          "effective_plan", "raw_proposal"):
+                if field in receipt:
+                    yield path.rsplit(".", 1)[0] + "." + field, receipt, field
+
+
+def _restore_receipt_values(original, metadata):
+    definitions, paths = metadata.get("receipt_value_definitions"), metadata.get("receipt_value_paths")
+    if (not isinstance(definitions, dict) or not definitions or not isinstance(paths, list)
+            or not paths or any(not isinstance(p, str) for p in paths) or len(paths) != len(set(paths))):
+        raise ValueError("invalid_receipt_value_projection")
+    locations = {p: (r, f) for p, r, f in _receipt_locations(original)}
+    used = set()
+    for path in paths:
+        if path not in locations:
+            raise ValueError("unknown_receipt_value_path")
+        receipt, field = locations[path]
+        ref = receipt[field]
+        if not isinstance(ref, dict) or set(ref) != {"$receipt_value"}:
+            raise ValueError("invalid_receipt_value_reference")
+        key = ref["$receipt_value"]
+        if not isinstance(key, str) or key not in definitions:
+            raise ValueError("unknown_receipt_value_reference")
+        value = definitions[key]
+        if (_has_receipt_marker(value) or hashlib.sha256(_json(value, sort_keys=True).encode()).hexdigest() != key):
+            raise ValueError("receipt_value_hash_mismatch")
+        receipt[field] = deepcopy(value)
+        used.add(key)
+    if used != set(definitions) or _has_receipt_marker(original):
+        raise ValueError("unregistered_receipt_value")
+
+
+def _proposal_locations(payload):
+    for path, receipt in _wrapper_locations(payload):
+        if isinstance(receipt, dict):
+            for field in ("raw_allocation_proposal", "raw_proposal", "effective_plan"):
+                yield path.rsplit(".", 1)[0] + "." + field, receipt, field
+
+
+def _wrapper_proposal(receipt):
+    wrapper = receipt.get("raw_model_wrapper")
+    if not isinstance(wrapper, dict):
+        return None
+    if receipt.get("id") == "WAIT":
+        return wrapper.get("wait_proposal")
+    candidates = wrapper.get("candidates")
+    if isinstance(candidates, list):
+        for i, proposal in enumerate(candidates):
+            if receipt.get("id") == f"c{i}":
+                return proposal
+    return None
+
+
+def _restore_proposals(original, metadata):
+    paths = metadata.get("model_proposal_paths")
+    if (not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths)
+            or len(paths) != len(set(paths))):
+        raise ValueError("invalid_model_proposal_paths")
+    locations = {p: (r, f) for p, r, f in _proposal_locations(original)}
+    for path in paths:
+        if path not in locations:
+            raise ValueError("unknown_model_proposal_path")
+        receipt, field = locations[path]
+        ref, proposal = receipt.get(field), _wrapper_proposal(receipt)
+        if (not isinstance(ref, dict) or set(ref) not in ({"$model_proposal"},
+                {"$model_proposal", "overrides", "removed_fields", "restored_sha256"})
+                or not isinstance(proposal, dict) or _has_proposal_marker(proposal)
+                or hashlib.sha256(_json(receipt.get("raw_model_wrapper"), sort_keys=True).encode()).hexdigest()
+                != receipt.get("raw_model_wrapper_sha256")
+                or ref["$model_proposal"] != hashlib.sha256(_json(proposal, sort_keys=True).encode()).hexdigest()):
+            raise ValueError("model_proposal_hash_mismatch")
+        restored = deepcopy(proposal)
+        if "overrides" in ref:
+            overrides, removed = ref["overrides"], ref["removed_fields"]
+            if (not isinstance(overrides, dict) or _has_proposal_marker(overrides)
+                    or not isinstance(removed, list) or any(not isinstance(k, str) for k in removed)
+                    or len(removed) != len(set(removed)) or any(k not in proposal for k in removed)
+                    or set(removed) & set(overrides)):
+                raise ValueError("invalid_model_proposal_delta")
+            for key in removed:
+                del restored[key]
+            restored.update(overrides)
+            if hashlib.sha256(_json(restored, sort_keys=True).encode()).hexdigest() != ref["restored_sha256"]:
+                raise ValueError("model_proposal_delta_hash_mismatch")
+        hash_field = {"raw_allocation_proposal": "raw_allocation_sha256", "raw_proposal": "raw_sha256",
+                      "effective_plan": "effective_sha256"}[field]
+        if hash_field in receipt and receipt[hash_field] != hashlib.sha256(_json(restored, sort_keys=True).encode()).hexdigest():
+            raise ValueError("model_proposal_receipt_hash_mismatch")
+        receipt[field] = restored
+    if _has_proposal_marker(original):
+        raise ValueError("unregistered_model_proposal")
 
 
 def _wrapper_locations(payload):
@@ -104,15 +218,27 @@ def _restore_tables(original, metadata):
         if not isinstance(table, dict) or set(table) != {"$row_table"}:
             raise ValueError("invalid_row_table")
         body = table["$row_table"]
-        if not isinstance(body, dict) or set(body) != {"columns", "rows"}:
+        if not isinstance(body, dict) or set(body) not in ({"columns", "rows"}, {"columns", "rows", "keys"}):
             raise ValueError("invalid_row_table")
         columns, rows = body["columns"], body["rows"]
+        if path in {"contract_context.ma_structure.levels", "contract_context.recovery.changed_evidence"} and "keys" not in body:
+            raise ValueError("missing_row_table_keys")
         if (not isinstance(columns, list) or not columns or
                 any(not isinstance(c, str) for c in columns) or len(columns) != len(set(columns)) or
                 not isinstance(rows, list) or not rows or
                 any(not isinstance(row, list) or len(row) != len(columns) for row in rows)):
             raise ValueError("invalid_row_table_shape")
-        owner[key] = [dict(zip(columns, row)) for row in rows]
+        values = [dict(zip(columns, row)) for row in rows]
+        if "keys" in body:
+            keys = body["keys"]
+            if (metadata["version"] != 4 or path not in {
+                    "contract_context.ma_structure.levels", "contract_context.recovery.changed_evidence"}
+                    or not isinstance(keys, list) or len(keys) != len(rows)
+                    or any(not isinstance(k, str) for k in keys) or len(keys) != len(set(keys))):
+                raise ValueError("invalid_row_table_keys")
+            owner[key] = dict(zip(keys, values))
+        else:
+            owner[key] = values
     if _has_table_marker(original):
         raise ValueError("unregistered_row_table")
 
@@ -121,7 +247,8 @@ def project_model_input(payload):
     """Return independent projected payload and value-free byte/hash/path audit."""
     original = _json(payload)
     projected = deepcopy(payload)
-    if "model_input_projection" in payload or _has_table_marker(payload) or _has_wrapper_marker(payload):
+    if ("model_input_projection" in payload or _has_table_marker(payload)
+            or _has_wrapper_marker(payload) or _has_proposal_marker(payload) or _has_receipt_marker(payload)):
         raise ValueError("reserved_projection_field")
     references, definitions, paths = [], {}, []
     recovery = projected.get("contract_context", {}).get("recovery")
@@ -144,19 +271,50 @@ def project_model_input(payload):
             for path, row in rows:
                 row[name] = {"$feature_definition": name}
                 paths.append(path)
-    table_paths = []
+    table_paths, keyed_tables = [], False
     for path, owner, key in _table_locations(projected):
         rows = owner.get(key)
+        keys = None
+        if path in {"contract_context.ma_structure.levels", "contract_context.recovery.changed_evidence"}:
+            if not isinstance(rows, dict):
+                continue
+            if any(not isinstance(k, str) for k in rows):
+                continue
+            keys, rows = list(rows), list(rows.values())
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict) or not rows[0]:
             continue
         columns = list(rows[0])
         if any(not isinstance(c, str) for c in columns) or any(not isinstance(row, dict) or list(row) != columns for row in rows):
             continue
         table = {"$row_table": {"columns": columns, "rows": [[row[c] for c in columns] for row in rows]}}
-        if len(_json(table).encode()) < len(_json(rows).encode()):
+        if keys is not None:
+            table["$row_table"]["keys"] = keys
+        if len(_json(table).encode()) < len(_json(owner[key]).encode()):
             owner[key] = table
             table_paths.append(path)
             paths.append(path)
+            keyed_tables |= keys is not None
+    proposal_paths = []
+    for path, receipt, field in _proposal_locations(projected):
+        proposal, value = _wrapper_proposal(receipt), receipt.get(field)
+        wrapper = receipt.get("raw_model_wrapper")
+        if (isinstance(proposal, dict) and isinstance(value, dict)
+                and hashlib.sha256(_json(wrapper, sort_keys=True).encode()).hexdigest()
+                == receipt.get("raw_model_wrapper_sha256")):
+            ref = {"$model_proposal": hashlib.sha256(_json(proposal, sort_keys=True).encode()).hexdigest()}
+            if _json(proposal, sort_keys=True) != _json(value, sort_keys=True):
+                ref.update(overrides={k: deepcopy(v) for k, v in value.items()
+                           if k not in proposal or _json(v, sort_keys=True) != _json(proposal[k], sort_keys=True)},
+                           removed_fields=[k for k in proposal if k not in value],
+                           restored_sha256=hashlib.sha256(_json(value, sort_keys=True).encode()).hexdigest())
+            hash_field = {"raw_allocation_proposal": "raw_allocation_sha256", "raw_proposal": "raw_sha256",
+                          "effective_plan": "effective_sha256"}[field]
+            if hash_field in receipt and receipt[hash_field] != hashlib.sha256(_json(value, sort_keys=True).encode()).hexdigest():
+                continue
+            if len(_json(ref)) < len(_json(value)):
+                receipt[field] = ref
+                proposal_paths.append(path)
+                paths.append(path)
     wrapper_definitions, wrapper_paths = {}, []
     groups = {}
     for path, receipt in _wrapper_locations(projected):
@@ -173,17 +331,44 @@ def project_model_input(payload):
             receipt["raw_model_wrapper"] = {"$model_wrapper": key}
             wrapper_paths.append(path)
             paths.append(path)
+    value_definitions, value_paths, groups = {}, [], {}
+    for path, receipt, field in _receipt_locations(projected):
+        value = receipt[field]
+        if isinstance(value, (dict, list)) and len(_json(value)) >= 400:
+            groups.setdefault(_json(value, sort_keys=True), []).append((path, receipt, field))
+    for encoded_value, locations in groups.items():
+        if len(locations) < 2:
+            continue
+        key = hashlib.sha256(encoded_value.encode()).hexdigest()
+        ref = {"$receipt_value": key}
+        overhead = len(_json(ref)) * len(locations) + len(_json([p for p, _, _ in locations])) + 70
+        if len(encoded_value) * (len(locations) - 1) <= overhead:
+            continue
+        value_definitions[key] = deepcopy(locations[0][1][locations[0][2]])
+        for path, receipt, field in locations:
+            receipt[field] = deepcopy(ref)
+            value_paths.append(path)
+            paths.append(path)
     if paths:
         projected["model_input_projection"] = {
-            "version": 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
+            "version": 4 if proposal_paths or keyed_tables or value_paths else 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
             "meaning": "Lossless references only. Resolve numeric_market-v1 as the supplied snapshot numeric paths; feature-definition references use this shared dictionary. All original values are retained or exactly reproducible."}
         if table_paths:
             projected["model_input_projection"]["row_table_paths"] = table_paths
             projected["model_input_projection"]["meaning"] += " At each row_table_path, $row_table.columns names each cell in every rows array, in order; each array is one original observation object. Expand tables before resolving numeric_market-v1."
+            if keyed_tables:
+                projected["model_input_projection"]["meaning"] += " When keys is present, keys[i] names rows[i] in the original object mapping."
         if wrapper_paths:
             projected["model_input_projection"].update(model_wrapper_definitions=wrapper_definitions,
                                                       model_wrapper_paths=wrapper_paths)
             projected["model_input_projection"]["meaning"] += " Each $model_wrapper refers to the exact shared raw model wrapper in model_wrapper_definitions. Restore it before interpreting original receipt or bundle hashes; raw_model_wrapper_sha256 and receipt identities are unchanged."
+        if proposal_paths:
+            projected["model_input_projection"]["model_proposal_paths"] = proposal_paths
+            projected["model_input_projection"]["meaning"] += " Each $model_proposal is the SHA256 of the base proposal in that receipt's raw_model_wrapper: WAIT uses wait_proposal; cN uses candidates[N]. If present, remove removed_fields then replace/add top-level overrides to obtain the exact restored_sha256 proposal (including host-sized quantity). Restore wrappers first, then these proposals before interpreting receipt hashes. No strategic values are changed."
+        if value_paths:
+            projected["model_input_projection"].update(receipt_value_definitions=value_definitions,
+                                                     receipt_value_paths=value_paths)
+            projected["model_input_projection"]["meaning"] += " First expand $receipt_value using receipt_value_definitions (key is its SHA256); these are exact shared receipt blocks, not shared decisions. Then restore wrappers and proposals. Effective-plan overrides apply only to that effective_plan, never to the raw proposal."
     encoded = _json(projected)
     if len(encoded.encode()) >= len(original.encode()):
         projected, encoded, paths = deepcopy(payload), original, []
@@ -204,18 +389,30 @@ def restore_model_input(payload):
     original = deepcopy(payload)
     metadata = original.pop("model_input_projection", None)
     if metadata is None:
+        if _has_receipt_marker(original):
+            raise ValueError("unregistered_receipt_value")
+        if _has_proposal_marker(original):
+            raise ValueError("unregistered_model_proposal")
         if _has_wrapper_marker(original):
             raise ValueError("unregistered_model_wrapper")
         if _has_table_marker(original):
             raise ValueError("unregistered_row_table")
         return original
-    if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2, 3):
+    if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2, 3, 4):
         raise ValueError("unknown_projection_version")
-    if metadata["version"] == 3:
+    if metadata["version"] == 4 and "receipt_value_paths" in metadata:
+        _restore_receipt_values(original, metadata)
+    elif _has_receipt_marker(original):
+        raise ValueError("unregistered_receipt_value")
+    if metadata["version"] == 3 or (metadata["version"] == 4 and "model_wrapper_paths" in metadata):
         _restore_wrappers(original, metadata)
     elif _has_wrapper_marker(original):
         raise ValueError("unregistered_model_wrapper")
-    if metadata["version"] == 2 or (metadata["version"] == 3 and "row_table_paths" in metadata):
+    if metadata["version"] == 4 and "model_proposal_paths" in metadata:
+        _restore_proposals(original, metadata)
+    elif _has_proposal_marker(original):
+        raise ValueError("unregistered_model_proposal")
+    if metadata["version"] == 2 or (metadata["version"] in (3, 4) and "row_table_paths" in metadata):
         _restore_tables(original, metadata)
     elif _has_table_marker(original):
         raise ValueError("unregistered_row_table")
@@ -226,4 +423,10 @@ def restore_model_input(payload):
     if "contract_context.recovery.current" in metadata["numeric_market_references"]:
         from live.scenario_recovery import numeric_market
         original["contract_context"]["recovery"]["current"] = numeric_market(original["market_snapshot"])
+    if metadata["version"] == 4:
+        for _, receipt in _wrapper_locations(original):
+            if isinstance(receipt, dict) and "receipt_sha256" in receipt:
+                body = {k: v for k, v in receipt.items() if k != "receipt_sha256"}
+                if hashlib.sha256(_json(body, sort_keys=True).encode()).hexdigest() != receipt["receipt_sha256"]:
+                    raise ValueError("restored_receipt_hash_mismatch")
     return original
