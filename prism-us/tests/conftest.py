@@ -36,6 +36,8 @@ from messaging.publish_guard import DISABLE_ENV_VAR  # noqa: E402
 os.environ[DISABLE_ENV_VAR] = "1"
 # Runner hold rule: no daily-bar network fetch in the default US run; its tests opt in.
 os.environ.setdefault("RUNNER_HOLD_ENABLED", "false")
+# Its relative-weakness exit also fetches index bars; tests/test_runner_hold.py opts in.
+os.environ.setdefault("RUNNER_REL_WEAK_ENABLED", "false")
 
 
 # =============================================================================
