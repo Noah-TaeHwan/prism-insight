@@ -15,6 +15,11 @@ Phases of a runner (the AI trailing stop never applies to a runner):
   * EXTENDED (after ``hold_until``): additionally on a completed close below the 20-day
              MA — then the normal sell rules apply again.
 
+Relative-weakness exit (both phases, H-1014-e, user decision 2026-10-15): a completed close
+below the 20-day MA while the stock's return from its highest completed close since the
+entry session is at least 10 percentage points worse than the index over the same dates
+(KR KOSPI, US SPY). An unknown index close is unknown, never an exit.
+
 In both phases the intraday hard stop (row stop_loss) is the initial entry: it is set
 to the entry when the runner is found, even when an earlier AI trailing raise had put
 it higher (the one explicit exception to the one-way stop ratchet, user decision
@@ -45,7 +50,12 @@ CLOSE_BUFFER = timedelta(minutes=30)
 # holdings.buy_date is the server's naive local time (KST) in both markets.
 BUY_DATE_TZ = ZoneInfo(os.getenv("RUNNER_HOLD_BUY_DATE_TZ", "Asia/Seoul"))
 CORPORATE_PREFIXES = ("TIER0_EVENT", "[법인이벤트]", "[CORP_EVENT]")
-EXIT_CODES = ("MA50_CLOSE", "BREAKEVEN_CLOSE", "MA20_CLOSE")
+EXIT_CODES = ("MA50_CLOSE", "BREAKEVEN_CLOSE", "MA20_CLOSE", "REL_WEAK_CLOSE")
+# H-1014-e (docs/HYPOTHESIS_REGISTRY_ko.md): stock return from its peak close minus the index return.
+REL_WEAK_GAP = -0.10
+INDEX_SYMBOL = {"KR": "1001", "US": "SPY"}  # KOSPI, S&P 500 ETF (the study's indices)
+INDEX_NAME_KO = {"KR": "코스피", "US": "S&P 500(SPY)"}
+INDEX_NAME_EN = {"KR": "KOSPI", "US": "the S&P 500 (SPY)"}
 HOLD, EXTENDED = "HOLD", "EXTENDED"
 
 # Reason buckets for the [RUNNER_HOLD] log only (never for the decision itself).
@@ -66,6 +76,11 @@ def enabled(market):
     flag = os.getenv("RUNNER_HOLD_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     markets = {m.strip().upper() for m in os.getenv("RUNNER_HOLD_MARKETS", "KR,US").split(",") if m.strip()}
     return flag and str(market).upper() in markets
+
+
+def rel_weak_enabled():
+    """RUNNER_REL_WEAK_ENABLED (default true): the relative-weakness exit only (rollback switch)."""
+    return os.getenv("RUNNER_REL_WEAK_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _dec(value):
@@ -233,10 +248,33 @@ def phase(block, today):
     return HOLD if str(today) <= str(block.get("hold_until") or "") else EXTENDED
 
 
-def runner_exit(bars, entry_ref, current_phase=HOLD):
+def relative_weakness(bars, index_bars, entry_session):
+    """(gap or None, facts): the stock's return from its highest completed close since the entry
+    session minus the index return between the same two dates. None when the index close of
+    either date is missing (unknown, never an exit)."""
+    window = [i for i, b in enumerate(bars) if b["date"] >= str(entry_session)]
+    if not window or not index_bars:
+        return None, {"rel_status": "UNKNOWN"}
+    peak_i = max(window, key=lambda i: float(bars[i]["close"]))  # first of equal peaks, as in the study
+    peak, last = bars[peak_i], bars[-1]
+    index_close = {b["date"]: _num(b.get("close")) for b in index_bars}
+    i_peak, i_last = index_close.get(peak["date"]), index_close.get(last["date"])
+    facts = {"peak_date": peak["date"], "peak_close": float(peak["close"])}
+    if i_peak is None or i_last is None:
+        return None, dict(facts, rel_status="UNKNOWN")
+    stock = float(last["close"]) / float(peak["close"]) - 1
+    index = i_last / i_peak - 1
+    gap = stock - index
+    return gap, dict(facts, rel_status="OK", stock_from_peak_pct=round(stock * 100, 2),
+                     index_from_peak_pct=round(index * 100, 2), rel_gap_pct=round(gap * 100, 2))
+
+
+def runner_exit(bars, entry_ref, current_phase=HOLD, *, index_bars=None, entry_session=None):
     """(exit code or None, facts) on the latest completed bar: close below the initial entry
     (BREAKEVEN_CLOSE) or its 50-day MA (MA50_CLOSE); in EXTENDED also below its 20-day MA
-    (MA20_CLOSE). A missing moving average is unknown, never an exit."""
+    (MA20_CLOSE); in both phases below its 20-day MA while at least 10%p weaker than the index
+    since its peak close (REL_WEAK_CLOSE, needs ``index_bars`` and ``entry_session``).
+    A missing moving average or index close is unknown, never an exit."""
     if not bars:
         return None, {"status": "UNKNOWN", "reason": "NO_BARS"}
     last = bars[-1]
@@ -247,12 +285,18 @@ def runner_exit(bars, entry_ref, current_phase=HOLD):
     facts = {"status": "OK" if ma50 is not None else "UNKNOWN", "date": last["date"], "close": close,
              "ma50": round(ma50, 4) if ma50 is not None else None,
              "ma20": round(ma20, 4) if ma20 is not None else None}
+    gap = None
+    if index_bars is not None and entry_session and rel_weak_enabled():
+        gap, rel = relative_weakness(bars, index_bars, entry_session)
+        facts.update(rel)
     if entry is not None and close < entry:
         return "BREAKEVEN_CLOSE", facts
     if ma50 is not None and close < ma50:
         return "MA50_CLOSE", facts
     if current_phase == EXTENDED and ma20 is not None and close < ma20:
         return "MA20_CLOSE", facts
+    if gap is not None and gap <= REL_WEAK_GAP and ma20 is not None and close < ma20:
+        return "REL_WEAK_CLOSE", facts
     return None, facts
 
 
@@ -334,15 +378,25 @@ def exit_reason(view, market, language):
     facts = view.get("exit_facts") or {}
     block = view.get("record") or {}
     code = view.get("exit")
+    market = str(market).upper()
     if language == "en":
         money = _money_en
         why = {"BREAKEVEN_CLOSE": f"below the initial entry {money(block.get('entry_ref'), market)} (breakeven)",
                "MA20_CLOSE": f"below the 20-day MA {money(facts.get('ma20'), market)} after the hold window",
+               "REL_WEAK_CLOSE": (f"below the 20-day MA {money(facts.get('ma20'), market)}, "
+                                  f"{facts.get('stock_from_peak_pct')}% since the peak close "
+                                  f"{money(facts.get('peak_close'), market)} ({facts.get('peak_date')}) vs "
+                                  f"{INDEX_NAME_EN.get(market, 'the index')} {facts.get('index_from_peak_pct')}% "
+                                  f"({facts.get('rel_gap_pct')}%p weaker than the index)"),
                }.get(code, f"below the 50-day MA {money(facts.get('ma50'), market)}")
         return (f"RUNNER_MA50: runner hold rule exit — completed close {money(facts.get('close'), market)} "
                 f"({facts.get('date')}) {why}.")
     why = {"BREAKEVEN_CLOSE": f"최초 매수가 {_money(block.get('entry_ref'), market)}(본전) 아래",
            "MA20_CLOSE": f"보유 기한 이후 20일선 {_money(facts.get('ma20'), market)} 아래",
+           "REL_WEAK_CLOSE": (f"최고 종가 {_money(facts.get('peak_close'), market)}({facts.get('peak_date')}) 이후 "
+                              f"{facts.get('stock_from_peak_pct')}%로 같은 기간 {INDEX_NAME_KO.get(market, '지수')} "
+                              f"{facts.get('index_from_peak_pct')}%보다 {facts.get('rel_gap_pct')}%p 더 빠진 채 "
+                              f"20일선 {_money(facts.get('ma20'), market)} 아래"),
            }.get(code, f"50일선 {_money(facts.get('ma50'), market)} 아래")
     return (f"RUNNER_MA50: 주도주 보유 규칙 매도 — {facts.get('date')} 확정 종가 {_money(facts.get('close'), market)}, "
             f"{why}로 마감했습니다.")
@@ -381,6 +435,9 @@ def prompt_block(view, *, market, language):
                   "an exit, then the normal SELL rules apply.")
         exits = ("(1) a completed close below the 50-day MA, (2) a completed close below the initial entry "
                  "(breakeven)" + (", (3) a completed close below the 20-day MA" if extended else "")
+                 + (f", ({4 if extended else 3}) a completed close below the 20-day MA while the drop since the "
+                    f"highest completed close after the entry is at least 10 percentage points worse than "
+                    f"{INDEX_NAME_EN.get(market, 'the index')} over the same dates" if rel_weak_enabled() else "")
                  + " — the system checks these deterministically and sells; the intraday hard stop at the initial "
                  "entry — the system executes it. An officially confirmed corporate event (Core-0) remains a sell "
                  "reason.")
@@ -402,7 +459,7 @@ def prompt_block(view, *, market, language):
             "- Not sell reasons while the rule is on: target reached (in any regime, including the sideways/bear "
             "'exit at the target'), overheating, a short-term surge or RSI, slowing momentum, a 20-day MA break "
             + ("" if extended else "(before the hold window ends) ") +
-            "or the trend-weakness composite, a trailing-stop break, holding period or time review, sector weakness. "
+            "on its own (outside the exits listed above) or the trend-weakness composite, a trailing-stop break, holding period or time review, sector weakness. "
             "The stored BUY scenario sell_triggers and the matching parts of the shared SELL instruction (target "
             "milestone, trailing stop, trend weakness, take-profit and time management) do not apply to this holding. "
             "A should_sell=true for such a reason is turned into a hold by the system. Keep should_sell=false and "
@@ -422,6 +479,9 @@ def prompt_block(view, *, market, language):
               "돌아갑니다.")
     exits = ("(1) 확정 종가가 50일선 아래로 마감한 경우, (2) 확정 종가가 최초 매수가(본전) 아래로 마감한 경우"
              + (", (3) 확정 종가가 20일선 아래로 마감한 경우" if extended else "")
+             + (f", ({4 if extended else 3}) 매수 후 최고 종가 이후 하락률이 같은 기간 "
+                f"{INDEX_NAME_KO.get(market, '지수')} 변화보다 10%p 이상 나쁘면서 확정 종가가 20일선 아래로 마감한 경우"
+                if rel_weak_enabled() else "")
              + " — 시스템이 결정론적으로 확인해 매도합니다. 장중에 최초 매수가(손절가) 아래로 내려가면 하드스탑이 자동 "
              "실행합니다. 공식 확인된 법인 이벤트(핵심-0)는 그대로 매도 사유입니다.")
     return (
@@ -440,7 +500,7 @@ def prompt_block(view, *, market, language):
         "- 이 규칙이 적용되는 동안에는 다음이 매도 사유가 아닙니다: 목표가 도달(시장 국면과 무관하며, 횡보·약세 국면의 "
         "'도달 즉시 전량 매도'도 포함), 과열·단기 급등·RSI, 모멘텀 둔화, "
         + ("" if extended else "(보유 기한 전의) ") +
-        "20일선 이탈과 추세 약화 복합 조건, trailing stop 이탈, 보유 기간·시간 점검, 업종 약세. 저장된 매수 시나리오의 "
+        "20일선 이탈 단독(위 매도 조건에 해당하지 않는 경우)과 추세 약화 복합 조건, trailing stop 이탈, 보유 기간·시간 점검, 업종 약세. 저장된 매수 시나리오의 "
         "sell_triggers와 공유 매도 지침의 해당 항목(익절 마일스톤, trailing stop, 추세 약화, 익절, 시간 관리)은 이 종목에 "
         "적용하지 않습니다. 이런 이유로 should_sell=true를 내도 시스템이 보유로 바꿉니다. should_sell은 false로 두고 보유 "
         "근거를 쓰십시오.\n"
@@ -497,8 +557,10 @@ def notice(block, *, market, company_name, ticker, today, detected, stop_change=
     until = _mmdd(block.get("hold_until") or "")
     gain, session = float(block.get("gain_pct") or 0), block.get("session")
     floor = f"50일선({_money(ma50, market)})" if _num(ma50) is not None else "50일선"
+    weak = f"{INDEX_NAME_KO.get(str(market).upper(), '지수')}보다 고점 대비 10%p 넘게 더 빠진 채 20일선 아래로 마감하면"
     keep = (f"보유 기한이 지나 20일선, {floor} 또는 매수가 아래로 마감하면 매도합니다." if extended
-            else f"{floor} 또는 매수가 아래로 마감하기 전까지 보유합니다 (~{until}).")
+            else f"{floor} 또는 매수가 아래로 마감하거나, {weak} 매도합니다. 그 전까지 보유합니다 (~{until})."
+            if rel_weak_enabled() else f"{floor} 또는 매수가 아래로 마감하기 전까지 보유합니다 (~{until}).")
     if stop_change:
         stop = f"손절가: {_money(stop_change[0], market)} → 매수가 {_money(stop_change[1], market)}\n"
     else:

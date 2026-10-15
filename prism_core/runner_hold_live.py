@@ -82,6 +82,49 @@ def fetch_daily_bars(market, ticker, now=None):
             for index, row in frame.iterrows()]
 
 
+def _frame_bars(frame):
+    if frame is None or frame.empty:
+        return []
+    columns = {str(c).lower(): c for c in frame.columns}
+    close = columns.get("close") or columns.get("종가")
+    if close is None:
+        return []
+    return [{"date": index.date().isoformat(), "close": float(row[close])} for index, row in frame.iterrows()]
+
+
+def fetch_index_bars(market, now=None):
+    """Daily index closes for the relative-weakness exit: KR KOSPI (KIS 1001), US SPY (yfinance)."""
+    end = (now or _now()).date()
+    start = end - timedelta(days=HISTORY_DAYS)
+    symbol = R.INDEX_SYMBOL[str(market).upper()]
+    if str(market).upper() == "US":
+        import yfinance as yf
+        return _frame_bars(yf.Ticker(symbol).history(start=start.isoformat(),
+                                                     end=(end + timedelta(days=1)).isoformat(), auto_adjust=False))
+    from cores import market_data
+    return _frame_bars(market_data.get_index_ohlcv_by_date(start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), symbol))
+
+
+_INDEX_CACHE = {}
+INDEX_TTL = timedelta(minutes=10)
+
+
+def index_bars_safe(market, now=None):
+    """fetch_index_bars cached per market for INDEX_TTL; [] (exit unknown, never a sell) on provider failure."""
+    market = str(market).upper()
+    now = now or _now()
+    cached = _INDEX_CACHE.get(market)
+    if cached is not None and now - cached[0] < INDEX_TTL:
+        return cached[1]
+    try:
+        bars = fetch_index_bars(market, now)
+    except Exception as error:  # noqa: BLE001 - an index outage only disables the relative-weakness exit
+        _LOG.warning("[RUNNER_HOLD][%s] index bars unavailable: %s", market, error)
+        bars = []
+    _INDEX_CACHE[market] = (now, bars)
+    return bars
+
+
 def fetch_bars_safe(market, ticker):
     """fetch_daily_bars that logs and returns [] on any provider failure."""
     try:
@@ -110,8 +153,11 @@ def needs_bars(market, row, *, now=None):
     return today <= R.session_after(market, start, R.HOLD_SESSIONS)
 
 
-def evaluate(market, row, bars, *, current_price, now=None):
-    """Runner view of one holding row from its stored block or in-memory detection (no writes)."""
+def evaluate(market, row, bars, *, current_price, now=None, index_bars=None):
+    """Runner view of one holding row from its stored block or in-memory detection (no writes).
+
+    ``index_bars``: index daily bars, or a callable returning them, resolved only for a runner.
+    """
     now = now or _now()
     scenario = R.load_scenario(row.get("scenario"))
     stored = R.record(scenario)
@@ -139,7 +185,11 @@ def evaluate(market, row, bars, *, current_price, now=None):
         block = dict(block, peak_close=peak)
         view["record"] = block
     view["phase"] = R.phase(block, today)
-    view["exit"], view["exit_facts"] = R.runner_exit(done, block.get("entry_ref"), view["phase"])
+    index = None
+    if index_bars is not None and R.rel_weak_enabled():
+        index = R.completed_bars(index_bars() if callable(index_bars) else index_bars, market=market, now=now)
+    view["exit"], view["exit_facts"] = R.runner_exit(done, block.get("entry_ref"), view["phase"],
+                                                     index_bars=index, entry_session=start)
     price = R._num(current_price)
     view["facts"] = {"current_price": price, "stop_loss": row.get("stop_loss"),
                      "gain_now_pct": round((price / float(block["entry_ref"]) - 1) * 100, 2) if price else None,
@@ -148,12 +198,13 @@ def evaluate(market, row, bars, *, current_price, now=None):
     return view
 
 
-def view_for_row(market, row, current_price, fetch, *, now=None):
+def view_for_row(market, row, current_price, fetch, *, now=None, index_fetch=None):
     """evaluate() with bars from ``fetch(ticker)`` only when the row needs them (trend-exit, read-only)."""
     now = now or _now()
     if not needs_bars(market, row, now=now):
         return None
-    return evaluate(market, row, fetch(row.get("ticker")), current_price=current_price, now=now)
+    index = index_fetch or (lambda: index_bars_safe(market, now))
+    return evaluate(market, row, fetch(row.get("ticker")), current_price=current_price, now=now, index_bars=index)
 
 
 def persist(conn, market, row_id, view, *, current_price, now=None):
@@ -223,7 +274,8 @@ async def review_holding(agent, market, stock, *, logger=None, now=None):
         if not needs_bars(market, stock, now=now):
             return None
         bars = await asyncio.to_thread(fetch_bars_safe, market, ticker)
-        view = evaluate(market, stock, bars, current_price=stock.get("current_price"), now=now)
+        view = evaluate(market, stock, bars, current_price=stock.get("current_price"), now=now,
+                        index_bars=lambda: index_bars_safe(market, now))
         if view["record"] is None:
             return None
         written = persist(agent.conn, market, row_id, view, current_price=stock.get("current_price"), now=now)
@@ -268,7 +320,9 @@ async def review_holding(agent, market, stock, *, logger=None, now=None):
         log.warning("[RUNNER_HOLD][%s] %s runner exit code=%s", market, ticker, view["exit"])
         _emit("runner.exit_forced", market=market, ticker=ticker, row_id=row_id,
               attributes={"code": view["exit"], "phase": view["phase"],
-                          **{k: view["exit_facts"].get(k) for k in ("date", "close", "ma50", "ma20")},
+                          **{k: view["exit_facts"].get(k) for k in ("date", "close", "ma50", "ma20", "peak_date",
+                                                                    "peak_close", "stock_from_peak_pct",
+                                                                    "index_from_peak_pct", "rel_gap_pct")},
                           **_price_facts(stock, block)})
         return reason
     return None
