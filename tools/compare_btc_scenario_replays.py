@@ -244,13 +244,13 @@ def verify_calculated_completion(report, exchange):
 def verify_economic_rejections(directory, report):
     """Independently recount durable evidence, including mixed-candidate rejections."""
     profiles = {"economic-reject-single-v1", "economic-reject-calculated-v1"}
-    if report["contract"]["policy_profile"] not in profiles:
+    if report["contract"].get("policy_profile") not in profiles:
         require("economic_rejections" not in report, "unexpected_rejection_protocol")
         return
     with sqlite3.connect((directory / "replay.sqlite").resolve().as_uri() + "?mode=ro", uri=True) as conn:
         events = [(slot, json.loads(body)) for slot, body in conn.execute(
             "SELECT slot,body FROM llm_scenario_review_events ORDER BY slot,sequence")]
-        decisions = {slot: (proposal, json.loads(context)) for slot, proposal, context in conn.execute(
+        decisions = {slot: (proposal, context) for slot, proposal, context in conn.execute(
             "SELECT slot,proposal,context FROM llm_scenario_decisions")}
         intent_inputs = {json.loads(payload)["input_id"] for (payload,) in conn.execute(
             "SELECT payload FROM llm_scenario_intents")}
@@ -288,8 +288,11 @@ def verify_economic_rejections(directory, report):
             "economic_rejection_tick_mismatch")
     for slot in slots:
         require(slot in decisions and decisions[slot][0] is None
-                and decisions[slot][1]["input_id"] not in intent_inputs
                 and slot not in consumed_slots, "economic_rejection_authority_mutation")
+        context = json.loads(decisions[slot][1]) if decisions[slot][1] is not None else None
+        require(isinstance(context, dict) and isinstance(context.get("input_id"), str)
+                and bool(context["input_id"]), "economic_rejection_context_missing")
+        require(context["input_id"] not in intent_inputs, "economic_rejection_authority_mutation")
 
 
 def verify_run(directory, variant, registry, *, frozen=False, contract_verifier=None):

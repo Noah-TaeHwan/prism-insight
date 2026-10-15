@@ -80,6 +80,29 @@ def test_bad_raw_still_first_error_stop(tmp_path, calculated):
     assert fresh["execution_status"] == "STOPPED"
     assert fresh["model_failures"] == 1
     assert fresh["economic_rejections"]["rejected_ticks"] == 0
+    # Failed decisions may have NULL context; diagnostic recount must remain
+    # available without making that stopped run eligible for comparison.
+    with sqlite3.connect(tmp_path / "fresh/replay.sqlite") as conn:
+        conn.execute("UPDATE llm_scenario_decisions SET context=NULL")
+    verify_economic_rejections(tmp_path / "fresh", fresh)
+
+
+def test_legacy_rejection_recount_does_not_require_new_profile(tmp_path):
+    verify_economic_rejections(tmp_path, {"contract": {}})
+    with pytest.raises(ValueError, match="unexpected_rejection_protocol"):
+        verify_economic_rejections(tmp_path, {"contract": {}, "economic_rejections": {}})
+
+
+def test_rejected_tick_requires_its_own_context(tmp_path):
+    bundle, market = inputs()
+    with network_boundary("frozen"):
+        fresh = run_replay(bundle, market, tmp_path / "fresh", mode="fixture", tape_path=tmp_path / "tape",
+            policy_profile="economic-reject-single-v1", model_generator=generator([], calculated=False),
+            clock_monotonic=lambda: 0.)
+    with sqlite3.connect(tmp_path / "fresh/replay.sqlite") as conn:
+        conn.execute("UPDATE llm_scenario_decisions SET context=NULL")
+    with pytest.raises(ValueError, match="economic_rejection_context_missing"):
+        verify_economic_rejections(tmp_path / "fresh", fresh)
 
 
 def test_new_contract_is_explicit_not_legacy_reclassification():
