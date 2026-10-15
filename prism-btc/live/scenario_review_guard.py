@@ -6,7 +6,7 @@ import math
 from analysis.scenario_review_tape import replay_review
 from core.scenario_limit_prices import validate_execution_prices
 from live.scenario_calculated_review import (
-    _supplied_instrument_filters, receipt_hash, research_review,
+    ECONOMIC_REJECT_MODES, _supplied_instrument_filters, receipt_hash, research_review,
 )
 from live.scenario_contract import validate_wire_proposal
 from live.scenario_runtime import snapshot_input_time
@@ -39,6 +39,28 @@ def _meaningful(plan):
             if key not in {"risk", "execution_pricing", "rationale"}}
 
 
+def guard_rejected_review(snapshot, context, response_contract, envelope, *, bindings, research_mode):
+    """Verify the full rejection tape. This path never exposes an executable wire."""
+    if research_mode not in ECONOMIC_REJECT_MODES:
+        raise ValueError("review_rejection_mode")
+    outcome = replay_review(envelope, partial(research_review, research_mode=research_mode),
+                            snapshot, context, response_contract, bindings=bindings)
+    result = outcome.get("result", {})
+    if outcome.get("status") != "COMPLETE" or result.get("disposition") != "REJECTED_NO_ACTION":
+        raise ValueError("review_rejection_incomplete")
+    events = [op["event"] for op in envelope["operations"] if op["kind"] == "record"]
+    required = dict(kind="RESEARCH_REJECTION", body=result, sha256=receipt_hash(result))
+    if sum(event == required for event in events) != 1:
+        raise ValueError("review_rejection_audit_missing")
+    receipts = result["candidates"]["candidates"]
+    if not receipts or any(r.get("eligible") is not False or
+                          r.get("rejection_type") != "PREAUTHORITY_ECONOMIC" for r in receipts):
+        raise ValueError("review_rejection_invalid")
+    return dict(disposition="REJECTED_NO_ACTION", rejection_codes=[r["rejection"] for r in receipts],
+                envelope_sha256=envelope["sha256"], bundle_sha256=result["bundle_sha256"],
+                execution_authorized=False)
+
+
 def guard_review(snapshot, original_context, response_contract, envelope, fresh_context,
                  *, bindings=None, research_mode="legacy"):
     """Replay exact evidence, then reprice the original wire once on fresh facts.
@@ -46,7 +68,8 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     The caller still owns locking, recovery authorization and broker preflight.
     A receipt here does not assert any order was submitted or protection exists.
     """
-    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
+                             "action-allocation-single-v1", "action-allocation-calculated-v1"} | ECONOMIC_REJECT_MODES:
         raise ValueError("research_review_mode")
     review = research_review if research_mode == "legacy" else partial(research_review, research_mode=research_mode)
     outcome = replay_review(envelope, review, snapshot, original_context,

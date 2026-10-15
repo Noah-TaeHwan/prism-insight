@@ -110,7 +110,8 @@ def test_first_observation_is_wait_only_even_without_phase_label():
     assert schema["properties"]["entries"]["maxItems"] == 0
 
 
-@pytest.mark.parametrize("mode", ["allocation-single", "allocation-calculated"])
+@pytest.mark.parametrize("mode", ["allocation-single", "allocation-calculated",
+                                  "action-allocation-single-v1", "action-allocation-calculated-v1"])
 def test_runtime_trusted_mode_reaches_both_fresh_guards(tmp_path, monkeypatch, mode):
     from live import scenario_review_guard
     from live.scenario_review_adapter import make_calculated_review_proposer
@@ -134,8 +135,10 @@ def test_runtime_trusted_mode_reaches_both_fresh_guards(tmp_path, monkeypatch, m
             result = runtime_wire(captured, "OPEN")
             result["entries"][0].pop("quantity")
             result["entries"][0]["allocation_fraction"] = .5
-            if mode == "allocation-calculated":
+            if mode in {"allocation-calculated", "action-allocation-calculated-v1"}:
                 result = dict(wait_proposal=runtime_wire(captured, "WAIT"), candidates=[result], no_candidate_reason="")
+            elif mode == "action-allocation-single-v1":
+                result = dict(proposal=result)
         return SimpleNamespace(text=json.dumps(result))
 
     adapter = make_calculated_review_proposer(generate=generate, clock=lambda: now, research_mode=mode)

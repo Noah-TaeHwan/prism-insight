@@ -106,7 +106,9 @@ class ScenarioRuntime:
                  recovery_enabled=False, automatic_normalization_enabled=False,
                  calculated_review_enabled=False, calculated_review_propose=None,
                  research_review_mode="legacy"):
-        if research_review_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+        if research_review_mode not in {"legacy", "allocation-single", "allocation-calculated",
+                                     "action-allocation-single-v1", "action-allocation-calculated-v1",
+                                     "economic-reject-single-v1", "economic-reject-calculated-v1"}:
             raise ValueError("research_review_mode")
         if research_review_mode != "legacy" and not calculated_review_enabled:
             raise ValueError("allocation_review_requires_explicit_enable")
@@ -526,6 +528,16 @@ class ScenarioRuntime:
                                    if operation["kind"] == "record"]
                 if recorded_events != expected_events:
                     raise ValueError("review_durable_events_mismatch")
+                if review_envelope["outcome"]["result"].get("disposition") == "REJECTED_NO_ACTION":
+                    from live.scenario_preview import response_contract
+                    from live.scenario_review_guard import guard_rejected_review
+                    rejected = guard_rejected_review(snap, ctx, response_contract(ctx), review_envelope,
+                        bindings=review_bindings, research_mode=self.research_review_mode)
+                    # No selected payload, recovery assessment, review, permit,
+                    # intent or cancellation authority is created on this path.
+                    return dict(status="rejected_no_action", reason="economic_rejection",
+                                rejection_codes=rejected["rejection_codes"],
+                                rejection_receipt=rejected)
                 payload = validate_wire_proposal(
                     review_envelope["outcome"]["result"]["selected"]["raw_proposal"], ctx)
                 payload["rationale"] = review_envelope["outcome"]["result"]["selection"]["rationale"]

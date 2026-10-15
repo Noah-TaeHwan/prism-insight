@@ -8,7 +8,7 @@ from copy import deepcopy
 from decimal import Decimal, ROUND_FLOOR
 import math
 
-from core.llm_scenario import ScenarioValidationError, quantity_for_risk, risk_snapshot
+from core.llm_scenario import EconomicProposalRejection, ScenarioValidationError, quantity_for_risk, risk_snapshot
 
 
 def _number(value, name, *, positive=False):
@@ -148,7 +148,9 @@ def allocate_entry_risk(proposal, context):
                     (cap / unit / step).to_integral_value(rounding=ROUND_FLOOR))
         quantity = steps * step
         if quantity <= 0 or quantity < minimum or quantity * Decimal(str(row["price"])) < min_notional:
-            raise ScenarioValidationError("allocation_below_minimum")
+            raise EconomicProposalRejection("allocation_below_minimum", dict(
+                allocation_receipt=receipt, entry_id=row["id"], quantity=float(quantity),
+                minimum_quantity=float(minimum), minimum_notional=float(min_notional)))
         receipt["entries"].append(dict(id=row["id"], allocation_fraction=float(fraction),
             allocation_budget=float(cap), model_price=row["price"],
             quantity=float(quantity), risk_per_btc=float(immediate_unit),
@@ -180,7 +182,7 @@ def validate_allocation_prices(effective_plan, receipt, context):
         if qty % step or qty < minimum or qty * Decimal(str(row["price"])) < min_notional:
             raise ScenarioValidationError("allocation_instrument_filters")
         if qty * _worst_unit_risk(effective_plan, context, row["price"]) > Decimal(str(allocated["allocation_budget"])):
-            raise ScenarioValidationError("allocation_budget_exceeded")
+            raise EconomicProposalRejection("allocation_budget_exceeded", dict(allocation_receipt=receipt))
     risk = _risk(effective_plan, context, rows)
     if not risk["within_budget"]:
-        raise ScenarioValidationError("allocation_total_budget_exceeded")
+        raise EconomicProposalRejection("allocation_total_budget_exceeded", dict(risk=risk, allocation_receipt=receipt))

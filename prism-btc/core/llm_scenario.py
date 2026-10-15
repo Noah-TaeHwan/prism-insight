@@ -19,6 +19,19 @@ class ScenarioValidationError(ValueError):
     pass
 
 
+class EconomicProposalRejection(ScenarioValidationError):
+    """Known pre-authority economic infeasibility, not a malformed proposal."""
+
+    def __init__(self, code, evidence=None):
+        if code not in {"risk budget exceeded", "allocation_below_minimum",
+                        "allocation_budget_exceeded", "allocation_total_budget_exceeded",
+                        "entry_below_minimum"}:
+            raise ValueError("unknown_economic_rejection")
+        super().__init__(code)
+        self.code = code
+        self.evidence = deepcopy(evidence or {})
+
+
 def _number(value, name, *, minimum=0, positive=False):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ScenarioValidationError(f"{name}: finite number required")
@@ -310,7 +323,7 @@ the caller must first reconcile cancellations before dropping pending risk.
         # Never block pure protection improvement when a prior fill exceeded budget.
         if (widening and not risk["within_budget"]) or (entries and (
                 not risk["within_budget"] or risk["proposed_risk"] > risk["budget"] * confidence)):
-            raise ScenarioValidationError("risk budget exceeded")
+            raise EconomicProposalRejection("risk budget exceeded", risk)
         p["leverage"] = LEVERAGE
         p["risk"] = risk
         return p

@@ -58,7 +58,9 @@ def review_policy_binding(*, research_mode="legacy"):
         'live/scenario_runtime.py': scenario_runtime,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
-    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
+                             "action-allocation-single-v1", "action-allocation-calculated-v1",
+                             "economic-reject-single-v1", "economic-reject-calculated-v1"}:
         raise ValueError('research_review_mode')
     if research_mode != "legacy":
         from live import scenario_risk_allocation, scenario_execution

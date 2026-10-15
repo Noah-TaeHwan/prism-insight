@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sqlite3
+from collections import Counter
 from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
@@ -109,7 +111,8 @@ def verify_calculated_registry_contract(contract, registry, variant):
     require(type(contract["schema"]) is int and contract["schema"] == 4,
             "calculated_contract_schema_required")
     require(contract["policy_profile"] in {"single-pass-economic-v4", "calculated-economic-v4",
-            "allocation-single-economic-v1", "allocation-calculated-economic-v1"},
+            "allocation-single-economic-v1", "allocation-calculated-economic-v1",
+            "economic-reject-single-v1", "economic-reject-calculated-v1"},
             "unregistered_economic_profile")
     require(contract["economic_clock_contract"] == "NATIVE_MONOTONIC_INTEGER_MS_FULL_TICK_V1",
             "economic_clock_contract_mismatch")
@@ -238,6 +241,57 @@ def verify_calculated_completion(report, exchange):
             and protection.get("failed", 0) == 0, "economic_protection_failure")
 
 
+def verify_economic_rejections(directory, report):
+    """Independently recount durable evidence, including mixed-candidate rejections."""
+    profiles = {"economic-reject-single-v1", "economic-reject-calculated-v1"}
+    if report["contract"]["policy_profile"] not in profiles:
+        require("economic_rejections" not in report, "unexpected_rejection_protocol")
+        return
+    with sqlite3.connect((directory / "replay.sqlite").resolve().as_uri() + "?mode=ro", uri=True) as conn:
+        events = [(slot, json.loads(body)) for slot, body in conn.execute(
+            "SELECT slot,body FROM llm_scenario_review_events ORDER BY slot,sequence")]
+        decisions = {slot: (proposal, json.loads(context)) for slot, proposal, context in conn.execute(
+            "SELECT slot,proposal,context FROM llm_scenario_decisions")}
+        intent_inputs = {json.loads(payload)["input_id"] for (payload,) in conn.execute(
+            "SELECT payload FROM llm_scenario_intents")}
+        consumed_slots = {slot for (slot,) in conn.execute(
+            "SELECT slot FROM llm_scenario_recovery_events WHERE kind='PERMIT_CONSUMED'")}
+    slots, candidates = set(), {}
+    for slot, event in events:
+        if event["kind"] == "RESEARCH_REJECTION":
+            body = event["body"]
+            require(body["disposition"] == "REJECTED_NO_ACTION"
+                    and body["rejection_policy"] == "preauthority-economic-reject-v1"
+                    and body["executable"] is False and body["orders_submitted"] == 0
+                    and event["sha256"] == hashlib.sha256(json.dumps(body, ensure_ascii=False,
+                        sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest(),
+                    "rejection_event_invalid")
+            slots.add(slot)
+            bundle = body["candidates"]
+        elif event["kind"] == "CALCULATED_CANDIDATES":
+            bundle = event["body"]
+        else:
+            continue
+        for candidate in bundle["candidates"]:
+            if candidate.get("rejection_type") == "PREAUTHORITY_ECONOMIC":
+                require(candidate["eligible"] is False and isinstance(candidate["rejection"], str)
+                        and candidate["rejection"], "economic_rejection_candidate_invalid")
+                key = (slot, candidate["id"])
+                require(key not in candidates or candidates[key] == candidate["rejection"],
+                        "economic_rejection_candidate_conflict")
+                candidates[key] = candidate["rejection"]
+    expected = dict(policy="preauthority-economic-reject-v1", rejected_ticks=len(slots),
+                    rejected_candidates=len(candidates), codes=dict(Counter(candidates.values())),
+                    durable_events_sha256=digest(events))
+    require(report.get("economic_rejections") == expected, "economic_rejection_evidence_mismatch")
+    require(len(slots) == report["decision_outcomes"].get("rejected_no_action", 0),
+            "economic_rejection_tick_mismatch")
+    for slot in slots:
+        require(slot in decisions and decisions[slot][0] is None
+                and decisions[slot][1]["input_id"] not in intent_inputs
+                and slot not in consumed_slots, "economic_rejection_authority_mutation")
+
+
 def verify_run(directory, variant, registry, *, frozen=False, contract_verifier=None):
     report, exchange, curve = (read(directory / name) for name in
                                ("report.json", "exchange.json", "equity.json"))
@@ -254,6 +308,7 @@ def verify_run(directory, variant, registry, *, frozen=False, contract_verifier=
             if k not in {"result_hash", "execution_metadata"}}), "result_hash_mismatch")
     require(report["exchange_hash"] == digest(exchange), "exchange_hash_mismatch")
     contract = report["contract"]
+    verify_economic_rejections(directory, report)
     if contract_verifier is None:
         verify_registry_contract(contract, registry)
     else:

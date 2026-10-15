@@ -37,6 +37,7 @@ STAGES = {1: (0, 4, 24), 2: (4, 24, 144)}
 PROTOCOLS = {
     "legacy": ("single-pass-economic-v4", "calculated-economic-v4"),
     "risk-allocation-v1": ("allocation-single-economic-v1", "allocation-calculated-economic-v1"),
+    "preauthority-economic-reject-v1": ("economic-reject-single-v1", "economic-reject-calculated-v1"),
 }
 
 

@@ -15,8 +15,13 @@ ALLOCATION_PROFILES = {
     "allocation-single-economic-v1": "allocation-single",
     "allocation-calculated-economic-v1": "allocation-calculated",
 }
-ECONOMIC_PROFILES = {"single-pass-economic-v4", "calculated-economic-v4", *ALLOCATION_PROFILES}
-REVIEW_PROFILES = {"calculated-economic-v4", *ALLOCATION_PROFILES}
+REJECTION_PROFILES = {
+    "economic-reject-single-v1": "economic-reject-single-v1",
+    "economic-reject-calculated-v1": "economic-reject-calculated-v1",
+}
+RESEARCH_PROFILES = {**ALLOCATION_PROFILES, **REJECTION_PROFILES}
+ECONOMIC_PROFILES = {"single-pass-economic-v4", "calculated-economic-v4", *RESEARCH_PROFILES}
+REVIEW_PROFILES = {"calculated-economic-v4", *RESEARCH_PROFILES}
 
 
 class EconomicTape:
@@ -216,7 +221,7 @@ class EconomicDecisions:
         from live.scenario_preview import response_contract
         from live.scenario_provenance import review_policy_binding
         row = self._inputs(snapshot, context)
-        research_mode = ALLOCATION_PROFILES.get(self.tape.contract["policy_profile"], "legacy")
+        research_mode = RESEARCH_PROFILES.get(self.tape.contract["policy_profile"], "legacy")
         if research_mode != "legacy":
             from functools import partial
             research_review = partial(research_review, research_mode=research_mode)

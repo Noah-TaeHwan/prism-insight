@@ -7,7 +7,9 @@ from live.scenario_provenance import review_policy_binding
 
 
 def make_calculated_review_proposer(*, generate, clock, research_mode="legacy"):
-    if research_mode not in {"legacy", "allocation-single", "allocation-calculated"}:
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
+                             "action-allocation-single-v1", "action-allocation-calculated-v1",
+                             "economic-reject-single-v1", "economic-reject-calculated-v1"}:
         raise ValueError("research_review_mode")
     if not callable(generate) or not callable(clock):
         raise ValueError("review_dependencies_required")

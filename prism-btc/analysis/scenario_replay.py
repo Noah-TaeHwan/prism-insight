@@ -33,7 +33,9 @@ from live.scenario_runtime import ScenarioRuntime
 from live.scenario_preview import response_contract
 from live.scenario_llm import propose,SYSTEM_PROMPT,FLAT_ENTRY_PROMPT,MA_STRUCTURE_PROMPT,ScenarioModelError
 from core.scenario_limit_prices import POLICY_VERSION
-from analysis.scenario_calculated_replay import ALLOCATION_PROFILES, ECONOMIC_PROFILES, REVIEW_PROFILES
+from analysis.scenario_calculated_replay import (
+    ECONOMIC_PROFILES, REVIEW_PROFILES, RESEARCH_PROFILES, REJECTION_PROFILES,
+)
 from live.shared_entry_coordinator import mutation_lock
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -44,6 +46,8 @@ POLICY_PROFILES = {
     "calculated-economic-v4": {"recovery_enabled": True, "automatic_normalization_enabled": True},
     "allocation-single-economic-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
     "allocation-calculated-economic-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
+    "economic-reject-single-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
+    "economic-reject-calculated-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
 }
 _identity_scope_lock = threading.Lock()
 INPUT_PREPARATION_CODES = {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
@@ -209,23 +213,34 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
                 schema_builder_sha256=hashlib.sha256(inspect.getsource(research_review).encode()).hexdigest(),
                 wire_schema_builder_sha256=contract["phase_contracts"]["schema_builder_sha256"],
                 actual_phase_schema_binding="EXACT_GENERATE_REQUEST_RESPONSE_SCHEMA_IN_FULL_INPUT_TAPE")
-            if policy_profile in ALLOCATION_PROFILES:
+            if policy_profile in RESEARCH_PROFILES:
                 from live.scenario_calculated_review import (
                     allocation_response_schema, allocation_system_prompt, ALLOCATION_SINGLE_PROMPT,
                 )
-                research_mode = ALLOCATION_PROFILES[policy_profile]
+                research_mode = RESEARCH_PROFILES[policy_profile]
+                single = research_mode in {"allocation-single", "economic-reject-single-v1"}
                 contract["review_binding"] = review_policy_binding(research_mode=research_mode)
                 allocation_draft = DRAFT_PROMPT.replace("SL, TP, quantities and fractions yourself",
                     "SL, TP, confidence and entry allocation_fraction yourself") + ALLOCATION_SINGLE_PROMPT
-                phase_prompts = ({"SINGLE": ALLOCATION_SINGLE_PROMPT} if research_mode == "allocation-single"
+                phase_prompts = ({"SINGLE": ALLOCATION_SINGLE_PROMPT} if single
                                  else {"DRAFT": allocation_draft, "SELECT": SELECT_PROMPT})
+                if policy_profile == "economic-reject-single-v1":
+                    phase_prompts["SINGLE"] += "\nReturn exactly the root object {proposal: <action-specific allocation proposal>}. Follow its action branch; inactive fields must be null or empty as specified.\n"
                 contract["phase_contracts"] = dict(profile=policy_profile, research_mode=research_mode,
-                    max_model_calls=1 if research_mode == "allocation-single" else 2,
+                    max_model_calls=1 if single else 2,
                     **{key: hashlib.sha256(value.encode()).hexdigest() for key, value in phase_prompts.items()},
                     base_transform_sha256=hashlib.sha256(inspect.getsource(allocation_system_prompt).encode()).hexdigest(),
                     schema_builder_sha256=hashlib.sha256(inspect.getsource(research_review).encode()).hexdigest(),
                     wire_schema_builder_sha256=hashlib.sha256(inspect.getsource(allocation_response_schema).encode()).hexdigest(),
                     actual_phase_schema_binding="EXACT_GENERATE_REQUEST_RESPONSE_SCHEMA_IN_FULL_INPUT_TAPE")
+                if policy_profile in REJECTION_PROFILES:
+                    from live.scenario_calculated_review import action_allocation_response_schema
+                    contract["phase_contracts"].update(
+                        rejection_policy="preauthority-economic-reject-v1",
+                        rejection_execution="NO_AUTHORITY_NO_RETRY_NEXT_PLANNED_TICK",
+                        model_error_policy="STOP_FIRST_ERROR",
+                        wire_schema_builder_sha256=hashlib.sha256(
+                            inspect.getsource(action_allocation_response_schema).encode()).hexdigest())
         contract["observed_data"] = dict(mode=market_input_mode, provider_manifest=observed_manifest,
             allow_input_gaps=allow_input_gaps, clock="OBSERVED_AVAILABILITY_BEFORE_SIMULATED_CONTEXT",
             account_source="INDEPENDENT_SIMULATED_ACCOUNT_ONLY")
@@ -528,8 +543,8 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
                             clock=clock,**POLICY_PROFILES[policy_profile],
                             calculated_review_enabled=policy_profile in REVIEW_PROFILES,
                             calculated_review_propose=provider.calculated if policy_profile in REVIEW_PROFILES else None,
-                            **({"research_review_mode": ALLOCATION_PROFILES[policy_profile]}
-                               if policy_profile in ALLOCATION_PROFILES else {}))
+                            **({"research_review_mode": RESEARCH_PROFILES[policy_profile]}
+                               if policy_profile in RESEARCH_PROFILES else {}))
     if initial_state=="recovery-stage0":
         with mutation_lock(conn):
             state=runtime.state()
@@ -671,6 +686,28 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
                 final_economic_time_ms=session.ts_ms,eligible=stopped is None and drain_status=="COMPLETE")
             if stopped:
                 report["readiness"]["insufficiency_reasons"].append("STOPPED_TECHNICAL_FAILURE")
+        if policy_profile in REJECTION_PROFILES:
+            events = [(slot, json.loads(body)) for slot, body in conn.execute(
+                "SELECT slot,body FROM llm_scenario_review_events ORDER BY slot,sequence")]
+            rejected_slots = set()
+            candidates = {}
+            for slot, event in events:
+                if event["kind"] == "RESEARCH_REJECTION":
+                    rejected_slots.add(slot)
+                    bundle = event["body"]["candidates"]
+                elif event["kind"] == "CALCULATED_CANDIDATES":
+                    bundle = event["body"]
+                else:
+                    continue
+                for candidate in bundle["candidates"]:
+                    if candidate.get("rejection_type") == "PREAUTHORITY_ECONOMIC":
+                        candidates[(slot, candidate["id"])] = candidate["rejection"]
+            if stopped is None and len(rejected_slots) != statuses.get("rejected_no_action", 0):
+                raise TapeMismatch("economic_rejection_outcome_evidence_mismatch")
+            report["economic_rejections"] = dict(
+                policy="preauthority-economic-reject-v1", rejected_ticks=len(rejected_slots),
+                rejected_candidates=len(candidates), codes=dict(Counter(candidates.values())),
+                durable_events_sha256=digest(events))
         report["result_hash"]=digest(report)
         # Run mechanics are outside the reproducible economic result hash.
         report["execution_metadata"]={"mode":mode,"actual_model_calls":provider.model_calls,

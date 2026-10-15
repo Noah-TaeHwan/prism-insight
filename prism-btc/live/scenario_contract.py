@@ -116,7 +116,7 @@ def _matches(value, schema):
         return (set(value) == set(schema["required"]) and
                 all(_matches(value[key], child) for key, child in schema["properties"].items()))
     if actual == "array":
-        return len(value) <= min(20, schema.get("maxItems",20)) and all(_matches(item, schema["items"]) for item in value)
+        return schema.get("minItems", 0) <= len(value) <= min(20, schema.get("maxItems",20)) and all(_matches(item, schema["items"]) for item in value)
     return True
 
 
