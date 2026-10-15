@@ -284,6 +284,24 @@ Start by considering 50% near, 30% intermediate and 20% protected runner;
 this is a flexible model-selected baseline, not a forced allocation.
 Nearby material resistance for LONG or support for SHORT takes precedence over
 the distance baseline: place the first partial target closer when appropriate.
+500 USDT is a reference, not a minimum profit distance. Inspect intervening
+round-number zones along with supplied price reactions and support/resistance;
+roundness alone does not prove support or resistance. A nearer evidenced obstacle
+takes priority over waiting for the baseline distance, including for an inherited
+holding ladder. For a SHORT buy-to-close TP, choose a price slightly ABOVE the support;
+for a LONG sell-to-close TP, slightly BELOW the resistance. Choose the exact buffer
+and partial size from current volatility, available spread/order-book evidence,
+price_tick and executable minimum size; do not invent unavailable liquidity data.
+Example only: an 82,300 SHORT approaching evidenced 82,000 support may take some
+profit before the level; 82,030-82,080 is illustrative, not a fixed offset.
+Keep a new resting TP on the profitable, unpassed side of current price;
+never place a crossed target to claim an earlier fill. If the level was already
+passed, reassess the remaining structure and supported execution choices now.
+After a sustained break through that level, let the protected remainder pursue
+the next evidenced objective; a strong rejection or rebound at that level calls
+for evaluating residual reduction or stronger SL protection, not an automatic
+full exit or an unconditional stop move. Actual target changes require ADJUST;
+retain filled quotas and native Full SL protection.
 Weakening, convergence with fading follow-through, or nearby rejection can justify
 earlier or larger near reduction. Strong 30m/1h continuation can justify a smaller
 near allocation and more later exposure, but not postponing all profit-taking

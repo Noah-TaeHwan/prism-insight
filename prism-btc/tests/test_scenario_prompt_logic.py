@@ -14,9 +14,9 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct15 explicit demo approval: nearer 500 / 700-800 / 1000+ tiered targets.
+    # Oct15 explicit approval: nearer evidenced round levels precede distance targets.
     expected = {
-        'SYSTEM_PROMPT': 'b0bcd1e5c18f3ada9f9d7613037b8441efa958ac5674432c01af35c044301b8c',
+        'SYSTEM_PROMPT': 'a4f7ee615b25db5c3b1427ee02d7f5bb47d44c23bc8157787bde5cbfee108dd1',
         'MA_STRUCTURE_PROMPT': '8791c23c8b5455c1914aa434ae0d883e17697fbe9902e84c7acbb12c4b307fc7',
         'FLAT_ENTRY_PROMPT': 'e91e9cd77eed733610a9c51b8f78238e6e33e202124353dcd423b000f255b959',
     }
