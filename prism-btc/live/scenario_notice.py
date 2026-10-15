@@ -489,10 +489,13 @@ def render_notice(event: dict) -> str:
     if kind == "MODEL_ERROR":
         reason = {"llm_output_contract_failed":"LLM 응답이 출력 규격 검증을 통과하지 못했습니다.",
                   "llm_call_failed":"LLM 호출에 실패했습니다.",
-                  "llm_input_preparation_failed":"판단 입력 준비에 실패하여 LLM을 호출하지 않았습니다."}.get(event.get("reason_code"))
+                  "llm_input_preparation_failed":"판단 입력 준비에 실패하여 LLM을 호출하지 않았습니다.",
+                  "calculated_review_failed":"후보 생성·검산·최종 선택 과정이 정상 완료되지 않았습니다."}.get(event.get("reason_code"))
         if reason is None:
             raise ValueError("model_error_reason_required")
         input_failure = event.get("reason_code") == "llm_input_preparation_failed"
+        if event.get("reason_code") == "calculated_review_failed":
+            lines[0] = "⚠️ BTC 데모 판단 처리 오류 · 이번 판단 미반영"
         if input_failure:
             lines[0] = "⚠️ BTC 데모 판단 입력 오류 · LLM 호출 생략"
             if event.get("failure_code") == "input_size":

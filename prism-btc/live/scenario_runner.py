@@ -142,15 +142,20 @@ def notify_runtime_status(conn,result,*,clock=time.time):
         # independent from the once-per-minute protection heartbeat.
         conn.execute("CREATE TABLE IF NOT EXISTS llm_scenario_model_incident (id INTEGER PRIMARY KEY CHECK(id=1),event_id TEXT,opened REAL,active INTEGER)")
         model_row=conn.execute("SELECT event_id,opened,active FROM llm_scenario_model_incident WHERE id=1").fetchone()
-        model_failed=result.get("status")=="blocked" and result.get("reason") in {
+        review_failed = (result.get("status") == "blocked"
+            and result.get("reason") == "reconciliation_or_proposal_failed"
+            and result.get("failure_code") in {
+                "review_contract_failure", "review_tape_failure", "review_deadline_failure"})
+        model_failed=result.get("status")=="blocked" and (result.get("reason") in {
             "llm_output_contract_failed", "llm_call_failed", "llm_input_preparation_failed"}
+            or review_failed)
         model_validated=result.get("status")=="wait" or (
             result.get("status")=="intent_pending" and result.get("reason")=="awaiting_exact_evidence")
         if model_failed and (not model_row or not model_row[2]):
             identity="model-error-"+uuid.uuid4().hex
             stamp=clock()
             enqueue(conn,identity,{"kind":"MODEL_ERROR","timestamp":stamp,
-                "reason_code":result["reason"],
+                "reason_code":"calculated_review_failed" if review_failed else result["reason"],
                 "failure_code": "input_size" if result.get("reason") == "llm_input_preparation_failed"
                     and result.get("failure_code") == "input_size" else None})
             conn.execute("INSERT OR REPLACE INTO llm_scenario_model_incident VALUES(1,?,?,1)",(identity,stamp))
