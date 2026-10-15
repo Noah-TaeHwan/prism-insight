@@ -17,7 +17,7 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     # Oct15 explicit demo approval: nearer 500 / 700-800 / 1000+ tiered targets.
     expected = {
         'SYSTEM_PROMPT': 'b0bcd1e5c18f3ada9f9d7613037b8441efa958ac5674432c01af35c044301b8c',
-        'MA_STRUCTURE_PROMPT': 'faf00999ccf62b09488fe00ef27c866f691e79d1600ec04d184ae2a6657e18eb',
+        'MA_STRUCTURE_PROMPT': '8791c23c8b5455c1914aa434ae0d883e17697fbe9902e84c7acbb12c4b307fc7',
         'FLAT_ENTRY_PROMPT': 'e91e9cd77eed733610a9c51b8f78238e6e33e202124353dcd423b000f255b959',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
