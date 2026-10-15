@@ -488,3 +488,91 @@ def test_stop_is_never_reset_when_the_price_is_unknown():
     assert R.stop_target(block, 112.0, None) is None
     assert R.stop_target(block, 112.0, 0) is None
     assert R.stop_target(block, 112.0, 118.0) == 100.0
+
+
+# ---------------------------------------------------------------- relative-weakness exit (H-1014-e, 2026-10-15)
+
+_WEAK_PATH = [101, 103, 106, 110, 115, 121, 126, 130, 128, 125, 122, 119, 116, 113, 111]
+
+
+def _index(bars, closes=None):
+    """Index bars on the stock's dates: flat 1000, or ``closes`` (date -> close) overrides."""
+    return [{"date": b["date"], "close": (closes or {}).get(b["date"], 1000.0)} for b in bars]
+
+
+@pytest.fixture
+def rel_weak_on(monkeypatch):
+    monkeypatch.setenv("RUNNER_REL_WEAK_ENABLED", "true")
+
+
+def test_rel_weak_exit_when_10pp_weaker_than_the_index_and_below_ma20(rel_weak_on):
+    bars, start, _ = build("KR", _WEAK_PATH)
+    code, facts = R.runner_exit(bars, 100, R.HOLD, index_bars=_index(bars), entry_session=start)
+    assert code == "REL_WEAK_CLOSE"
+    assert facts["peak_close"] == 130.0 and facts["rel_gap_pct"] == facts["stock_from_peak_pct"] == -14.62
+    assert facts["close"] < facts["ma20"] and facts["close"] > facts["ma50"] and facts["close"] > 100
+    reason = R.exit_reason({"exit": code, "exit_facts": facts, "record": {"entry_ref": 100}}, "KR", "ko")
+    assert reason.startswith("RUNNER_MA50:") and "코스피" in reason and "-14.62%p" in reason
+
+
+def test_rel_weak_holds_when_the_whole_market_fell_with_it(rel_weak_on):
+    # Counterexample: the same drop with the index down 5% since the stock's peak -> gap -9.6%p, keep holding.
+    bars, start, _ = build("KR", _WEAK_PATH)
+    peak_day = bars[60 + 8]["date"]
+    index = _index(bars, {b["date"]: 950.0 for b in bars if b["date"] > peak_day})
+    code, facts = R.runner_exit(bars, 100, R.HOLD, index_bars=index, entry_session=start)
+    assert code is None and facts["rel_gap_pct"] > -10
+
+
+def test_rel_weak_needs_the_close_below_ma20_and_a_known_index_close(rel_weak_on):
+    bars, start, _ = build("KR", _WEAK_PATH[:-4])  # 130 -> 122: -6.2%, above the 20-day MA
+    assert R.runner_exit(bars, 100, R.HOLD, index_bars=_index(bars, {bars[-1]["date"]: 1100.0}),
+                         entry_session=start)[0] is None
+    bars, start, _ = build("KR", _WEAK_PATH)
+    missing = [b for b in _index(bars) if b["date"] != bars[-1]["date"]]
+    code, facts = R.runner_exit(bars, 100, R.HOLD, index_bars=missing, entry_session=start)
+    assert code is None and facts["rel_status"] == "UNKNOWN"
+    assert R.runner_exit(bars, 100, R.HOLD)[0] is None  # no index passed: unknown, never an exit
+
+
+def test_rel_weak_switch_off_restores_the_r5_exits(monkeypatch):
+    monkeypatch.setenv("RUNNER_REL_WEAK_ENABLED", "false")
+    bars, start, _ = build("KR", _WEAK_PATH)
+    assert R.runner_exit(bars, 100, R.HOLD, index_bars=_index(bars), entry_session=start)[0] is None
+
+
+@pytest.mark.parametrize("market", ["KR", "US"])
+def test_rel_weak_forces_the_runner_exit_in_the_batch_and_is_a_trend_exit(market, monkeypatch, rel_weak_on):
+    agent, stock, bars, now = _runner_case(market, _WEAK_PATH, price=111.0)
+    monkeypatch.setattr(L, "fetch_daily_bars", lambda m, t, now=None: bars)
+    calls = []
+    monkeypatch.setattr(L, "fetch_index_bars", lambda m, now=None: calls.append(m) or _index(bars))
+    L._INDEX_CACHE.clear()
+    reason = asyncio.run(L.review_holding(agent, market, stock, now=now))
+    assert stock["_runner_ctx"]["exit"] == "REL_WEAK_CLOSE" and reason.startswith("RUNNER_MA50")
+    from reentry_cooldown import classify_exit_kind
+    assert classify_exit_kind(reason) == "trend_exit"
+    # Trend-exit loop path: the cached index is reused within the TTL.
+    view = L.view_for_row(market, dict(stock, scenario=agent.row()[0] and json.dumps(agent.row()[0])), 111.0,
+                          lambda t: bars, now=now)
+    assert view["exit"] == "REL_WEAK_CLOSE" and calls == [market]
+    L._INDEX_CACHE.clear()
+
+
+def test_index_is_not_fetched_for_a_non_runner(monkeypatch, rel_weak_on):
+    agent, stock, bars, now = _runner_case("KR", [101, 102, 103, 104], price=104.0)
+    monkeypatch.setattr(L, "fetch_daily_bars", lambda m, t, now=None: bars)
+    monkeypatch.setattr(L, "fetch_index_bars", lambda m, now=None: pytest.fail("index fetched for a non-runner"))
+    L._INDEX_CACHE.clear()
+    assert asyncio.run(L.review_holding(agent, "KR", stock, now=now)) is None
+
+
+def test_index_outage_disables_only_the_rel_weak_exit(monkeypatch, rel_weak_on):
+    def down(m, now=None):
+        raise RuntimeError("KIS down")
+    monkeypatch.setattr(L, "fetch_index_bars", down)
+    L._INDEX_CACHE.clear()
+    assert L.index_bars_safe("KR") == []
+    bars, start, _ = build("KR", _WEAK_PATH)
+    assert R.runner_exit(bars, 100, R.HOLD, index_bars=[], entry_session=start)[0] is None
+    L._INDEX_CACHE.clear()
