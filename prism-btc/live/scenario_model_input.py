@@ -46,6 +46,51 @@ def _has_table_marker(value):
     return isinstance(value, list) and any(_has_table_marker(v) for v in value)
 
 
+def _has_wrapper_marker(value):
+    if isinstance(value, dict):
+        return "$model_wrapper" in value or any(_has_wrapper_marker(v) for v in value.values())
+    return isinstance(value, list) and any(_has_wrapper_marker(v) for v in value)
+
+
+def _wrapper_locations(payload):
+    bundle = payload.get("calculated_candidates")
+    if not isinstance(bundle, dict):
+        return []
+    candidates = bundle.get("candidates")
+    if not isinstance(candidates, list) or len(candidates) > 2:
+        return []
+    return [("calculated_candidates.wait.raw_model_wrapper", bundle.get("wait"))] + [
+        (f"calculated_candidates.candidates.{i}.raw_model_wrapper", receipt)
+        for i, receipt in enumerate(candidates)]
+
+
+def _restore_wrappers(original, metadata):
+    definitions, paths = metadata.get("model_wrapper_definitions"), metadata.get("model_wrapper_paths")
+    if (not isinstance(definitions, dict) or not definitions or not isinstance(paths, list)
+            or not paths or any(not isinstance(p, str) for p in paths) or len(paths) != len(set(paths))):
+        raise ValueError("invalid_model_wrapper_projection")
+    locations = dict(_wrapper_locations(original))
+    used = set()
+    for path in paths:
+        receipt = locations.get(path)
+        ref = receipt.get("raw_model_wrapper") if isinstance(receipt, dict) else None
+        if not isinstance(ref, dict) or set(ref) != {"$model_wrapper"}:
+            raise ValueError("invalid_model_wrapper_reference")
+        key = ref["$model_wrapper"]
+        if not isinstance(key, str) or key not in definitions:
+            raise ValueError("unknown_model_wrapper_reference")
+        wrapper = definitions[key]
+        if (not isinstance(wrapper, dict) or _has_wrapper_marker(wrapper)
+                or hashlib.sha256(_json(wrapper, sort_keys=True).encode()).hexdigest() != key
+                or hashlib.sha256(_json(wrapper, sort_keys=True).encode()).hexdigest()
+                != receipt.get("raw_model_wrapper_sha256")):
+            raise ValueError("model_wrapper_hash_mismatch")
+        receipt["raw_model_wrapper"] = deepcopy(wrapper)
+        used.add(key)
+    if used != set(definitions) or _has_wrapper_marker(original):
+        raise ValueError("unregistered_model_wrapper")
+
+
 def _restore_tables(original, metadata):
     paths = metadata.get("row_table_paths")
     if not isinstance(paths, list) or any(not isinstance(p, str) for p in paths) or len(paths) != len(set(paths)):
@@ -76,7 +121,7 @@ def project_model_input(payload):
     """Return independent projected payload and value-free byte/hash/path audit."""
     original = _json(payload)
     projected = deepcopy(payload)
-    if "model_input_projection" in payload or _has_table_marker(payload):
+    if "model_input_projection" in payload or _has_table_marker(payload) or _has_wrapper_marker(payload):
         raise ValueError("reserved_projection_field")
     references, definitions, paths = [], {}, []
     recovery = projected.get("contract_context", {}).get("recovery")
@@ -112,13 +157,33 @@ def project_model_input(payload):
             owner[key] = table
             table_paths.append(path)
             paths.append(path)
+    wrapper_definitions, wrapper_paths = {}, []
+    groups = {}
+    for path, receipt in _wrapper_locations(projected):
+        wrapper = receipt.get("raw_model_wrapper") if isinstance(receipt, dict) else None
+        if (isinstance(wrapper, dict) and hashlib.sha256(_json(wrapper, sort_keys=True).encode()).hexdigest()
+                == receipt.get("raw_model_wrapper_sha256")):
+            groups.setdefault(_json(wrapper), []).append((path, receipt))
+    for locations in groups.values():
+        if len(locations) < 2:
+            continue
+        key = hashlib.sha256(_json(locations[0][1]["raw_model_wrapper"], sort_keys=True).encode()).hexdigest()
+        wrapper_definitions[key] = deepcopy(locations[0][1]["raw_model_wrapper"])
+        for path, receipt in locations:
+            receipt["raw_model_wrapper"] = {"$model_wrapper": key}
+            wrapper_paths.append(path)
+            paths.append(path)
     if paths:
         projected["model_input_projection"] = {
-            "version": 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
+            "version": 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
             "meaning": "Lossless references only. Resolve numeric_market-v1 as the supplied snapshot numeric paths; feature-definition references use this shared dictionary. All original values are retained or exactly reproducible."}
         if table_paths:
             projected["model_input_projection"]["row_table_paths"] = table_paths
             projected["model_input_projection"]["meaning"] += " At each row_table_path, $row_table.columns names each cell in every rows array, in order; each array is one original observation object. Expand tables before resolving numeric_market-v1."
+        if wrapper_paths:
+            projected["model_input_projection"].update(model_wrapper_definitions=wrapper_definitions,
+                                                      model_wrapper_paths=wrapper_paths)
+            projected["model_input_projection"]["meaning"] += " Each $model_wrapper refers to the exact shared raw model wrapper in model_wrapper_definitions. Restore it before interpreting original receipt or bundle hashes; raw_model_wrapper_sha256 and receipt identities are unchanged."
     encoded = _json(projected)
     if len(encoded.encode()) >= len(original.encode()):
         projected, encoded, paths = deepcopy(payload), original, []
@@ -139,12 +204,18 @@ def restore_model_input(payload):
     original = deepcopy(payload)
     metadata = original.pop("model_input_projection", None)
     if metadata is None:
+        if _has_wrapper_marker(original):
+            raise ValueError("unregistered_model_wrapper")
         if _has_table_marker(original):
             raise ValueError("unregistered_row_table")
         return original
-    if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2):
+    if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2, 3):
         raise ValueError("unknown_projection_version")
-    if metadata["version"] == 2:
+    if metadata["version"] == 3:
+        _restore_wrappers(original, metadata)
+    elif _has_wrapper_marker(original):
+        raise ValueError("unregistered_model_wrapper")
+    if metadata["version"] == 2 or (metadata["version"] == 3 and "row_table_paths" in metadata):
         _restore_tables(original, metadata)
     elif _has_table_marker(original):
         raise ValueError("unregistered_row_table")

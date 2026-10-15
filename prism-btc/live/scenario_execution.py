@@ -347,12 +347,22 @@ class ScenarioExecution:
         if before_cancel is not None:
             before_cancel(child)
         # Cancel ACK is never sufficient to release outstanding risk.
+        acknowledgement = None
         try:
-            self._write("cancel_order",category="linear",symbol="BTCUSDT",orderLinkId=child["link_id"],orderId=child["order_id"])
+            acknowledgement = self._write("cancel_order",category="linear",symbol="BTCUSDT",orderLinkId=child["link_id"],orderId=child["order_id"])
         except Exception:
             logging.getLogger(__name__).warning("Cancel acknowledgement unknown; exact terminal query required")
         child = self._query_child(child)
         if child["status"]!="TERMINAL":
+            result = acknowledgement.get("result") if acknowledgement else None
+            if (child["status"] == "LIVE" and isinstance(result, dict)
+                    and child["order_id"] and result.get("orderId") == child["order_id"]
+                    and result.get("orderLinkId") == child["link_id"]):
+                from live.scenario_broker import BrokerCancellationPending
+                self._save("cancel_ack_pending", dict(link_id=child["link_id"],
+                    order_id=child["order_id"], acknowledgement=acknowledgement,
+                    evidence=child["evidence"], terminal_confirmed=False))
+                raise BrokerCancellationPending("cancel_not_confirmed")
             self._fail("cancel_not_confirmed")
         return child
 

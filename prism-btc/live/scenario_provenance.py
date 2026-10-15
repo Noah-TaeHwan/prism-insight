@@ -29,6 +29,56 @@ MAX_REVIEW_BYTES = 16 * 1024
 _current = ContextVar('scenario_audit', default=None)
 
 
+def review_policy_binding(*, research_mode="legacy"):
+    """Opt-in identity, separate from the default legacy policy manifest."""
+    # Literal, opt-in imports keep this loader independent of supplied names.
+    from analysis import scenario_review_tape
+    from backtest import scenario_tape
+    from live import (scenario_calculated_review, scenario_review_adapter,
+                      scenario_review_guard, scenario_llm, scenario_contract,
+                      scenario_model_input, scenario_preview, scenario_runtime)
+    from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
+    from engine import scenario_ma_context
+
+    root = Path(__file__).resolve().parents[1]
+    modules = {
+        'analysis/scenario_review_tape.py': scenario_review_tape,
+        'backtest/scenario_tape.py': scenario_tape,
+        'live/scenario_calculated_review.py': scenario_calculated_review,
+        'live/scenario_review_adapter.py': scenario_review_adapter,
+        'live/scenario_review_guard.py': scenario_review_guard,
+        'live/scenario_llm.py': scenario_llm,
+        'live/scenario_contract.py': scenario_contract,
+        'live/scenario_model_input.py': scenario_model_input,
+        'live/scenario_preview.py': scenario_preview,
+        'core/scenario_limit_prices.py': scenario_limit_prices,
+        'core/llm_scenario.py': llm_scenario,
+        'core/scenario_stop_policy.py': scenario_stop_policy,
+        'engine/scenario_ma_context.py': scenario_ma_context,
+        'live/scenario_runtime.py': scenario_runtime,
+        'live/scenario_provenance.py': sys.modules[__name__],
+    }
+    if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
+                             "action-allocation-single-v1", "action-allocation-calculated-v1",
+                             "economic-reject-single-v1", "economic-reject-calculated-v1"}:
+        raise ValueError('research_review_mode')
+    if research_mode != "legacy":
+        from live import scenario_risk_allocation, scenario_execution
+        modules['live/scenario_risk_allocation.py'] = scenario_risk_allocation
+        modules['live/scenario_execution.py'] = scenario_execution
+    sources, parity = {}, {}
+    for name, module in modules.items():
+        if sys.modules.get(name.removesuffix('.py').replace('/', '.')) is not module:
+            raise ValueError('review_mixed_loaded_policy')
+        source = (root / name).read_text()
+        sources[name] = hashlib.sha256(source.encode()).hexdigest()
+        parity[name] = _loaded_parity(name, source)
+    if set(parity.values()) != {'VERIFIED'}:
+        raise ValueError('review_mixed_loaded_policy')
+    return dict(policy='calculated-review-v1' if research_mode == "legacy" else research_mode,
+                source_sha256=sources, loaded_parity=parity)
+
+
 def _gap():
     try:
         logging.getLogger(__name__).warning('AUDIT_GAP')

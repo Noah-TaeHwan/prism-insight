@@ -103,12 +103,27 @@ def _economic_evidence(item):
 
 class ScenarioRuntime:
     def __init__(self, conn, broker, propose, snapshot, *, clock=time.time,
-                 recovery_enabled=False, automatic_normalization_enabled=False):
+                 recovery_enabled=False, automatic_normalization_enabled=False,
+                 calculated_review_enabled=False, calculated_review_propose=None,
+                 research_review_mode="legacy"):
+        if research_review_mode not in {"legacy", "allocation-single", "allocation-calculated",
+                                     "action-allocation-single-v1", "action-allocation-calculated-v1",
+                                     "economic-reject-single-v1", "economic-reject-calculated-v1"}:
+            raise ValueError("research_review_mode")
+        if research_review_mode != "legacy" and not calculated_review_enabled:
+            raise ValueError("allocation_review_requires_explicit_enable")
+        self.research_review_mode = research_review_mode
+        if type(calculated_review_enabled) is not bool:
+            raise ValueError("calculated_review_flag_must_be_bool")
+        if calculated_review_enabled and not callable(calculated_review_propose):
+            raise ValueError("calculated_review_callback_required")
         database_path(conn)  # In-memory state cannot provide restart safety.
         self.conn, self.broker = conn, broker
         self.propose, self.snapshot, self.clock = propose, snapshot, clock
         self.recovery_enabled = recovery_enabled or automatic_normalization_enabled
         self.automatic_normalization_enabled = automatic_normalization_enabled
+        self.calculated_review_enabled = calculated_review_enabled
+        self.calculated_review_propose = calculated_review_propose
         with mutation_lock(conn):
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS llm_scenario_state (
@@ -130,7 +145,41 @@ class ScenarioRuntime:
                          (_json({"version": 0, "active": None, "breaker": {}}),))
             if self.recovery_enabled:
                 recovery.ensure_schema(conn)
+            if self.calculated_review_enabled:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS llm_scenario_review_events (
+                        slot INTEGER NOT NULL, sequence INTEGER NOT NULL,
+                        body TEXT NOT NULL, PRIMARY KEY(slot,sequence));
+                    CREATE TABLE IF NOT EXISTS llm_scenario_review_tapes (
+                        slot INTEGER PRIMARY KEY, body TEXT NOT NULL);
+                """)
             conn.commit()
+
+    def _record_calculated_review(self, slot, event, *, commit=True):
+        from analysis.scenario_review_tape import MAX_BYTES
+        body = _json(event)
+        if len(body.encode()) > MAX_BYTES:
+            raise ValueError("review_record_bound")
+        sequence = self.conn.execute(
+            "SELECT COUNT(*) FROM llm_scenario_review_events WHERE slot=?", (slot,)).fetchone()[0]
+        if sequence >= 128:
+            raise ValueError("review_record_bound")
+        self.conn.execute("INSERT INTO llm_scenario_review_events VALUES(?,?,?)",
+                          (slot, sequence, body))
+        if commit:
+            self.conn.commit()
+
+    def _assert_calculated_review_time(self, envelope, context, fresh, payload, *, observed_at=None):
+        # Durable journal I/O is inside the original budget, not a new lease.
+        now = self.clock() if observed_at is None else observed_at
+        started = next(operation["value"] for operation in envelope["operations"]
+                       if operation["kind"] == "clock")
+        max_age = min(120, context["max_input_age_seconds"])
+        if (not _finite(now) or not 0 <= now - started < 75
+                or payload["expires_at"] <= now
+                or not 0 <= now - context["input_captured_at"] <= max_age
+                or not 0 <= now - fresh["account_captured_at"] <= 120):
+            raise ValueError("review_final_deadline")
 
     def state(self):
         return json.loads(self.conn.execute(
@@ -140,9 +189,9 @@ class ScenarioRuntime:
         self.conn.execute("UPDATE llm_scenario_state SET body=? WHERE id=1", (_json(state),))
         self.conn.commit()
 
-    def _apply_review(self, active, payload, validated, presented, input_id, slot):
+    def _apply_review(self, active, payload, validated, presented, input_id, slot, *, observed_at=None):
         """Optional audit failures must never interrupt advisory apply or EXIT."""
-        stamp, boundary = self.clock(), None
+        stamp, boundary = self.clock() if observed_at is None else observed_at, None
         try:
             from live.scenario_provenance import begin_review_capture
             boundary = begin_review_capture(active, presented, payload, validated,
@@ -158,7 +207,7 @@ class ScenarioRuntime:
             return receipt
         return receipt
 
-    def _notice(self, identity, event):
+    def _notice(self, identity, event, *, observed_at=None):
         """Optional local publication must never undo a durable order intent."""
         from live.scenario_outbox import enqueue
         self.conn.execute("SAVEPOINT runtime_notice")
@@ -170,7 +219,7 @@ class ScenarioRuntime:
             self.conn.execute("ROLLBACK TO runtime_notice")
             self.conn.execute("RELEASE runtime_notice")
             self.conn.execute("INSERT INTO llm_scenario_notice_errors VALUES(?,?)",
-                              (self.clock(),"notice_validation_or_enqueue_failed"))
+                              (self.clock() if observed_at is None else observed_at,"notice_validation_or_enqueue_failed"))
             return False
 
     def _enabled(self):
@@ -178,7 +227,7 @@ class ScenarioRuntime:
                 getattr(self.broker, "lane", None) == "MAIN" and
                 REQUIRED_CAPABILITIES <= set(getattr(self.broker, "capabilities", ())))
 
-    def _reconcile(self, state):
+    def _reconcile(self, state, *, observed_at=None):
         result = self.broker.reconcile() or {}
         active = state["active"]
         confirmed_stop = result.get("confirmed_hard_stop")
@@ -207,7 +256,7 @@ class ScenarioRuntime:
                 self.conn.execute("ROLLBACK TO scenario_notice")
                 self.conn.execute("RELEASE scenario_notice")
                 self.conn.execute("INSERT INTO llm_scenario_notice_errors VALUES(?,?)",
-                                  (self.clock(), "notice_validation_or_enqueue_failed"))
+                                  (self.clock() if observed_at is None else observed_at, "notice_validation_or_enqueue_failed"))
         # Live orders can be managed only with exact current evidence. Acceptance
         # and UNKNOWN retain the fence. Missing fresh evidence revokes LIVE status.
         seen_live = set()
@@ -280,7 +329,8 @@ class ScenarioRuntime:
                         state["breaker"]["consecutive_losses"] = max(
                             old_count, state["breaker"]["consecutive_losses"])
                 if state.get("recovery", {}).get("scenario_id") == active["scenario_id"]:
-                    recovery.settled(self.conn, state, settlement, self.clock())
+                    recovery.settled(self.conn, state, settlement,
+                                     self.clock() if observed_at is None else observed_at)
                 inserted = self.conn.execute("INSERT OR IGNORE INTO llm_scenario_settlements VALUES(?,?)",
                                   (active["scenario_id"], _json(settlement)))
                 if inserted.rowcount == 1:
@@ -291,7 +341,7 @@ class ScenarioRuntime:
                 state["version"] += 1
         self._save(state)
 
-    def _context(self, state):
+    def _context(self, state, *, observed_at=None):
         ctx = dict(self.broker.context())
         hard_risk_blocked = ctx.get("new_risk_blocked")
         for flag in ("legacy_fenced", "protection_ok", "new_risk_blocked"):
@@ -308,7 +358,7 @@ class ScenarioRuntime:
         state["breaker"] = update_circuit_breaker(state["breaker"],
             **{k: ctx[k] for k in ("day", "day_start_equity", "daily_net_pnl")})
         active = state["active"]
-        observe_review(active, ctx, self.clock())
+        observe_review(active, ctx, self.clock() if observed_at is None else observed_at)
         ctx.update(review_contract_version=1,
                    review_memory=json.loads(_json(active.get("review_memory", []))) if active else [],
                    review_status=active.get("review_status", "not_initialized") if active else "no_scenario")
@@ -331,7 +381,7 @@ class ScenarioRuntime:
             ctx.update(current_plan=None,recent_actions=[])
         # Past validated WAIT reasons are observations, never executable plans.
         # Do not feed rejected/stale proposals or another active scenario back.
-        slot = int(self.clock() // 300)
+        slot = int((self.clock() if observed_at is None else observed_at) // 300)
         waits = []
         rows = self.conn.execute(
             "SELECT context,proposal,outcome FROM llm_scenario_decisions "
@@ -352,7 +402,7 @@ class ScenarioRuntime:
         if self.recovery_enabled:
             ctx["recovery_hard_blocked"] = ctx["new_risk_blocked"]
             if self.automatic_normalization_enabled:
-                recovery.migrate(self.conn, state, ctx, self.clock())
+                recovery.migrate(self.conn, state, ctx, self.clock() if observed_at is None else observed_at)
             allowed = recovery.observing_allowed(state, ctx)
             no_intents = not self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status IS NULL OR status!='TERMINAL'").fetchone()
             if allowed and no_intents:
@@ -386,12 +436,12 @@ class ScenarioRuntime:
             positions=ctx.get("positions"), unknown_intents=bool(self.conn.execute(
                 "SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' OR status IS NULL").fetchone())))
         if state["breaker"].get("blocked") and not state.get("halt_notified"):
-            stamp=state.setdefault("halted_at",self.clock())
+            stamp=state.setdefault("halted_at",self.clock() if observed_at is None else observed_at)
             reasons=set(state["breaker"].get("reasons",[]))
             event={"kind":"HALTED","timestamp":stamp,"reason_code":
                    "DAILY_LOSS" if "daily_loss" in reasons else "THREE_LOSSES",
                    "automatic_normalization":self.automatic_normalization_enabled and reasons=={"three_losses"}}
-            state["halt_notified"]=self._notice(f"halt:{stamp}",event)
+            state["halt_notified"]=self._notice(f"halt:{stamp}",event,observed_at=observed_at)
         self._save(state)
         return ctx
 
@@ -452,7 +502,46 @@ class ScenarioRuntime:
             from live.scenario_provenance import record_hashed
             record_hashed("decision_input", {"snapshot": snap, "context": ctx, "input_id": input_id},
                           scenario_id=ctx.get("scenario_id"), decision_slot=slot)
-            if self.recovery_enabled:
+            review_envelope = review_bindings = None
+            if self.calculated_review_enabled:
+                from live.scenario_contract import validate_wire_proposal
+                from live.scenario_provenance import review_policy_binding
+                from analysis.scenario_review_tape import MAX_BYTES
+                review_bindings = review_policy_binding(research_mode=self.research_review_mode)
+                review_envelope = self.calculated_review_propose(snap, ctx,
+                    record=lambda event: self._record_calculated_review(slot, event))
+                envelope_body = _json(review_envelope)
+                if len(envelope_body.encode()) > MAX_BYTES:
+                    raise ValueError("review_tape_bound")
+                self.conn.execute("INSERT INTO llm_scenario_review_tapes VALUES(?,?)",
+                                  (slot, envelope_body))
+                self.conn.commit()
+                stored_input = self.conn.execute(
+                    "SELECT snapshot,context FROM llm_scenario_decisions WHERE slot=?", (slot,)).fetchone()
+                if stored_input is None or tuple(stored_input) != (_json(snap), _json(ctx)):
+                    raise ValueError("review_input_mutated")
+                if review_envelope.get("outcome", {}).get("status") != "COMPLETE":
+                    raise ValueError("review_tape_incomplete")
+                recorded_events = [json.loads(row[0]) for row in self.conn.execute(
+                    "SELECT body FROM llm_scenario_review_events WHERE slot=? ORDER BY sequence", (slot,))]
+                expected_events = [operation["event"] for operation in review_envelope["operations"]
+                                   if operation["kind"] == "record"]
+                if recorded_events != expected_events:
+                    raise ValueError("review_durable_events_mismatch")
+                if review_envelope["outcome"]["result"].get("disposition") == "REJECTED_NO_ACTION":
+                    from live.scenario_preview import response_contract
+                    from live.scenario_review_guard import guard_rejected_review
+                    rejected = guard_rejected_review(snap, ctx, response_contract(ctx), review_envelope,
+                        bindings=review_bindings, research_mode=self.research_review_mode)
+                    # No selected payload, recovery assessment, review, permit,
+                    # intent or cancellation authority is created on this path.
+                    return dict(status="rejected_no_action", reason="economic_rejection",
+                                rejection_codes=rejected["rejection_codes"],
+                                rejection_receipt=rejected)
+                payload = validate_wire_proposal(
+                    review_envelope["outcome"]["result"]["selected"]["raw_proposal"], ctx)
+                payload["rationale"] = review_envelope["outcome"]["result"]["selection"]["rationale"]
+            elif self.recovery_enabled:
                 with recovery.capture_wire(self.conn, slot, self.clock):
                     payload = self.propose(snap, ctx)
             else:
@@ -497,16 +586,74 @@ class ScenarioRuntime:
                              max_input_age_seconds=120)
                 stage = "validation"
                 probe = False
+                if self.calculated_review_enabled:
+                    from live.scenario_review_guard import guard_review
+                    from live.scenario_preview import response_contract
+                    from live.scenario_provenance import review_policy_binding
+                    if review_policy_binding(research_mode=self.research_review_mode) != review_bindings:
+                        raise ValueError("review_policy_changed")
+                    guarded = guard_review(snap, ctx, response_contract(ctx), review_envelope,
+                                           fresh, bindings=review_bindings, research_mode=self.research_review_mode)
+                    payload, validated = guarded["payload"], guarded["validated"]
+                    self._record_calculated_review(slot, dict(kind="FRESH_REVIEW_RECEIPT",
+                                                             receipt=guarded["receipt"]))
+                    if self.recovery_enabled:
+                        # These are original phase texts, never a host-normalized
+                        # proposal disguised as a model response.
+                        for operation in review_envelope["operations"]:
+                            if operation["kind"] == "record" and operation["event"]["kind"] in {"MODEL_REQUEST", "MODEL_RAW"}:
+                                event = operation["event"]
+                                recovery.journal(self.conn, event["kind"], dict(event, calculated_review_version=1),
+                                                 self.clock(), slot=slot)
+                        recovery.journal(self.conn, "CALCULATED_REVIEW_SELECTION", guarded["receipt"],
+                                         self.clock(), slot=slot)
+                        self.conn.commit()
+                    self._assert_calculated_review_time(review_envelope, ctx, fresh, payload)
                 if ctx.get("recovery_observing"):
                     if not fresh.get("recovery_observing"):
                         return {"status": "blocked", "reason": "recovery_hard_guard"}
                     probe = recovery.assess(self.conn, state, ctx, payload, slot, self.clock())
                     self.conn.commit()
-                core_payload = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
-                validated = validate_execution_prices(core_payload, fresh)
+                if self.calculated_review_enabled:
+                    self._assert_calculated_review_time(review_envelope, ctx, fresh, payload)
+                    # Complete all elapsed review/journal I/O before the atomic
+                    # observation/intent cut, while authority is still untouched.
+                    if review_policy_binding(research_mode=self.research_review_mode) != review_bindings:
+                        raise ValueError("review_policy_changed")
+                    commit_at = self.clock()
+                    self._reconcile(state, observed_at=commit_at)
+                    commit_context = self._context(state, observed_at=commit_at)
+                    # Broker REST capture occurs after observation started.
+                    # Never stamp validation before the captured account itself.
+                    commit_at = self.clock()
+                    commit_context.update(now=commit_at,input_id=input_id,input_captured_at=captured,
+                                          max_input_age_seconds=120)
+                    commit_context = json.loads(_json(commit_context))
+                    # Reprice ORIGINAL raw, not the effective plan. The bounded
+                    # post-validation deadline check below bounds this capture.
+                    final_guard = guard_review(snap,ctx,response_contract(ctx),review_envelope,
+                                               commit_context,bindings=review_bindings,
+                                               research_mode=self.research_review_mode)
+                    self._assert_calculated_review_time(review_envelope,ctx,commit_context,payload,
+                                                        observed_at=commit_at)
+                    # Pure verification has real latency too. Advance once after
+                    # it and recheck expiry/input/account freshness. One coherent
+                    # observation is validated under the mutation lock; this is
+                    # NOT a promise that exchange facts cannot change afterward.
+                    # Executor capture/preflight remains mandatory before orders.
+                    post_validation_at = self.clock()
+                    self._assert_calculated_review_time(review_envelope,ctx,commit_context,payload,
+                                                        observed_at=post_validation_at)
+                    commit_at = post_validation_at
+                    validated = final_guard["validated"]
+                    fresh = commit_context
+                if not self.calculated_review_enabled:
+                    core_payload = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
+                    validated = validate_execution_prices(core_payload, fresh)
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids"):
                     receipt = self._apply_review(state["active"], payload, validated,
-                                                 ctx["review_memory"], input_id, slot)
+                                                 ctx["review_memory"], input_id, slot,
+                                                 observed_at=commit_at if self.calculated_review_enabled else None)
                     self._save(state)
                     return {"status": "wait", **({"review_update_receipt": receipt} if receipt else {})}
                 stage = "execution"
@@ -515,20 +662,27 @@ class ScenarioRuntime:
                     if self.conn.execute("SELECT 1 FROM llm_scenario_settlements WHERE scenario_id=?", (validated["scenario_id"],)).fetchone():
                         return {"status": "reused_scenario"}
                     if probe:
-                        recovery.consume(self.conn, state, validated, fresh, slot, self.clock())
+                        recovery.consume(self.conn, state, validated, fresh, slot,
+                                         commit_at if self.calculated_review_enabled else self.clock())
                     state["active"] = {"scenario_id": validated["scenario_id"], "initial_equity": fresh["initial_equity"],
                         "side": validated["side"], "hard_stop": validated["hard_stop"], "revision": 0,
-                        "created_at": self.clock(), "expires_at": validated["expires_at"],
+                        "created_at": commit_at if self.calculated_review_enabled else self.clock(), "expires_at": validated["expires_at"],
                         "stop_policy": {"version": 1, "initial_hard_stop": validated["hard_stop"],
                                         "initial_action_id": validated["action_id"]}}
                 receipt = self._apply_review(state["active"], payload, validated,
-                                             ctx["review_memory"], input_id, slot)
+                                             ctx["review_memory"], input_id, slot,
+                                             observed_at=commit_at if self.calculated_review_enabled else None)
                 state["active"]["revision"] = validated["revision"]
                 if validated["action"] in ("OPEN", "ADJUST"):
                     state["active"]["desired_hard_stop"] = validated["hard_stop"]
                     state["active"]["expires_at"] = validated["expires_at"]
                     state["active"]["current_plan"] = validated
                 state["version"] += 1
+                if self.calculated_review_enabled:
+                    self._record_calculated_review(slot,dict(kind="FINAL_FRESH_REVIEW_RECEIPT",
+                        atomic_with_intent=True,post_validation_checked_at=commit_at,
+                        stability_scope="COHERENT_FINAL_OBSERVATION_EXECUTOR_FRESH_PREFLIGHT_REQUIRED",
+                        receipt=final_guard["receipt"]),commit=False)
                 self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
                                   (ident, validated["scenario_id"], _json(validated)))
                 self._save(state)  # Intent precedes the first exchange side effect.
@@ -554,10 +708,13 @@ class ScenarioRuntime:
                     self.conn.commit()
                 try:
                     self.broker.execute(validated, ident)
-                except Exception:
+                except Exception as exc:
+                    from live.scenario_broker import BrokerCancellationPending
                     self._notice("unknown:"+ident,dict(kind="PENDING",timestamp=self.clock()))
                     self.conn.commit()
-                    return {"status": "intent_pending", "reason": "submission_unknown",
+                    reason = ("awaiting_cancellation" if validated["action"] == "EXIT"
+                              and isinstance(exc, BrokerCancellationPending) else "submission_unknown")
+                    return {"status": "intent_pending", "reason": reason,
                             "review_update_receipt": receipt}
                 return {"status": "intent_pending", "reason": "awaiting_exact_evidence",
                         "review_update_receipt": receipt}
@@ -607,6 +764,19 @@ class ScenarioRuntime:
             code = exc.args[0] if type(exc) is ValueError and len(exc.args) == 1 else None
             if isinstance(code, str) and code in safe_codes.get(stage, ()):
                 outcome["failure_code"] = code
+            if self.calculated_review_enabled:
+                from backtest.scenario_tape import TapeMismatch
+                review_code = str(exc)
+                if isinstance(exc, TapeMismatch):
+                    outcome["failure_code"] = "review_tape_failure"
+                elif review_code.startswith("review_guard_context_changed:") or review_code in {
+                        "review_guard_effective_plan_changed", "review_guard_stale_account", "stop_crossed_market"}:
+                    outcome["failure_code"] = "fresh_safety_rejection"
+                elif review_code in {"review_final_deadline", "review_guard_stale_input",
+                        "review_guard_stale_review_clock", "review_guard_invalid_time"}:
+                    outcome["failure_code"] = "review_deadline_failure"
+                elif review_code.startswith("review_"):
+                    outcome["failure_code"] = "review_contract_failure"
             from core.llm_scenario import ScenarioValidationError
             if stage == "validation" and isinstance(exc, ScenarioValidationError):
                 fixed = {"risk budget exceeded": "scenario_risk_budget_exceeded",

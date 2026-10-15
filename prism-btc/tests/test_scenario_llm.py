@@ -37,6 +37,43 @@ def test_assembled_flexible_tp_policy_preserves_safety_and_no_fixed_allocations(
     assert '1–3' in rules and 'no fixed allocation' in rules
 
 
+@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
+@pytest.mark.parametrize('active', [False, True])
+def test_assembled_tp_distance_baseline_is_symmetric_and_preserves_remaining_quota(side, active):
+    from live.scenario_preview import response_contract
+
+    ctx = context(active)
+    ctx['side'] = side
+    calls = []
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(text=json.dumps(wire(ctx)))
+
+    propose({'valid': True, 'as_of_ms': 1000000}, ctx, response_contract(ctx),
+            generate=generate, clock=lambda: 1000)
+    policy = ' '.join(calls[0]['system_prompt'].split())
+    for clause in (
+        'first partial profit around 500 USDT',
+        'intermediate profit around 700-800 USDT',
+        'only the residual runner beyond 1000 USDT',
+        'absolute BTC price differences',
+        'entry +500, +700-800, then +1000',
+        'entry -500, -700-800, then -1000',
+        '50% near, 30% intermediate and 20% protected runner',
+        'not a forced allocation',
+        'support for SHORT takes precedence',
+        'never reset the distance from each new current mark',
+        'a NEW ADJUST allocates the current remaining position',
+        'never restore already filled target quotas',
+        'Check quantity_step and minimum_quantity before splitting',
+        'rounding remainder stays protected by the native Full SL',
+        'After confirmed near profit-taking',
+        'do not install a crossed limit to fabricate past profit',
+    ):
+        assert clause in policy
+
+
 def wire(ctx, action='WAIT'):
     p=dict(**identity_fields(ctx),action=action,confidence=.5,expires_at=1100,
            rationale='관측 근거와 무효화 조건',leverage=10,entries=[],take_profits=[],

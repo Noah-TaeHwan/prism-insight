@@ -28,6 +28,10 @@ class BrokerNotReady(ValueError):
     """Sanitized fail-closed reason, without transport payload or credentials."""
 
 
+class BrokerCancellationPending(BrokerNotReady):
+    """Exact cancellation ACK saved; terminal order evidence is still pending."""
+
+
 def _number(value, *, minimum=None):
     try:
         result = float(value)

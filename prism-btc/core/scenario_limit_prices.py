@@ -58,6 +58,26 @@ def validate_execution_prices(payload, context):
     Audit metadata is added only after strict validation, never accepted from the
     model. Passing a saved validated intent here is deliberately not supported.
     """
+    return _validate_execution_prices(payload,context)
+
+
+def preview_execution_prices(payload, context, *, original_input_now):
+    """Hypothetical original-input pricing, never execution authorization.
+
+    Only quote age uses the original input clock. Raw/current expiry, input age,
+    risk and every subsequent candidate validation still use context['now'].
+    Neither context nor the genuine quote capture timestamp is rewritten.
+    """
+    try:
+        original,current=_decimal(original_input_now),_decimal(context["now"])
+        if original>current or not all(math.isfinite(float(stamp)) for stamp in (original,current)):
+            raise ValueError("invalid preview clock")
+    except (KeyError,ValueError,TypeError,InvalidOperation,OverflowError):
+        raise ValueError("preview_pricing_clock_invalid") from None
+    return _validate_execution_prices(payload,context,quote_reference_now=original)
+
+
+def _validate_execution_prices(payload, context, *, quote_reference_now=None):
     validated = validate_scenario(payload, context)
     policy = context.get("execution_price_policy")
     if (not isinstance(policy, dict) or policy.get("version") != POLICY_VERSION
@@ -70,7 +90,7 @@ def validate_execution_prices(payload, context):
         tick = _decimal(context.get("price_tick"))
         quotes = context["limit_price_quotes"]
         bid, ask = _decimal(quotes["bid"]), _decimal(quotes["ask"])
-        age = _decimal(context["now"]) - _decimal(quotes["captured_at"])
+        age = _decimal(context["now"] if quote_reference_now is None else quote_reference_now) - _decimal(quotes["captured_at"])
         if tick <= 0 or not 0 < bid < ask or not 0 <= age <= 10:
             prerequisites = "invalid_or_stale_quote_or_tick"
         elif not all(math.isfinite(float(v)) for v in (tick, bid, ask)):
