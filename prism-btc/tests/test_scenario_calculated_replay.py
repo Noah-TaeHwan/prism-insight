@@ -10,6 +10,7 @@ from analysis.scenario_calculated_replay import EconomicClock
 from backtest.scenario_tape import TapeMismatch
 from tests.test_scenario_replay import inputs, wait_policy
 from tests.test_scenario_review_runtime import wire as runtime_wire
+from live.scenario_model_input import restore_model_input
 
 
 def wire(ctx, action):
@@ -386,7 +387,9 @@ def test_consumed_recovery_exact_all_runtime_review_exchange_tables(tmp_path,pro
     policy=cycle_policy(calls,native_stops=True)
     def generate(**request):
         wall[0]+=1
-        payload=json.loads(request["user_prompt"])
+        # This scripted model reads original recovery paths, not wire encoding
+        # markers. Resolve the same lossless references described to the model.
+        payload=restore_model_input(json.loads(request["user_prompt"]))
         if "selection_token" in request["response_schema"]["properties"]:
             candidate=next(r for r in payload["calculated_candidates"]["candidates"] if r["eligible"])
             result=dict(selection_token=f"{candidate['id']}:{candidate['receipt_sha256']}",rationale="계산 검토")
@@ -469,7 +472,7 @@ def test_observing_post_record_stop_crossing_never_consumes_permit(tmp_path,monk
     policy=cycle_policy([])
     def generate(**request):
         wall[0]+=1
-        data=json.loads(request["user_prompt"])
+        data=restore_model_input(json.loads(request["user_prompt"]))
         if "selection_token" in request["response_schema"]["properties"]:
             candidate=next(r for r in data["calculated_candidates"]["candidates"] if r["eligible"])
             result=dict(selection_token=f"{candidate['id']}:{candidate['receipt_sha256']}",rationale="계산 확인")
