@@ -198,6 +198,29 @@ def test_model_incident_only_validated_model_outcome_recovers(tmp_path, reason, 
     c.close()
 
 
+@pytest.mark.parametrize('code', ['review_contract_failure', 'review_tape_failure', 'review_deadline_failure'])
+def test_calculated_failure_alert_is_not_cleared_by_protection(tmp_path, code):
+    from live.scenario_runner import notify_runtime_status
+    c = sqlite3.connect(tmp_path / 'alerts.db')
+    failure = dict(status='blocked', reason='reconciliation_or_proposal_failed',
+                   failure_stage='proposal_call', failure_code=code, details='SECRET_RAW')
+    notify_runtime_status(c, failure, clock=lambda: 1000)
+    notify_runtime_status(c, failure, clock=lambda: 1005)
+    notify_runtime_status(c, dict(status='protection_checked'), clock=lambda: 1015)
+    rows = c.execute('SELECT kind,body FROM llm_scenario_outbox').fetchall()
+    assert [r[0] for r in rows] == ['MODEL_ERROR']
+    assert '판단 처리 오류' in rows[0][1]
+    assert 'SECRET_RAW' not in rows[0][1]
+    assert c.execute('SELECT active FROM llm_scenario_model_incident').fetchone()[0] == 1
+    assert c.execute('SELECT count(*) FROM llm_scenario_runner_incident').fetchone()[0] == 0
+    notify_runtime_status(c, dict(status='wait'), clock=lambda: 1030)
+    notify_runtime_status(c, dict(status='wait'), clock=lambda: 1035)
+    assert c.execute('SELECT kind FROM llm_scenario_outbox').fetchall() == [('MODEL_ERROR',), ('MODEL_RECOVERED',)]
+    notify_runtime_status(c, failure, clock=lambda: 1040)
+    assert c.execute('SELECT count(*) FROM llm_scenario_outbox').fetchone()[0] == 3
+    c.close()
+
+
 def test_concurrent_protection_and_model_incidents_recover_independently(tmp_path):
     from live.scenario_runner import notify_runtime_status
     c=sqlite3.connect(tmp_path/'state.db')
@@ -209,6 +232,16 @@ def test_concurrent_protection_and_model_incidents_recover_independently(tmp_pat
     notify_runtime_status(c,{'status':'wait'},clock=lambda:1020)
     assert c.execute('SELECT kind FROM llm_scenario_outbox').fetchall()==[
         ('PENDING',),('MODEL_ERROR',),('RESOLVED',),('MODEL_RECOVERED',)]
+
+
+@pytest.mark.parametrize('code', ['fresh_safety_rejection', 'scenario_risk_budget_exceeded', 'unknown_review_failure'])
+def test_non_model_safety_rejection_is_not_misclassified_as_model_failure(tmp_path, code):
+    from live.scenario_runner import notify_runtime_status
+    c = sqlite3.connect(tmp_path / 'non_model.db')
+    notify_runtime_status(c, dict(status='blocked', reason='reconciliation_or_proposal_failed',
+                                 failure_code=code), clock=lambda: 1000)
+    assert c.execute('SELECT count(*) FROM llm_scenario_model_incident').fetchone()[0] == 0
+    assert c.execute('SELECT kind FROM llm_scenario_outbox').fetchall() == [('PENDING',)]
     c.close()
 
 
