@@ -186,3 +186,34 @@ def test_success_cache_survives_another_tickers_exhausted_retry(tmp_path):
     assert [call[0] for call in source.calls] == ["004170", "005930", "004170"]
     assert (tmp_path / "20260910" / "005930.json").exists()
     assert not (tmp_path / "20260910" / "004170.json").exists()
+
+
+def test_rest_warm_up_uses_bundle_universe():
+    from cores.kis_market_snapshot import KisMasterData, warm_kis_previous_history
+
+    master = KisMasterData(
+        names={"000001": "a", "000002": "ipo", "000003": "zero"},
+        cap_df=pd.DataFrame({"시가총액": [1e11, 1e11, 0]}, index=["000001", "000002", "000003"]),
+        listed_dates={"000002": "20261015"}, observed_date="20261015",
+        markets={}, industry_codes={}, previous_volumes={},
+    )
+    seen = []
+
+    def history(codes, prev_date):
+        seen.append((codes, prev_date))
+        return pd.DataFrame(index=codes)
+
+    assert warm_kis_previous_history("20261015", master_fetcher=lambda: master, history_fetcher=history) == 1
+    assert seen == [(["000001"], "20261014")]
+    with pytest.raises(KisSnapshotError, match="Stale"):
+        warm_kis_previous_history("20261016", master_fetcher=lambda: master, history_fetcher=history)
+
+
+def test_telegram_config_import_redacts_bot_tokens(caplog):
+    import logging
+    import telegram_config  # noqa: F401
+
+    token = "123456789:" + "A" * 35
+    with caplog.at_level(logging.INFO):
+        logging.getLogger("x").info("POST https://api.telegram.org/bot%s/sendMessage", token)
+    assert token not in caplog.text and "<redacted-token>" in caplog.text

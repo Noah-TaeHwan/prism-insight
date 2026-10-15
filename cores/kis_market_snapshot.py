@@ -483,6 +483,26 @@ def _rights_action_row(code, previous_date, cached, master, fetcher):
         raise KisSnapshotError(f"KIS corporate-action validation failed for {code}: {type(exc).__name__}") from exc
 
 
+def warm_kis_previous_history(
+    trade_date: str | None = None, *, master_fetcher=fetch_kis_master_data,
+    history_fetcher=fetch_kis_previous_history,
+) -> int:
+    """Fill the shared previous-session cache when the KR morning batch rests.
+
+    Otherwise the afternoon batch starts cold and a slow KIS day can miss the
+    acceptance deadline (2026-10-15: coverage 2319/2674). Same universe as
+    build_kis_snapshot_bundle; zero-cap issues are excluded there as well.
+    """
+    trade_date = trade_date or _today_kst()
+    master = master_fetcher()
+    if master.observed_date != trade_date:
+        raise KisSnapshotError("Stale KIS master")
+    caps = master.cap_df["시가총액"]
+    codes = sorted(code for code in master.names
+                   if master.listed_dates.get(code, "") != trade_date and caps.get(code, 0) > 0)
+    return len(history_fetcher(codes, previous_session(trade_date)))
+
+
 def build_kis_snapshot_bundle(
     trade_date: str, *, master_fetcher=fetch_kis_master_data,
     snapshot_fetcher=fetch_kis_intraday_snapshot, history_fetcher=fetch_kis_previous_history,

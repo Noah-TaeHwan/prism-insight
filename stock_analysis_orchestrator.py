@@ -1636,6 +1636,14 @@ async def main():
                         skip_reason=_mp_pol.reason,
                     )
                     _JOB_RUN_SKIPS.append(f"{args.mode}:{_mp_pol.reason}")
+                    if args.mode == "morning":
+                        # The afternoon batch reuses this cache; resting must not leave it cold.
+                        try:
+                            from cores.kis_market_snapshot import warm_kis_previous_history
+                            _warmed = await asyncio.to_thread(warm_kis_previous_history)
+                            logger.info(f"[MARKET_PULSE] warmed KIS previous history: {_warmed} tickers")
+                        except Exception as _warm_e:
+                            logger.warning(f"[MARKET_PULSE] KIS history warm-up failed (ignored): {_warm_e}")
                     return
                 else:
                     logger.info("[MARKET_PULSE][SHADOW] WOULD_SKIP this batch "
