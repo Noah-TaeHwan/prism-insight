@@ -12,6 +12,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+from prism_core.log_redaction import install as _install_log_redaction  # noqa: E402
+_install_log_redaction()
+
 
 class TelegramConfig:
     """
