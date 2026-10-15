@@ -270,14 +270,35 @@ against retaining exposure for a supported break; neither early profit-taking
 nor a distant all-size TP is mandatory. Do not assume an intervening obstacle
 will break merely because the primary trend or higher frames favor the position.
 Use flexible near, intermediate and extension TP allocation rather than
-indiscriminately shortening the final target. First identify evidenced reaction
-zones, then choose sizes: normally compare two or three meaningful tiers,
-not equal price intervals and not fixed percentages. Strong primary-frame
-continuation can justify a smaller near allocation and more exposure later;
-weakening or nearby rejection can justify more near reduction. These are
-comparisons, not mandatory sales or promises that later targets will fill.
+indiscriminately shortening the final target. Use the BTC price-distance baseline:
+first partial profit around 500 USDT, intermediate profit around 700-800 USDT,
+and only the residual runner beyond 1000 USDT when continuation supports it.
+These are absolute BTC price differences, not account profit, percentages or
+10x-leveraged returns. Measure from proposed entry for OPEN and verified position
+average entry for holdings, never reset the distance from each new current mark.
+For LONG the baseline is entry +500, +700-800, then +1000 or farther;
+for SHORT it is entry -500, -700-800, then -1000 or farther.
+First identify evidenced reaction zones, then choose sizes: normally compare
+two or three meaningful tiers, not equal price intervals and not fixed percentages.
+Start by considering 50% near, 30% intermediate and 20% protected runner;
+this is a flexible model-selected baseline, not a forced allocation.
+Nearby material resistance for LONG or support for SHORT takes precedence over
+the distance baseline: place the first partial target closer when appropriate.
+Weakening, convergence with fading follow-through, or nearby rejection can justify
+earlier or larger near reduction. Strong 30m/1h continuation can justify a smaller
+near allocation and more later exposure, but not postponing all profit-taking
+to a first all-size target 1000 USDT or farther away. Preserve the long-trend
+opportunity with the residual runner rather than stretching the whole ladder.
+The model chooses exact structural prices and fractions, including feasible
+tick-aligned prices around crowded levels; the baseline is not guaranteed reach
+or fill and does not override price, cost, risk or order validation.
 Use one target or an SL-protected runner without fixed TP when evidence or
-executable size does not support more tiers; explain that choice briefly.
+executable size does not support more tiers; explain that choice briefly. For a
+new full position, do not use that exception merely to put all size at a distant
+target; compare one executable nearer partial/full target. After confirmed near
+profit-taking, the remaining runner may legitimately have only a distant TP or
+no fixed TP. If a baseline target has already been crossed, reassess using valid
+current orders or EXIT; do not install a crossed limit to fabricate past profit.
 For LONG list near-to-far targets at increasing prices; reverse for SHORT.
 OPEN allocations use the initial batch; a NEW ADJUST allocates the current
 remaining position, never the original pre-exit size. Respect target_status and
@@ -535,7 +556,8 @@ separate host stop_policy. A bearish higher-frame MA order can coexist with a
 rising MA10 and price recovery; evaluate both instead of treating the label as
 ongoing decline. Connect TP allocation to observed 30m/1h price follow-through:
 new expansion after compression plus price progress and room can support less
-near TP and more later exposure; fading price progress/rejection/near obstacles
+near TP and more later exposure within the price-distance baseline above, not
+deferring all profit-taking to 1000+ USDT; fading price progress/rejection/near obstacles
 can support nearer or larger front tiers. Gap width or elapsed age alone never
 proves an early/late trend. Convergence can be a normal pullback; preserve a
 justified protected runner. Forming changes remain provisional and must account

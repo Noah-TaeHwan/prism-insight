@@ -518,7 +518,7 @@ class ScenarioRuntime:
                 self.conn.commit()
                 stored_input = self.conn.execute(
                     "SELECT snapshot,context FROM llm_scenario_decisions WHERE slot=?", (slot,)).fetchone()
-                if stored_input != (_json(snap), _json(ctx)):
+                if stored_input is None or tuple(stored_input) != (_json(snap), _json(ctx)):
                     raise ValueError("review_input_mutated")
                 if review_envelope.get("outcome", {}).get("status") != "COMPLETE":
                     raise ValueError("review_tape_incomplete")
@@ -623,55 +623,27 @@ class ScenarioRuntime:
                     commit_at = self.clock()
                     self._reconcile(state, observed_at=commit_at)
                     commit_context = self._context(state, observed_at=commit_at)
+                    # Broker REST capture occurs after observation started.
+                    # Never stamp validation before the captured account itself.
+                    commit_at = self.clock()
                     commit_context.update(now=commit_at,input_id=input_id,input_captured_at=captured,
                                           max_input_age_seconds=120)
-                    account_at_validation = dict(self.broker.context())
+                    commit_context = json.loads(_json(commit_context))
                     # Reprice ORIGINAL raw, not the effective plan. The bounded
-                    # post-validation clock/fact check below is the final cut.
+                    # post-validation deadline check below bounds this capture.
                     final_guard = guard_review(snap,ctx,response_contract(ctx),review_envelope,
                                                commit_context,bindings=review_bindings,
                                                research_mode=self.research_review_mode)
                     self._assert_calculated_review_time(review_envelope,ctx,commit_context,payload,
                                                         observed_at=commit_at)
                     # Pure verification has real latency too. Advance once after
-                    # it, reject changed economic facts (no retry/model call),
-                    # then commit from this final bounded stability observation.
+                    # it and recheck expiry/input/account freshness. One coherent
+                    # observation is validated under the mutation lock; this is
+                    # NOT a promise that exchange facts cannot change afterward.
+                    # Executor capture/preflight remains mandatory before orders.
                     post_validation_at = self.clock()
                     self._assert_calculated_review_time(review_envelope,ctx,commit_context,payload,
                                                         observed_at=post_validation_at)
-                    account_after_validation = dict(self.broker.context())
-                    def stable_observation(before,after):
-                        expected=json.loads(_json(before))
-                        old,new=before.get("account_captured_at"),after.get("account_captured_at")
-                        if not _finite(old) or not _finite(new) or new<old:
-                            return False
-                        expected["account_captured_at"]=new
-                        quotes=expected.get("limit_price_quotes")
-                        if isinstance(quotes,dict) and "captured_at" in quotes:
-                            if quotes["captured_at"]!=old:
-                                return False
-                            quotes["captured_at"]=new
-                        thesis=expected.get("entry_thesis")
-                        if isinstance(thesis,dict) and "observed_at" in thesis:
-                            first=thesis.get("first_fill_at")
-                            age=thesis.get("elapsed_since_first_fill_seconds")
-                            if (thesis.get("status")!="VERIFIED" or thesis["observed_at"]!=old
-                                    or not _finite(first) or not _finite(age) or first>old
-                                    or not math.isclose(age,old-first,rel_tol=0,abs_tol=1e-6)):
-                                return False
-                            thesis["observed_at"]=new
-                            thesis["elapsed_since_first_fill_seconds"]=new-first
-                        runner=expected.get("runner_economics")
-                        if isinstance(runner,dict) and "observed_at" in runner:
-                            if runner["observed_at"]!=old:
-                                return False
-                            runner["observed_at"]=new
-                        # Explicit producer-derived capture/age projection only:
-                        # every other economic/lifecycle/unknown field must match.
-                        return expected==after
-                    if not stable_observation(account_at_validation,account_after_validation):
-                        self._reconcile(state,observed_at=post_validation_at)
-                        raise ValueError("review_guard_context_changed:post_validation_boundary")
                     commit_at = post_validation_at
                     validated = final_guard["validated"]
                     fresh = commit_context
@@ -709,7 +681,7 @@ class ScenarioRuntime:
                 if self.calculated_review_enabled:
                     self._record_calculated_review(slot,dict(kind="FINAL_FRESH_REVIEW_RECEIPT",
                         atomic_with_intent=True,post_validation_checked_at=commit_at,
-                        stability_scope="ALL_BROKER_FIELDS_WITH_VALIDATED_CAPTURE_AND_FIRST_FILL_AGE_PROJECTION",
+                        stability_scope="COHERENT_FINAL_OBSERVATION_EXECUTOR_FRESH_PREFLIGHT_REQUIRED",
                         receipt=final_guard["receipt"]),commit=False)
                 self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
                                   (ident, validated["scenario_id"], _json(validated)))

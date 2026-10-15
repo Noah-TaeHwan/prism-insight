@@ -424,8 +424,14 @@ def test_consumed_recovery_exact_all_runtime_review_exchange_tables(tmp_path,pro
         if guard_delay:
             outcome=json.loads(one.execute("SELECT outcome FROM llm_scenario_decisions WHERE slot=?",(stop_minute//300000,)).fetchone()[0])
             if guard_delay>=40:
-                assert outcome["failure_code"]=="fresh_safety_rejection"
-                assert one.execute("SELECT count(*) FROM llm_scenario_intents").fetchone()[0]==1
+                # Native SL fills after the coherent final observation while
+                # pure validation is running. An EXIT intent may be committed,
+                # but the real executor's fresh capture sees flat and MUST NOT
+                # submit a second close. Intent is not exchange authority proof.
+                assert outcome["status"]=="intent_pending"
+                assert one.execute("SELECT count(*) FROM llm_scenario_intents").fetchone()[0]==2
+                assert one.execute("SELECT count(*) FROM llm_scenario_children WHERE kind='exit'").fetchone()[0]==0
+                assert one.execute("SELECT count(*) FROM llm_scenario_children WHERE kind='native_sl'").fetchone()[0]==1
             else:
                 assert outcome["status"]==("wait" if holding_action=="WAIT" else "intent_pending")
                 assert one.execute("SELECT count(*) FROM llm_scenario_intents").fetchone()[0]==(1 if holding_action=="WAIT" else 2)

@@ -28,20 +28,35 @@ def operational_propose(*args, **kwargs):
     return propose(*args, **kwargs, generate=partial(generate_scenario, retry_transport=True))
 
 
+CALCULATED_REVIEW_MODE = "economic-reject-calculated-v1"
+
+
+def operational_calculated_propose(snapshot, context, *, record):
+    """DEMO-only caller supplies durable recording; no retry or legacy fallback."""
+    from live.scenario_oauth import generate_scenario
+    from live.scenario_review_adapter import make_calculated_review_proposer
+    return make_calculated_review_proposer(generate=generate_scenario, clock=time.time,
+        research_mode=CALCULATED_REVIEW_MODE)(snapshot, context, record=record)
+
+
 _FAILURE_STAGES = {"database_init", "control", "broker_init", "activation", "run", "model_input_preparation"}
 _ERROR_TYPES = {"Exception", "ValueError", "RuntimeError", "PermissionError", "TimeoutError",
                 "OperationalError", "IntegrityError", "DatabaseError", "LockBusy"}
 
 
 def run_once(conn, broker, *, execute=False, protect_only=False,
-             snapshot=collect_snapshot, proposal=propose):
+             snapshot=collect_snapshot, proposal=propose, calculated_review=False):
     with run_capture(conn):
         return _run_once(conn, broker, execute=execute, protect_only=protect_only,
-                         snapshot=snapshot, proposal=proposal)
+                         snapshot=snapshot, proposal=proposal, calculated_review=calculated_review)
 
 
 def _run_once(conn, broker, *, execute=False, protect_only=False,
-              snapshot=collect_snapshot, proposal=propose):
+              snapshot=collect_snapshot, proposal=propose, calculated_review=False):
+    if type(calculated_review) is not bool:
+        raise ValueError("calculated_review_flag_must_be_bool")
+    if calculated_review and (not execute or protect_only):
+        return {"status":"blocked","reason":"calculated_review_requires_execute","model_called":False}
     if getattr(broker,"environment",None)!="demo" or getattr(broker,"lane",None)!="MAIN":
         return {"status":"blocked","reason":"demo_main_required"}
     if protect_only:
@@ -78,7 +93,10 @@ def _run_once(conn, broker, *, execute=False, protect_only=False,
         return {"status":"execution_disabled","reason":"explicit_activation_required"}
     runtime=ScenarioRuntime(conn,broker,
         lambda snap,ctx:proposal(snap,ctx,response_contract(ctx)),snapshot,
-        recovery_enabled=True,automatic_normalization_enabled=True)
+        recovery_enabled=True,automatic_normalization_enabled=True,
+        calculated_review_enabled=calculated_review,
+        calculated_review_propose=operational_calculated_propose if calculated_review else None,
+        research_review_mode=CALCULATED_REVIEW_MODE if calculated_review else "legacy")
     return runtime.tick()
 
 
@@ -170,9 +188,13 @@ def main():
     modes.add_argument("--execute",action="store_true")
     modes.add_argument("--protect-only",action="store_true")
     modes.add_argument("--activate",action="store_true",help="verify both old accounts flat and activate approved demo handoff; no orders")
+    parser.add_argument("--calculated-review", action="store_true",
+                        help="opt in to two-pass, host-sized DEMO MAIN decisions; requires --execute")
     parser.add_argument("--root-db",type=Path,
                         default=Path(__file__).resolve().parents[2]/"stock_tracking_db.sqlite")
     args=parser.parse_args()
+    if args.calculated_review and not args.execute:
+        parser.error("--calculated-review requires --execute and cannot be used for activation/protection")
     started=time.monotonic()
     loop="protection" if args.protect_only else "decision"
     if not args.execute and not args.protect_only and not args.activate:
@@ -210,7 +232,8 @@ def main():
             if swing is None or error:
                 raise ValueError("swing_handoff_unavailable")
             with mutation_lock(conn):
-                proof=lambda:flat_handoff_probe(conn,broker,swing,swing_uid)
+                def proof():
+                    return flat_handoff_probe(conn,broker,swing,swing_uid)
                 # Do not disable legacy entries when prerequisite observation fails.
                 evidence=proof()
                 if not all(evidence[k] for k in ("main_flat","swing_flat","all_orders_terminal","legacy_clear","broker_ready")):
@@ -226,7 +249,8 @@ def main():
             return value
         failure_stage="run"
         result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
-                        snapshot=snapshot,proposal=operational_propose)
+                        snapshot=snapshot,proposal=operational_propose,
+                        calculated_review=args.calculated_review)
         _record_health_best_effort(conn,result,snapshot=snapshots[-1] if snapshots else None,
                                    loop="protection" if args.protect_only else "decision")
         # Disabled adapters cannot produce trade notices. Delivery occurs only
