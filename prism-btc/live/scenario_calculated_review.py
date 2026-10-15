@@ -28,6 +28,9 @@ wire candidates (OPEN when flat, ADJUST/EXIT when active), and no_candidate_reas
 wait_proposal is the WAIT fallback, not a global WAIT-only instruction: follow
 the separate candidates schema and its cap. baseline_kind describes the stored
 baseline's origin; the current first-observation flag is recovery.first_observation.
+Read current_decision_state for literal current host flags and wire action choices.
+Historical baseline_kind never makes first_observation=false into a first observation.
+Unknown flags remain unknown: do not invent permission or a first-observation ban.
 Choose strategic direction, entry,
 SL, TP, quantities and fractions yourself from supplied market evidence; the host
 does not choose these. Candidates are mutually exclusive alternatives, never a
@@ -71,6 +74,13 @@ unknown; a projection cannot replenish risk or grant stop-restoration permission
 Unknown actual future fees alone are not a new automatic WAIT gate; evaluate the
 supplied reserve-based comparisons without inventing exact net profit or an edge.
 Pure wire/economic validation is NOT recovery authorization or execution evidence.
+Candidate eligible=true is selectable when its token is in the response enum;
+eligible=false is excluded. allocation_receipt.executable=false and order-free
+receipt flags mean the calculation cannot submit orders, NOT candidate rejection.
+Do not use those authority flags as a reason to WAIT on an eligible candidate.
+Current first_observation/recovery_eligible are in current_decision_state;
+baseline_kind is historical origin, not a current waiting restriction. Unknown
+state is not permission; fresh host recovery and execution checks still decide.
 No trade is mandatory. Explain the decisive evidence and invalidation briefly in
 Korean. Return exactly selection_token and rationale, no other fields.
 """
@@ -327,6 +337,14 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
 
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
     model_context = deepcopy(context)
+    recovery = context.get("recovery") or {}
+    # Interpretation-only copy. Do not alter source context, receipt hashes or
+    # authorization; missing/non-boolean metadata remains explicitly unknown.
+    model_context["current_decision_state"] = dict(
+        first_observation=recovery.get("first_observation") if type(recovery.get("first_observation")) is bool else None,
+        recovery_eligible=recovery.get("eligible") if type(recovery.get("eligible")) is bool else None,
+        wire_action_choices=response_schema(context)["properties"]["action"]["enum"],
+        execution_authorization="NOT_GRANTED_BY_MODEL_INPUT")
     model_context["ma_structure"] = build_ma_structure_context(snapshot, context)
     if context.get("scenario_id") is None:
         model_context["current_primary_frame_facts"] = scenario_llm._current_primary_frame_facts(snapshot)

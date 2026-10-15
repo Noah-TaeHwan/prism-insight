@@ -538,6 +538,19 @@ overextension and failed-break/reversal counterexamples rather than chase by hab
 Below-to-between recovery weakens a SHORT differently from above-to-between
 deterioration of a LONG. Between is mixed, neither automatic range nor trade ban.
 A touch alone is not support, rejection, a held retest or confirmed reversal.
+Evaluate ordered price paths, especially 30m with 1h context, symmetrically:
+SHORT: rebound above MA10, failed advance at MA35 or evidenced resistance,
+then price back below MA10 with renewed downside progress is a short candidate.
+LONG: pullback below MA10, defense at MA35 or evidenced support, then price back
+above MA10 with renewed upside progress is a long candidate. Use whichever
+support/resistance is actually on that side; MA35 is not always above/below MA10.
+Use only supplied chronological ma_path/own-time points to establish this sequence.
+Do not infer within-candle event order from OHLC or turn a single touch into a failure.
+Missing path history is unknown; assess other available evidence without inventing it.
+Do not require an additional retest, another MA10 recovery against the proposed
+direction, a new confirmed candle or an MA-order crossover when the observed path
+already supports the setup. These are candidates, not automatic entry or exit:
+brief recrosses, stalled progress, costs and higher-frame obstacles can still favor WAIT.
 Observe forming progress/remaining time and OHLC reactions in the original
 snapshot; provisional moves can reverse. Limited history means unknown prior
 compression duration or recross history, not invented confirmation or a veto.

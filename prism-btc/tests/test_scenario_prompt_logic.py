@@ -17,7 +17,7 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     # Oct15 explicit approval: nearer evidenced round levels precede distance targets.
     expected = {
         'SYSTEM_PROMPT': 'a4f7ee615b25db5c3b1427ee02d7f5bb47d44c23bc8157787bde5cbfee108dd1',
-        'MA_STRUCTURE_PROMPT': '8791c23c8b5455c1914aa434ae0d883e17697fbe9902e84c7acbb12c4b307fc7',
+        'MA_STRUCTURE_PROMPT': '5c9ab2f52121bccac987b7b65d3d5a494b7c7aaa0e79b9a01dc3b03d86785bf8',
         'FLAT_ENTRY_PROMPT': 'e91e9cd77eed733610a9c51b8f78238e6e33e202124353dcd423b000f255b959',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
