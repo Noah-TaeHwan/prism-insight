@@ -90,19 +90,25 @@ zero chase, reserve their full risk before trigger, and keep their original
 deadline even after WAIT or a later protection ADJUST. A trigger may occur without
 a fill if the limit cap is exceeded. Native Full SL is attached to entry;
 TP targets are synchronized after confirmed fills, not atomically with entry.
-When runner_economics.cost_positive_stop is available, use its whole-scenario
-cost-positive reference, not a fixed 10x +1% or the raw average entry price.
-It includes recorded costs once and a conservative future cost/slippage allowance,
-not an observed future fee tier; future funding and execution prices remain unknown.
-Prefer a structurally justified profit-protecting SL at or beyond that positive
-boundary (higher for LONG, lower for SHORT), only if it remains on the valid side
-of current MarkPrice. Prefer tightening or retaining protection; any restoration
-must independently satisfy the bounded stop_policy below. Price feasibility is
-not a noise-buffer verdict: do not mechanically hug the first profitable tick.
-If a feasible cost-positive level is not adopted, explain the concrete structure
-or noise reason for retaining risk; never call an estimated net-negative stop
-profit protection. If infeasible or accounting unknown, do not invent a positive
-outcome, force a crossed stop, add risk to manufacture profitability, or claim a guarantee.
+When runner_economics.cost_positive_stop is available, treat it as a conservative
+whole-scenario stress-cost diagnostic, NOT actual breakeven or a mandatory SL boundary;
+not a fixed 10x +1% or the raw average entry price either.
+Its risk reserve is not an observed future fee: a negative stress estimate alone
+does not establish actual net loss or forbid a structurally justified partial exit.
+Separate recorded fees/funding from optional fee_only_projection assumptions;
+estimated_net_before_unmodelled_costs is NOT guaranteed future net profit and omits
+unknown future slippage/funding. Observed historical fee rates are not guaranteed
+current account rates. Missing fee evidence stays UNKNOWN, not zero and not an
+automatic WAIT instruction. Do not invent a net-positive outcome from gross PnL.
+After partial profit compare recorded whole-scenario realized net plus remaining
+price PnL minus future assumed costs, counting recorded costs only once; distinguish
+LEG_ONLY projections from WHOLE_SCENARIO projections. A winning partial exit does
+not guarantee a profitable whole trade. Never subtract recorded costs again from
+an already net amount. Review retaining, tightening or reducing exposure against
+structure and noise; do not force a breakeven stop or hug the first profitable tick.
+Any restoration must independently satisfy the bounded stop_policy below. Keep
+SL on the valid side of current MarkPrice; do not force a crossed stop, add risk
+to manufacture profitability, or claim a guarantee.
 When review_contract_version=1, preserve structured reassessment continuity:
 review_memory contains at most three host-ID MARK_PRICE checkpoints. Reached
 means a fresh sampled mark met ge/le, NOT a candle close or continuous tick proof.
@@ -270,14 +276,19 @@ against retaining exposure for a supported break; neither early profit-taking
 nor a distant all-size TP is mandatory. Do not assume an intervening obstacle
 will break merely because the primary trend or higher frames favor the position.
 Use flexible near, intermediate and extension TP allocation rather than
-indiscriminately shortening the final target. Use the BTC price-distance baseline:
-first partial profit around 500 USDT, intermediate profit around 700-800 USDT,
-and only the residual runner beyond 1000 USDT when continuation supports it.
+indiscriminately shortening the final target. Consider a first partial profit
+100-300 USDT away only when evidenced structure and cost room support it;
+100-200 USDT of favorable movement is NOT automatically net profit. Compare
+later partial profit around 500 USDT and a residual runner around 800-1000 USDT
+or farther when continuation supports it. These are illustrative choices, not
+mandatory distances, minimum spacing or a requirement to exit at every tier.
 These are absolute BTC price differences, not account profit, percentages or
 10x-leveraged returns. Measure from proposed entry for OPEN and verified position
 average entry for holdings, never reset the distance from each new current mark.
-For LONG the baseline is entry +500, +700-800, then +1000 or farther;
-for SHORT it is entry -500, -700-800, then -1000 or farther.
+For LONG profitable objectives are above entry; for SHORT they are below entry.
+Choose the structural invalidation SL first, then let host risk sizing calculate
+quantity within the existing budget. Do not tighten SL merely to enlarge a bet;
+do not increase leverage to 30x or use full-account exposure to mimic manual bets.
 First identify evidenced reaction zones, then choose sizes: normally compare
 two or three meaningful tiers, not equal price intervals and not fixed percentages.
 Start by considering 50% near, 30% intermediate and 20% protected runner;

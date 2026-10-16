@@ -375,6 +375,8 @@ class ScenarioDemoBroker(ScenarioExecution):
         schedule=self._funding_schedule(start,end,observed)
         result=reconcile_scenario(active["scenario_id"],evidence,owned,observed,
             funding_schedule=schedule)
+        from live.scenario_fee_projection import observed_fee_evidence
+        result["observed_execution_fee_evidence"] = observed_fee_evidence(evidence, result, now=self.clock())
         from live.scenario_provenance import record
         record("accounting_observation", dict(financial_evidence=evidence, owned_orders=owned,
             children=children, observation=observed, funding_schedule=schedule,
@@ -465,6 +467,8 @@ class ScenarioDemoBroker(ScenarioExecution):
             unknown_intents=any(c["status"] == "UNKNOWN" or not c["evidence"] for c in children))
         return dict(entry_thesis=initial_entry_evidence, stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
             account_captured_at=observed["captured_at"], runner_economics=review_finance,
+            observed_execution_fee_evidence=accounting.get("observed_execution_fee_evidence", {"status":"UNKNOWN"}),
+            recorded_scenario_net=accounting.get("net_pnl") if accounting.get("accounting_complete") is True else None,
             target_status=[dict(target_id=c["local_id"],kind=c["kind"],status=c["status"],
                 intent_id=c["intent_id"],
                 logical_target_id=c["local_id"].partition(":")[2] if ":" in c["local_id"] else None,

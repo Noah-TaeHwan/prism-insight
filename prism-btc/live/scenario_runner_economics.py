@@ -71,7 +71,13 @@ def runner_economics(*, accounting, side, mark_price, hard_stop, observed_at, no
         values = {k: float(v) for k,v in values.items()}
         if not all(math.isfinite(v) for v in values.values()):
             return unavailable
+        from live.scenario_fee_projection import fee_only_projection
+        fee_views = {label: fee_only_projection(side=side, entry_price=entry_value/quantity,
+            exit_price=price, quantity=quantity, evidence=accounting.get('observed_execution_fee_evidence'),
+            now=now, new_entry=False, recorded_net=net)
+            for label,price in (('at_mark',mark),('at_current_stop',stop))}
         return dict(status='available', scope='confirmed_remaining_lots_no_pending_entries',
+                    fee_only_projection=fee_views,
                     future_funding_included=False, budget_replenishment_allowed=False,
                     estimates_not_guaranteed=True,
                     future_cost_basis='existing_conservative_cost_rate_plus_stop_slippage_allowance',

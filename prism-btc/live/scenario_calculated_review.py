@@ -124,6 +124,17 @@ def _gross_projection(plan, context, *, lots=None,
         realized_loss=0, fees_paid=0, funding_paid=0,
         estimated_cost_rate=context["estimated_cost_rate"], slippage_bps=context["slippage_bps"])
     risk_per_btc = _decimal(lot_risk["remaining_risk"]) / quantity
+    from live.scenario_fee_projection import fee_only_projection
+    confirmed = assumption == "CONFIRMED_REMAINING_NEW_REVISION_NO_ADDITIONAL_FILLS"
+    new_entry = context.get("scenario_id") is None
+    def fees(price, qty, whole=False):
+        if not (confirmed or new_entry):
+            return dict(status="UNKNOWN", reason="mixed_confirmed_and_unfilled_lots")
+        if whole and confirmed and context.get("recorded_scenario_net") is None:
+            return dict(status="UNKNOWN", reason="recorded_scenario_net_missing")
+        return fee_only_projection(side=plan["side"], entry_price=basis, exit_price=price,
+            quantity=qty, evidence=context.get("observed_execution_fee_evidence"), now=context.get("now"),
+            new_entry=new_entry, recorded_net=context.get("recorded_scenario_net") if whole and confirmed else None)
     for kind in ("take_profits", "partial_stops"):
         allocated = Decimal(0)
         for row in plan[kind]:
@@ -138,6 +149,7 @@ def _gross_projection(plan, context, *, lots=None,
             targets.append(dict(kind=kind, id=row["id"], price=row["price"],
                 quantity=float(projected_qty), below_minimum=below_minimum,
                 gross_pnl=float(gross), equity_percent=float(gross / equity * 100),
+                fee_only_projection=fees(row["price"], projected_qty),
                 gross_reward_per_btc=float(sign * (_decimal(row["price"]) - basis)),
                 gross_reward_to_reserved_risk_ratio=float(sign * (_decimal(row["price"]) - basis) / risk_per_btc)
                     if risk_per_btc > 0 else None))
@@ -145,6 +157,7 @@ def _gross_projection(plan, context, *, lots=None,
     return dict(assumption=assumption,
                 quantity=float(quantity), weighted_entry=float(basis),
                 notional=float(notional), gross_at_full_stop=float(stop_gross),
+                fee_only_projection_at_full_stop=fees(plan["hard_stop"], quantity, whole=True),
                 gross_at_full_stop_equity_percent=float(stop_gross / equity * 100),
                 targets=targets, target_paths="INDEPENDENT_NOT_ADDITIVE_WITH_FULL_STOP",
                 cost_basis="QUANTITY_WEIGHTED_REMAINING_LOTS_PRO_RATA_ESTIMATE",
@@ -174,7 +187,16 @@ def _holding_projection_values(plan, context):
         sign = 1 if side == "LONG" else -1
         gross = sum((sign * (mark - _decimal(row["price"])) * _decimal(row["quantity"])
                      for row in lots), Decimal(0))
+        from live.scenario_fee_projection import fee_only_projection
+        quantity=sum((_decimal(row["quantity"]) for row in lots), Decimal(0))
+        fee_view=dict(status="UNKNOWN", reason="recorded_scenario_net_missing")
+        if quantity > 0 and context.get("recorded_scenario_net") is not None:
+            basis=sum((_decimal(row["price"])*_decimal(row["quantity"]) for row in lots),Decimal(0))/quantity
+            fee_view=fee_only_projection(side=side,entry_price=basis,exit_price=mark,quantity=quantity,
+                evidence=context.get("observed_execution_fee_evidence"),now=context.get("now"),
+                new_entry=False,recorded_net=context["recorded_scenario_net"])
         return dict(status="AVAILABLE", assumption="CONFIRMED_REMAINING_AT_MARK_NOT_ACTUAL_EXIT_FILL",
+            fee_only_projection=fee_view,
             confirmed_quantity=float(sum((_decimal(row["quantity"]) for row in lots), Decimal(0))),
             mark_price=float(mark), estimated_gross_at_mark=float(gross), actual_net_pnl=None,
             estimated_gross_at_mark_equity_percent=float(gross / equity * 100),
