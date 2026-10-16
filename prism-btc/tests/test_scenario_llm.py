@@ -54,12 +54,16 @@ def test_assembled_tp_distance_baseline_is_symmetric_and_preserves_remaining_quo
             generate=generate, clock=lambda: 1000)
     policy = ' '.join(calls[0]['system_prompt'].split())
     for clause in (
-        'first partial profit around 500 USDT',
-        'intermediate profit around 700-800 USDT',
-        'only the residual runner beyond 1000 USDT',
+        '100-300 USDT away only when evidenced structure and cost room support it',
+        '100-200 USDT of favorable movement is NOT automatically net profit',
+        'later partial profit around 500 USDT',
+        'residual runner around 800-1000 USDT',
+        'not mandatory distances, minimum spacing',
         'absolute BTC price differences',
-        'entry +500, +700-800, then +1000',
-        'entry -500, -700-800, then -1000',
+        'For LONG profitable objectives are above entry; for SHORT they are below entry',
+        'Choose the structural invalidation SL first',
+        'Do not tighten SL merely to enlarge a bet',
+        'do not increase leverage to 30x or use full-account exposure',
         '50% near, 30% intermediate and 20% protected runner',
         'not a forced allocation',
         'support for SHORT takes precedence',
@@ -79,6 +83,14 @@ def test_assembled_tp_distance_baseline_is_symmetric_and_preserves_remaining_quo
         'rounding remainder stays protected by the native Full SL',
         'After confirmed near profit-taking',
         'do not install a crossed limit to fabricate past profit',
+        'NOT actual breakeven or a mandatory SL boundary',
+        'negative stress estimate alone does not establish actual net loss',
+        'Missing fee evidence stays UNKNOWN, not zero and not an automatic WAIT instruction',
+        'A winning partial exit does not guarantee a profitable whole trade',
+        'counting recorded costs only once',
+        'do not force a breakeven stop',
+        'unknown future slippage/funding',
+        'LEG_ONLY projections from WHOLE_SCENARIO projections',
     ):
         assert clause in policy
 

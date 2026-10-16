@@ -14,9 +14,9 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct15 explicit approval: nearer evidenced round levels precede distance targets.
+    # Oct17 approval: flexible near TP and fee assumptions distinct from stress reserve.
     expected = {
-        'SYSTEM_PROMPT': 'a4f7ee615b25db5c3b1427ee02d7f5bb47d44c23bc8157787bde5cbfee108dd1',
+        'SYSTEM_PROMPT': '4529e0396db23dfabcb1e9f7f57af3b2ad865c13189c9a4abe09b649ac7b03aa',
         'MA_STRUCTURE_PROMPT': '5c9ab2f52121bccac987b7b65d3d5a494b7c7aaa0e79b9a01dc3b03d86785bf8',
         'FLAT_ENTRY_PROMPT': 'e91e9cd77eed733610a9c51b8f78238e6e33e202124353dcd423b000f255b959',
     }

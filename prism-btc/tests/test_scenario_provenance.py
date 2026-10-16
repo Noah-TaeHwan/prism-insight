@@ -236,12 +236,18 @@ def test_actual_lifecycle_self_contained_funding_and_exact_ids(tmp_path, monkeyp
     observations = [json.loads(body) for kind, sid, _, body in events if kind == 'accounting_observation']
     assert observations
     for observation in observations:
+        assert 'observed_execution_fee_evidence' not in observation['result']
+        assert observation['observed_execution_fee_evidence']['status'] in {'AVAILABLE', 'UNKNOWN'}
         assert all(child['scenario_id'] == 's1' for child in observation['children'])
         assert observation['funding_source']['instruments'][0]['fundingInterval']
         assert isinstance(observation['funding_source']['raw_rows'], list)
         assert observation['funding_source']['next_funding_time'] > observation['funding_schedule']['end_ms']
         assert reconcile_scenario('s1', observation['financial_evidence'], observation['owned_orders'],
             observation['observation'], funding_schedule=observation['funding_schedule']) == observation['result']
+    saved = broker.conn.execute(
+        "SELECT body FROM llm_scenario_broker_evidence WHERE kind='scenario_accounting'").fetchall()
+    assert saved
+    assert all('observed_execution_fee_evidence' not in json.loads(body) for (body,) in saved)
     calls = [json.loads(body) for kind, _, _, body in events if kind == 'exchange_call']
     assert len(calls) == len(exchange.writes)
     assert all(event['request_hash'] == audit.digest(event['request']) for event in calls)

@@ -175,6 +175,7 @@ def _manifest():
                     'live/scenario_recovery.py',
                     'live/scenario_review_memory.py',
                     'live/scenario_runner_economics.py',
+                    'live/scenario_fee_projection.py',
                     'live/scenario_entry_thesis.py',
                     'live/scenario_model_input.py',
                     'live/scenario_preview.py', 'engine/scenario_snapshot.py',
