@@ -129,3 +129,91 @@ def test_holding_candidate_stop_exit_and_pending_scopes():
     exit_=_holding_projection(plan,ctx)['fee_only_projection']
     assert exit_['scope']=='WHOLE_SCENARIO'
     assert exit_['estimated_net_before_unmodelled_costs']==pytest.approx(-.46-.01*83410*.00055)
+
+
+@pytest.mark.parametrize('target_count', [3,20])
+def test_full_holding_two_candidate_select_fee_views_fit_and_restore(target_count, monkeypatch):
+    """Exercise real assembly with complete seven-frame facts and legal exit max."""
+    import json
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from tests.test_scenario_calculated_review import holding, holding_wire, wire
+    from tests.test_scenario_snapshot import snapshot
+    from live import scenario_calculated_review as review
+    from live.scenario_model_input import project_model_input, restore_model_input
+    from live.scenario_preview import response_contract
+    from live.scenario_recovery import numeric_market
+    from live.scenario_runner_economics import runner_economics
+    market=snapshot()
+    now=market['as_of_ms']/1000
+    ctx=holding()
+    ctx.update(now=now,input_captured_at=now,account_captured_at=now,
+        observed_execution_fee_evidence=evidence(),recorded_scenario_net=-2.5)
+    ctx['observed_execution_fee_evidence']['rates']['TAKER'].update(earliest_at=now,latest_at=now)
+    ctx['recovery']=dict(first_observation=False,eligible=True,current=numeric_market(market),
+        baseline=numeric_market(market),changed_evidence=[],risk_fraction=.005)
+    accounting=dict(status='confirmed',accounting_complete=True,positions=ctx['positions'],
+        gross_pnl=0,fees=2,funding_net=-.5,net_pnl=-2.5,
+        observed_execution_fee_evidence=ctx['observed_execution_fee_evidence'])
+    ctx['runner_economics']=runner_economics(accounting=accounting,side='LONG',mark_price=83400,
+        hard_stop=82500,observed_at=now,now=now,pending_entries=[],initial_equity=10000,
+        estimated_cost_rate=.002,slippage_bps=20,price_tick=.1)
+    candidates=[]
+    for i in range(2):
+        p=holding_wire(ctx)
+        p['expires_at']=now+300
+        p['take_profits']=[dict(id=f't{i}_{j}',price=84000+i*100+j*10+.1,fraction=.02) for j in range(target_count)]
+        p['partial_stops']=[dict(id=f's{i}_{j}',price=82600+i*100+j*10+.1,fraction=.02) for j in range(target_count)]
+        candidates.append(p)
+    wait=wire(ctx)
+    wait['expires_at']=now+300
+    originals=[]
+    sizes=[]
+    def without_fee_additions(value):
+        if isinstance(value,list):
+            return [without_fee_additions(item) for item in value]
+        if isinstance(value,dict):
+            return {key:without_fee_additions(item) for key,item in value.items()
+                if not key.startswith('fee_only_projection') and key not in
+                    ('observed_execution_fee_evidence','recorded_scenario_net')}
+        return value
+    def project(value):
+        originals.append(deepcopy(value))
+        result=project_model_input(value)
+        if 'calculated_candidates' in value:
+            baseline=project_model_input(without_fee_additions(value))[1]['projected_utf8_bytes']
+            sizes.append((baseline,result[1]['projected_utf8_bytes']))
+            assert restore_model_input(result[0])==value
+        return result
+    monkeypatch.setattr(review,'project_model_input',project)
+    calls=[]
+    def generate(**kwargs):
+        calls.append(kwargs)
+        if len(calls)==1:
+            body=dict(wait_proposal=wait,candidates=candidates,no_candidate_reason='')
+        else:
+            sent=json.loads(kwargs['user_prompt'])
+            restored=restore_model_input(sent)
+            assert restored==originals[-1]
+            assert len(kwargs['user_prompt'].encode())<=100_000
+            assert restored['contract_context']['runner_economics']['fee_only_projection']['at_mark']['status']=='AVAILABLE'
+            for r in restored['calculated_candidates']['candidates']:
+                assert r['eligible']
+                targets=r['projection']['confirmed_remaining']['targets']
+                assert len(targets)==target_count*2
+                assert all(t['fee_only_projection']['status']=='AVAILABLE' for t in targets)
+            choice=restored['calculated_candidates']['wait']
+            body=dict(selection_token=f"{choice['id']}:{choice['receipt_sha256']}",rationale='cost review')
+        return SimpleNamespace(text=json.dumps(body))
+    if target_count==20:
+        # The legal array bound was already too large for this full market shape.
+        # Retain the cap; do not truncate financial facts or call SELECT anyway.
+        with pytest.raises(ValueError,match='research_input_size'):
+            review.research_review(market,ctx,response_contract(ctx),generate=generate,record=lambda event:None,clock=lambda:now)
+        assert len(calls)==1
+        assert sizes[-1][0]>100_000
+        assert sizes[-1][1]>sizes[-1][0]
+    else:
+        review.research_review(market,ctx,response_contract(ctx),generate=generate,record=lambda event:None,clock=lambda:now)
+        assert len(calls)==2
+        assert sizes[-1][1]<100_000

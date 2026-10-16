@@ -1,6 +1,7 @@
 """Optional, pure holding-review facts; never an order or risk-budget authority."""
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import math
+from live.scenario_fee_projection import fee_only_projection
 
 
 def _number(value):
@@ -71,7 +72,6 @@ def runner_economics(*, accounting, side, mark_price, hard_stop, observed_at, no
         values = {k: float(v) for k,v in values.items()}
         if not all(math.isfinite(v) for v in values.values()):
             return unavailable
-        from live.scenario_fee_projection import fee_only_projection
         fee_views = {label: fee_only_projection(side=side, entry_price=entry_value/quantity,
             exit_price=price, quantity=quantity, evidence=accounting.get('observed_execution_fee_evidence'),
             now=now, new_entry=False, recorded_net=net)

@@ -376,14 +376,16 @@ class ScenarioDemoBroker(ScenarioExecution):
         result=reconcile_scenario(active["scenario_id"],evidence,owned,observed,
             funding_schedule=schedule)
         from live.scenario_fee_projection import observed_fee_evidence
-        result["observed_execution_fee_evidence"] = observed_fee_evidence(evidence, result, now=self.clock())
+        fee_evidence = observed_fee_evidence(evidence, result, now=self.clock())
         from live.scenario_provenance import record
         record("accounting_observation", dict(financial_evidence=evidence, owned_orders=owned,
             children=children, observation=observed, funding_schedule=schedule,
-            funding_source=getattr(self,"_audit_funding_source",None), result=result),
+            funding_source=getattr(self,"_audit_funding_source",None), result=result,
+            observed_execution_fee_evidence=fee_evidence),
             scenario_id=active["scenario_id"])
         self._save("scenario_accounting",result)
-        return result
+        # Preserve the pure reconciliation result; optional review facts are a sidecar.
+        return dict(result, observed_execution_fee_evidence=fee_evidence)
 
     def _risk_accounting(self,observed,active,children):
         result=self._accounting(observed,active,children)
