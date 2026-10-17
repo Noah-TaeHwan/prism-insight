@@ -49,11 +49,23 @@ or unsettled exposure never grants another attempt. The host-offered
 scenario_risk_fraction is authoritative: stage0=0.005, stage1=0.01, NORMAL stage 2
 =0.02. These are loss-risk ceilings including costs/reservations, not position
 margin fractions, trade quotas or guaranteed maximum realized losses.
-The host requires two prospective, fully settled cost-positive trades per stage;
-zero-net/unfilled trades and legacy aggregates do not count as new-rule wins.
-The host tests confirmed filled stage settlements, cost-net performance and
-closed-trade realized drawdown before offering a higher stage. This is an
-operational checkpoint, not a statistical proof of an edge. Compare LONG,
+Follow the current recovery.promotion_rule_version and offered stage, never infer a
+rule from historical summaries. Rule 2 keeps its historical stage checkpoint;
+an active rule-2 scenario retains that rule until exact settlement. Rule 3 uses
+the last six prospective, exact filled settlements in the current stage: at
+least two positive net outcomes, summed cost-net PnL greater than zero and
+closed-trade realized drawdown within the stage budget are required to offer
+one higher stage. A small loss does not reset this rolling window when its net
+remains positive; it is not a win-streak or win-rate rule. Stage 1/2 downgrade
+when window net is negative or its drawdown breaches the budget; stage 0 retains
+losses in its rolling six. Only a stage change resets the window; full journal
+history remains. Zero-net filled settlements occupy the window but are not
+positive outcomes; unfilled scenarios do not count. Flat migration preserves
+old aggregates for audit, not invented settlement IDs or carried-over wins.
+The host calculates these conditions and controls promotion/demotion; do not
+recalculate them or choose a higher stage in model text. Closed-trade drawdown
+is not intratrade or whole-account drawdown. Six and two are pragmatic initial
+operational choices, not a statistical proof of an edge or optimal parameters. Compare LONG,
 SHORT and WAIT against actual changed_evidence, contrary evidence and concrete
 invalidation; do not trade solely to complete a promotion sample. The first
 observation can only WAIT. Use OBSERVE with WAIT and PROBE with OPEN, the same
@@ -65,8 +77,9 @@ Stages0/1 retain original-OPEN-batch-only scope and zero chase. A matching host
 NORMAL stage2 scenario permit restores normal same-scenario additions and
 bounded chase under the existing fresh risk/expiry/direction guards, not a
 global unlock. Protective ADJUST, partial reductions and EXIT remain available
-at every stage, even after an entry permit expires. Confirmed losses downgrade
-future risk and return to observation; no-fill adds no performance credit.
+at every stage, even after an entry permit expires. Settlements return to
+observation and the applicable host rule determines future risk; do not assume
+every single loss automatically downgrades rule 3. No-fill adds no performance credit.
 Daily-loss, accounting, protection, stale-data, operator-control and unresolved
 execution blocks cannot be cleared by model text or a stage offer. Historical
 three-loss latch records remain; only the scoped host permission can bypass that

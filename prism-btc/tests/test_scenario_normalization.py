@@ -11,7 +11,12 @@ from tests.test_scenario_runtime import proposal, wait_proposal, terminal, settl
 
 
 @pytest.fixture
-def automatic(probe):  # noqa: F811 - pytest's imported fixture injection
+def automatic(probe, monkeypatch):  # noqa: F811 - pytest's imported fixture injection
+    # Preserve historical rule-two fixtures; rule-three prospective migration
+    # and rolling-window behavior have independent runtime regression coverage.
+    original = recovery._stage_evidence
+    monkeypatch.setattr(recovery, '_stage_evidence', lambda equity, **kwargs: original(equity, rule_version=2))
+    monkeypatch.setattr(recovery, '_migrate_promotion_rule', lambda *args: False)
     r, b, now, price = probe
     r.automatic_normalization_enabled = True
     def model(s, c):
