@@ -1,6 +1,7 @@
 """Bounded read-only BTC evidence bridge. Delivery is at-least-once by stable ID.
 
-No trading imports, source writes, network calls, historical backfill or order authority.
+No trading imports, source writes, network calls or order authority. Only the new
+review streams have an explicit retained-history backfill; old cutovers stay intact.
 """
 from __future__ import annotations
 
@@ -18,9 +19,18 @@ import time
 from .events import build_event
 
 STREAMS = ('llm_scenario_audit_events', 'llm_scenario_recovery_events',
-           'llm_scenario_broker_evidence', 'llm_scenario_outbox')
+           'llm_scenario_broker_evidence', 'llm_scenario_outbox', 'llm_scenario_review_events',
+           'llm_scenario_review_tapes')
 # All SQL text is literal. Source keys select a statement, never a table-name splice.
 STREAM_SQL = {
+    'llm_scenario_review_tapes': (
+        'SELECT MAX(rowid) FROM llm_scenario_review_tapes',
+        'SELECT slot,body FROM llm_scenario_review_tapes WHERE rowid=?',
+        'SELECT rowid AS source_rowid,* FROM llm_scenario_review_tapes WHERE rowid>? ORDER BY rowid LIMIT ?'),
+    'llm_scenario_review_events': (
+        'SELECT MAX(rowid) FROM llm_scenario_review_events',
+        'SELECT slot,sequence,body FROM llm_scenario_review_events WHERE rowid=?',
+        'SELECT rowid AS source_rowid,* FROM llm_scenario_review_events WHERE rowid>? ORDER BY rowid LIMIT ?'),
     'llm_scenario_audit_events': (
         'SELECT MAX(rowid) FROM llm_scenario_audit_events',
         'SELECT body FROM llm_scenario_audit_events WHERE rowid=?',
@@ -39,6 +49,7 @@ STREAM_SQL = {
         'SELECT rowid AS source_rowid,* FROM llm_scenario_outbox WHERE rowid>? ORDER BY rowid LIMIT ?'),
 }
 QUERY_SQL = {
+    'review_manifests': "SELECT DISTINCT manifest_id,CASE WHEN length(json_extract(body,'$.input_id'))<=4096 THEN json_extract(body,'$.input_id') END AS input_id FROM llm_scenario_audit_events WHERE decision_slot=? AND kind='decision_input' LIMIT 3",
     'queue': 'INSERT OR IGNORE INTO outbox VALUES(?,?)',
     'manifest': 'SELECT body FROM llm_scenario_audit_manifests WHERE manifest_id=?',
     'notice_status': 'SELECT status FROM notices WHERE id=?',
@@ -181,8 +192,10 @@ def _queue(state, identity, key, kind, attributes, stamp):
         trace_key = 'input:' + attributes['input_id_ref']
     else:
         trace_key = 'source:' + key
+    unknown_review_time = (kind in ('review','review_tape') and
+        attributes.get('source_time_basis') == 'UNKNOWN_EVENT_TIME_EXPORT_OBSERVATION_ONLY')
     attrs = dict(attributes, source_identity=identity, export_observed_at=time.time(),
-                 source_event_time=stamp, deployment_scope='UNKNOWN_NOT_ATTESTED',
+                 source_event_time=None if unknown_review_time else stamp, deployment_scope='UNKNOWN_NOT_ATTESTED',
                  evidence_scope='OBSERVED_SOURCE_ONLY_NOT_FILL_OR_DELIVERY_INFERENCE')
     value = dict(event_type='btc.research.' + kind, service='prism-btc-research-export',
                  event_id=event_id, market='CRYPTO', ticker='BTCUSDT', attributes=attrs,
@@ -265,7 +278,217 @@ def _model_metadata(body):
     return result
 
 
-def _capture(source, state, identity, stream, row):
+def _anchor_hash(stream, row):
+    if row is None:
+        return None
+    if stream == 'llm_scenario_review_events':
+        return _hash(_json([row['slot'], row['sequence'], row['body']]))
+    if stream == 'llm_scenario_review_tapes':
+        return _hash(_json([row['slot'], row['body']]))
+    return _hash(row['body'])
+
+
+def _hash_fields(body, keys):
+    return {key:body[key] for key in keys if isinstance(body.get(key), str)
+            and re.fullmatch('[a-f0-9]{64}', body[key])}
+
+
+def _review_manifest(source, slot, input_ref=None, manifest_cache=None):
+    """Exact-slot references only, never latest/global/exporter deployment policy."""
+    try:
+        if manifest_cache is not None and slot in manifest_cache:
+            rows = manifest_cache[slot]
+        else:
+            rows = _query(source, 'review_manifests', parameters=(slot,)).fetchall()
+            if manifest_cache is not None and len(manifest_cache) < 100:
+                manifest_cache[slot] = rows
+        if len(rows) != 1 or not rows[0][0]:
+            return dict(policy_evidence='UNKNOWN_CONFLICTING_MANIFESTS' if len(rows)>1 else 'UNKNOWN')
+        original_input = rows[0][1]
+        if input_ref and (not isinstance(original_input,str) or _hash(original_input)!=input_ref):
+            return dict(policy_evidence='UNKNOWN_INPUT_BINDING_CONFLICT')
+        evidence = _manifest(source, rows[0][0])
+        if evidence.get('loaded_code_status') != 'VERIFIED':
+            return dict(policy_evidence='UNKNOWN_UNVERIFIED_MANIFEST',
+                        **{k:v for k,v in evidence.items() if k in ('manifest_ref','manifest_sha256','loaded_code_status')})
+        return dict(evidence, policy_evidence='EXACT_SLOT_UNIQUE_MANIFEST_OBSERVED_NOT_CURRENT')
+    except (sqlite3.Error, ValueError, TypeError):
+        return dict(policy_evidence='UNKNOWN_MANIFEST_UNAVAILABLE')
+
+
+def _review_candidate(value):
+    if not isinstance(value, dict):
+        return dict(status='UNKNOWN')
+    result = _hash_fields(value, ('receipt_sha256','raw_sha256','effective_sha256',
+        'raw_allocation_sha256','context_sha256','input_sha256'))
+    ident = value.get('id')
+    if ident in ('WAIT','c0','c1'):
+        result['candidate_id'] = ident
+    elif isinstance(ident, str):
+        result['candidate_id_ref'] = _hash(ident)
+    if type(value.get('eligible')) is bool:
+        result['eligible'] = value['eligible']
+    for name in ('effective_plan','raw_proposal','raw_allocation_proposal'):
+        plan = value.get(name)
+        if isinstance(plan, dict):
+            result[name + '_facts'] = _facts(plan)
+            result.update(_references(plan))
+    if isinstance(value.get('rejection'), str):
+        result['rejection_sha256'] = _hash(value['rejection'])
+    result['semantics'] = 'CANDIDATE_NOT_ORDER_OR_FILL'
+    return result
+
+
+def _capture_review(source, state, identity, row, body, now, manifest_cache=None):
+    if any(type(row[k]) is not int or row[k] < 0 for k in ('slot','sequence')):
+        raise ValueError('review_identity_invalid')
+    kinds = {'MODEL_REQUEST','MODEL_RAW','MODEL_ERROR','CALCULATED_CANDIDATES',
+             'CALCULATED_CANDIDATE_REJECTED','RESEARCH_REJECTION','RESEARCH_RESULT',
+             'FRESH_REVIEW_RECEIPT','FINAL_FRESH_REVIEW_RECEIPT'}
+    kind = body.get('kind')
+    attrs = dict(source_stream='llm_scenario_review_events',source_rowid=row['source_rowid'],
+        source_sequence=row['sequence'],decision_slot=row['slot'],
+        source_kind=kind if isinstance(kind,str) and kind in kinds else 'UNKNOWN',
+        body_sha256=_hash(row['body']),facts_scope='ALLOWLISTED_SUBSET_RAW_SOURCE_RETAINED',
+        observation_origin='OBSERVED_NOT_CURRENT',granular_fill_coverage='UNKNOWN_NOT_EXTRACTED')
+    attrs.update(_review_manifest(source, row['slot'], manifest_cache=manifest_cache))
+    stamp = body.get('started_at')
+    if type(stamp) in (int,float) and math.isfinite(stamp) and 0 <= stamp <= now:
+        attrs['source_time_basis'] = 'EVENT_STARTED_AT'
+    else:
+        stamp = now
+        attrs['source_time_basis'] = 'UNKNOWN_EVENT_TIME_EXPORT_OBSERVATION_ONLY'
+    if body.get('phase') in ('candidate','selection'):
+        attrs['phase'] = body['phase']
+    attrs.update(_hash_fields(body, ('request_sha256','prepared_request_sha256','actual_request_sha256','sha256')))
+    for key in ('request','actual_request'):
+        request = body.get(key)
+        if isinstance(request,dict):
+            metadata = dict(request)
+            metadata.update(effort=request.get('reasoning_effort'),fast=request.get('fast_tier'))
+            attrs[key+'_metadata'] = _model_metadata(metadata)
+            attrs[key+'_observed_sha256'] = _hash(_json(request))
+            declared = body.get(key+'_sha256')
+            attrs[key+'_hash_status'] = ('MATCH' if declared == attrs[key+'_observed_sha256'] else
+                'CONFLICT' if declared is not None else 'UNKNOWN')
+            prompt = request.get('user_prompt')
+            if isinstance(prompt,str) and len(prompt.encode()) <= 100000:
+                try:
+                    decoded = json.loads(prompt)
+                    refs = _references(decoded.get('contract_context')) if isinstance(decoded,dict) else {}
+                    if refs.get('input_id_ref'):
+                        attrs.update(refs)
+                        # A supplied request identity must agree with the exact
+                        # decision-input audit, not merely share its time slot.
+                        for field in ('source_git_revision','source_policy_hash','source_execution_hash',
+                                      'manifest_ref','manifest_sha256','loaded_code_status'):
+                            attrs.pop(field,None)
+                        attrs.update(_review_manifest(source,row['slot'],refs['input_id_ref'],manifest_cache))
+                except (ValueError,TypeError):
+                    pass
+    if isinstance(body.get('raw'),str):
+        attrs['raw_sha256'] = _hash(body['raw'])
+    if isinstance(body.get('code'),str):
+        attrs['error_code_sha256'] = _hash(body['code'])
+    if type(body.get('elapsed_seconds')) in (int,float) and math.isfinite(body['elapsed_seconds']) and body['elapsed_seconds'] >= 0:
+        attrs['elapsed_seconds'] = body['elapsed_seconds']
+    nested = body.get('body')
+    if isinstance(nested,dict):
+        attrs.update(_hash_fields(nested, ('bundle_sha256','input_sha256','receipt_sha256')))
+        attrs['facts'] = _facts(nested)
+        candidates = nested.get('candidates')
+        if isinstance(candidates,list):
+            attrs['candidate_count'] = len(candidates)
+            attrs['candidate_summaries_complete'] = len(candidates) <= 2
+            attrs['candidates'] = [_review_candidate(value) for value in candidates[:2]]
+        if isinstance(nested.get('selected'),dict):
+            attrs['selected'] = _review_candidate(nested['selected'])
+        if isinstance(nested.get('selection'),dict):
+            attrs['selection'] = _hash_fields(nested['selection'], ('receipt_sha256',))
+            if nested['selection'].get('selection') in ('WAIT','c0','c1'):
+                attrs['selection']['candidate_id'] = nested['selection']['selection']
+        if kind == 'CALCULATED_CANDIDATE_REJECTED':
+            attrs['candidate'] = _review_candidate(nested)
+    receipt = body.get('receipt')
+    if isinstance(receipt,dict):
+        attrs['receipt_body_sha256'] = _hash(_json(receipt))
+        attrs['receipt_facts'] = _facts(receipt)
+        attrs.update(_hash_fields(receipt, ('bundle_sha256','input_sha256','envelope_sha256',
+            'selected_receipt_sha256','original_context_sha256','fresh_context_sha256',
+            'payload_sha256','validated_sha256')))
+        if _hash_fields(receipt, ('sha256',)):
+            attrs['receipt_sha256'] = receipt['sha256']
+        if receipt.get('status') == 'FRESH_VALIDATED_NOT_AUTHORIZED':
+            attrs['receipt_status'] = receipt['status']
+        if type(receipt.get('execution_authorized')) is bool:
+            attrs['receipt_execution_authorized'] = receipt['execution_authorized']
+    _queue(state, identity, 'llm_scenario_review_events:'+str(row['source_rowid']), 'review', attrs, stamp)
+
+
+def _capture_review_tape(source, state, identity, row, body, now, manifest_cache=None):
+    if type(row['slot']) is not int or row['slot'] < 0:
+        raise ValueError('review_identity_invalid')
+    attrs = dict(source_stream='llm_scenario_review_tapes',source_rowid=row['source_rowid'],
+        decision_slot=row['slot'],body_sha256=_hash(row['body']),observation_origin='OBSERVED_NOT_CURRENT',
+        source_time_basis='UNKNOWN_EVENT_TIME_EXPORT_OBSERVATION_ONLY',
+        evidence_scope='RETAINED_REVIEW_TAPE_NOT_EXECUTION_OR_PROFIT_PROOF')
+    attrs.update(_review_manifest(source,row['slot'],manifest_cache=manifest_cache))
+    attrs.update(_hash_fields(body,('sha256','inputs_sha256')))
+    # Tape digests use ensure_ascii=True, unlike the model request digest.
+    unsealed = {key:value for key,value in body.items() if key != 'sha256'}
+    sealed_hash = _hash(json.dumps(unsealed,sort_keys=True,separators=(',',':'),allow_nan=False))
+    attrs['tape_hash_status'] = 'MATCH' if body.get('sha256') == sealed_hash else 'UNKNOWN_OR_CONFLICT'
+    inputs = body.get('inputs')
+    if isinstance(inputs,dict):
+        attrs.update(_references(inputs.get('context')))
+        if attrs.get('input_id_ref'):
+            for field in ('source_git_revision','source_policy_hash','source_execution_hash',
+                          'manifest_ref','manifest_sha256','loaded_code_status'):
+                attrs.pop(field,None)
+            attrs.update(_review_manifest(source,row['slot'],attrs['input_id_ref'],manifest_cache))
+        computed_inputs = _hash(json.dumps(inputs,sort_keys=True,separators=(',',':'),allow_nan=False))
+        attrs['inputs_hash_status'] = 'MATCH' if body.get('inputs_sha256') == computed_inputs else 'UNKNOWN_OR_CONFLICT'
+        bindings = inputs.get('bindings')
+        if isinstance(bindings,dict):
+            attrs['review_policy_binding_sha256'] = _hash(_json(bindings))
+            if bindings.get('policy') in ('calculated-review-v1','allocation-single','allocation-calculated',
+                    'action-allocation-single-v1','action-allocation-calculated-v1',
+                    'economic-reject-single-v1','economic-reject-calculated-v1'):
+                attrs['review_policy'] = bindings['policy']
+            sources = bindings.get('source_sha256')
+            if isinstance(sources,dict):
+                attrs['binding_source_count'] = len(sources)
+                attrs['binding_sources_sha256'] = _hash(_json(sources))
+            parity = bindings.get('loaded_parity')
+            attrs['review_loaded_parity_status'] = ('VERIFIED' if isinstance(parity,dict) and parity
+                and all(value == 'VERIFIED' for value in parity.values()) else 'UNKNOWN_OR_MIXED')
+    if type(body.get('calls')) is int and 0 <= body['calls'] <= 2:
+        attrs['model_call_count'] = body['calls']
+    outcome = body.get('outcome')
+    if isinstance(outcome,dict):
+        if outcome.get('status') in ('COMPLETE','FAILED'):
+            attrs['review_outcome_status'] = outcome['status']
+        result = outcome.get('result')
+        if isinstance(result,dict):
+            attrs.update(_hash_fields(result,('bundle_sha256',)))
+            attrs['selected'] = _review_candidate(result.get('selected'))
+    operations = body.get('operations')
+    if isinstance(operations,list):
+        attrs['operation_count'] = len(operations)
+        generated = [op for op in operations[:128] if isinstance(op,dict) and op.get('kind')=='generate']
+        attrs['request_refs_complete'] = len(operations) <= 128 and len(generated)<=2
+        attrs['request_refs'] = []
+        for operation in operations[:128]:
+            if isinstance(operation,dict) and operation.get('kind') == 'generate' and isinstance(operation.get('request'),dict):
+                request = operation['request']
+                attrs['request_refs'].append(dict(actual_request_sha256=_hash(_json(request)),
+                    **({'raw_sha256':_hash(operation['text'])} if isinstance(operation.get('text'),str) else {})))
+                if len(attrs['request_refs']) >= 2:
+                    break
+    _queue(state,identity,'llm_scenario_review_tapes:'+str(row['source_rowid']),'review_tape',attrs,now)
+
+
+def _capture(source, state, identity, stream, row, manifest_cache=None):
     now = time.time()
     if stream == 'llm_scenario_outbox':
         _notice(state, identity, row, now)
@@ -274,6 +497,12 @@ def _capture(source, state, identity, stream, row):
     body = json.loads(raw)
     if not isinstance(body, dict):
         raise ValueError('source_body_not_object')
+    if stream == 'llm_scenario_review_events':
+        _capture_review(source, state, identity, row, body, now, manifest_cache)
+        return
+    if stream == 'llm_scenario_review_tapes':
+        _capture_review_tape(source,state,identity,row,body,now,manifest_cache)
+        return
     kind = row['kind']
     attrs = {'source_stream': stream, 'source_rowid': row['source_rowid'],
              'source_kind': kind if re.fullmatch(r'[A-Za-z_]{1,80}', kind) else 'UNKNOWN',
@@ -365,7 +594,7 @@ def _append(event, spool_path):
 
 
 def export_once(db_path, state_path, spool_path, limit=100):
-    """Fail-open bounded append export. First call records cutover, not history."""
+    """Old streams retain cutover; new review stream explicitly drains retained history."""
     source = state = None
     counts = {'status': 'UNAVAILABLE', 'captured': 0, 'emitted': 0, 'pending': 0,
               'source_bytes': 0, 'backlog': False, 'source_errors': []}
@@ -379,6 +608,8 @@ def export_once(db_path, state_path, spool_path, limit=100):
         source.row_factory = sqlite3.Row
         source.execute('PRAGMA query_only=ON')
         source.execute('BEGIN')
+        # Transaction-local only: later audit flushes become visible next call.
+        manifest_cache = {}
         tables = {r[0] for r in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         state_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(state_path, os.O_CREAT | os.O_WRONLY, 0o600)
@@ -398,18 +629,23 @@ def export_once(db_path, state_path, spool_path, limit=100):
             cursor = _query(state, 'cursor', parameters=(stream,)).fetchone()
             maximum = _query(source, (stream, 0)).fetchone()[0] or 0
             if cursor is None:
-                _query(state, 'save_cursor', parameters=(stream, maximum))
-                anchor = _query(source, (stream, 1), parameters=(maximum,)).fetchone()
-                _query(state, 'save_anchor', parameters=(stream, _hash(anchor[0]) if anchor else None))
+                backfill = stream in ('llm_scenario_review_events','llm_scenario_review_tapes')
+                cutover = 0 if backfill else maximum
+                _query(state, 'save_cursor', parameters=(stream, cutover))
+                anchor = _query(source, (stream, 1), parameters=(cutover,)).fetchone()
+                _query(state, 'save_anchor', parameters=(stream, _anchor_hash(stream, anchor)))
                 _queue(state, identity, 'coverage:' + stream, 'coverage',
-                       {'stream': stream, 'coverage_start_after_rowid': maximum,
-                        'historical_backfill': False}, time.time())
+                       {'stream': stream, 'coverage_start_after_rowid': cutover,
+                        'historical_backfill': backfill,
+                        **({'retained_backfill_through_rowid':maximum,
+                            'coverage_policy':'RETAINED_HISTORY_NOT_CURRENT_STATE'} if backfill else {})}, time.time())
+                counts['backlog'] |= backfill and maximum > 0
                 continue
             if maximum < cursor[0]:
                 raise ValueError('source_rowid_regressed')
             anchor = _query(source, (stream, 1), parameters=(cursor[0],)).fetchone()
             expected = _query(state, 'anchor', parameters=(stream,)).fetchone()
-            if not expected or expected[0] != (_hash(anchor[0]) if anchor else None):
+            if not expected or expected[0] != _anchor_hash(stream, anchor):
                 raise ValueError('source_anchor_changed')
             if state.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] >= 1000:
                 break
@@ -424,9 +660,9 @@ def export_once(db_path, state_path, spool_path, limit=100):
                     break
                 state.execute('SAVEPOINT source_row')
                 try:
-                    _capture(source, state, identity, stream, row)
+                    _capture(source, state, identity, stream, row, manifest_cache)
                     _query(state, 'update_cursor', parameters=(row['source_rowid'], stream))
-                    _query(state, 'update_anchor', parameters=(_hash(row['body']), stream))
+                    _query(state, 'update_anchor', parameters=(_anchor_hash(stream, row), stream))
                     state.execute('RELEASE source_row')
                     counts['captured'] += 1
                     counts['source_bytes'] += size

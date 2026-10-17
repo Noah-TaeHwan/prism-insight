@@ -121,7 +121,10 @@ def test_production_shapes_preserve_safe_scalars_and_exact_slot_without_source_w
     source = populate(production_lane)
     events = capture(production_lane, monkeypatch)
     attrs = [event["attributes"] for event in events if event["event_type"] == "btc.research.source"]
-    assert {row["source_stream"] for row in attrs} == set(export.STREAMS) - {"llm_scenario_outbox"}
+    # This fixture contains the four original source tables; review streams have
+    # separate retained-history and wire-shape coverage.
+    assert {row["source_stream"] for row in attrs} == set(export.STREAMS) - {
+        "llm_scenario_outbox", "llm_scenario_review_events", "llm_scenario_review_tapes"}
     assert "historical_before_cutover" not in {row["source_kind"] for row in attrs}
     account, = [row for row in attrs if row["source_kind"] == "account"]
     leaves = values(account["facts"])
