@@ -25,20 +25,20 @@ export function ProjectFooter() {
                   </span>
                 </p>
                 <div className="pt-2">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <div className="flex items-center gap-1">
                       <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                      <span>GPT-4.1</span>
+                      <span>GPT-6.1 Sol</span>
                     </div>
                     <span>•</span>
                     <div className="flex items-center gap-1">
                       <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                      <span>GPT-5.1</span>
+                      <span>GPT-6 Luna</span>
                     </div>
                     <span>•</span>
                     <div className="flex items-center gap-1">
                       <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-                      <span>Claude 4.5</span>
+                      <span>Claude Sonnet 5.5</span>
                     </div>
                   </div>
                 </div>
@@ -126,7 +126,7 @@ export function ProjectFooter() {
                         About PRISM-INSIGHT
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {t("footer.landingDesc") || "Project introduction & features"}
+                        {t("footer.landingDesc")}
                       </div>
                     </div>
                   </a>
@@ -152,7 +152,7 @@ export function ProjectFooter() {
               <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-muted-foreground">
                 <div className="flex flex-col md:flex-row items-center gap-2">
                   <div className="flex items-center gap-2">
-                    <span>© 2025 PRISM-INSIGHT</span>
+                    <span>© 2025–2026 PRISM-INSIGHT</span>
                     <span className="hidden md:inline">•</span>
                     <span className="text-xs">All rights reserved</span>
                   </div>
