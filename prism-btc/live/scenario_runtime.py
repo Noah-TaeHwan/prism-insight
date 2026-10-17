@@ -33,6 +33,40 @@ REQUIRED_CAPABILITIES = frozenset({"exact_fills", "atomic_protection",
 
 
 @contextmanager
+def _snapshot_mutation_lock(conn, diagnostics):
+    """Wait only for OS-lock acquisition, never retry input persistence work."""
+    started = None
+    with ExitStack() as stack:
+        while True:
+            if started is not None:
+                elapsed = time.monotonic()-started
+                diagnostics["lock_wait_seconds"] = round(elapsed, 3)
+                if elapsed >= 20:
+                    raise LockBusy("lock_busy")
+            try:
+                stack.enter_context(mutation_lock(conn))
+                break
+            except LockBusy:
+                if conn.in_transaction:
+                    raise
+                if started is None:
+                    started = time.monotonic()
+                diagnostics["contended"] = True
+                remaining = 20-(time.monotonic()-started)
+                if remaining <= 0:
+                    diagnostics["lock_wait_seconds"] = round(time.monotonic()-started, 3)
+                    raise
+                time.sleep(min(.25, remaining))
+        if started is not None:
+            elapsed = time.monotonic()-started
+            diagnostics["lock_wait_seconds"] = round(elapsed, 3)
+            if elapsed >= 20:
+                raise LockBusy("lock_busy")
+        # Guarded-body LockBusy must escape, not re-enter the acquisition loop.
+        yield
+
+
+@contextmanager
 def _post_model_mutation_lock(conn):
     """Briefly wait for protection; retry acquisition, never the guarded work."""
     deadline = time.monotonic() + 20
@@ -450,6 +484,7 @@ class ScenarioRuntime:
         """One synchronous tick; callers may run independent protection separately."""
         slot = int(self.clock() // 300)
         stage = "initial_reconcile"
+        snapshot_lock = {"contended": False, "lock_wait_seconds": 0.}
         try:
             if (getattr(self.broker, "environment", None) != "demo" or
                     getattr(self.broker, "lane", None) != "MAIN"):
@@ -487,11 +522,30 @@ class ScenarioRuntime:
             ctx.update(now=self.clock(), input_id=input_id, input_captured_at=captured,
                        max_input_age_seconds=120)
             stage = "snapshot_persist"
-            with mutation_lock(self.conn):
+            with _snapshot_mutation_lock(self.conn, snapshot_lock):
+                current = self.state()
+                now = self.clock()
+                account_at = ctx.get("account_captured_at")
+                reason = None
+                if not _finite(now):
+                    reason = "snapshot_stale"
+                elif current["version"] != version:
+                    reason = "snapshot_state_changed"
+                elif int(now//300) != slot:
+                    reason = "snapshot_slot_changed"
+                elif not 0 <= now-captured <= 120:
+                    reason = "snapshot_stale"
+                elif ((snapshot_lock["contended"] or account_at is not None)
+                        and (not _finite(account_at) or not 0 <= now-account_at <= 120)):
+                    reason = "snapshot_account_stale"
+                if reason:
+                    outcome = {"status": "stale_proposal", "reason": reason,
+                               "failure_stage": stage, "model_called": False}
+                    if snapshot_lock["contended"]:
+                        outcome["lock_wait_seconds"] = snapshot_lock["lock_wait_seconds"]
+                    return outcome
+                ctx["now"] = now
                 if ctx.get("recovery_observing"):
-                    current = self.state()
-                    if current["version"] != version:
-                        return {"status": "stale_proposal"}
                     recovery.prepare_input(self.conn, current, ctx, snap, slot, self.clock())
                     # Baseline, mandatory INPUT and the full decision input must
                     # share one commit. _save() would commit the baseline early.
@@ -741,7 +795,10 @@ class ScenarioRuntime:
             return {"status": "blocked", "reason": reason}
         except LockBusy:
             self.conn.rollback()
-            return {"status":"lock_busy","reason":"another_protection_or_execution_tick"}
+            outcome = {"status":"lock_busy","reason":"another_protection_or_execution_tick"}
+            if stage == "snapshot_persist":
+                outcome.update(failure_stage=stage, lock_wait_seconds=snapshot_lock["lock_wait_seconds"])
+            return outcome
         except Exception as exc:
             # No exception text/account data enters public notifications. Previously
             # committed intents and slot claims survive all failures.
