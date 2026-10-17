@@ -420,6 +420,7 @@ class ScenarioRuntime:
                 if permit.get("policy_version") == 2:
                     ctx["recovery"].update(current_stage=permit["stage"], offered_stage=permit["stage"],
                         policy_version=2, one_attempt_only=False, automatic_normal_resume=True,
+                        promotion_rule_version=permit["stage_evidence"].get("promotion_rule_version"),
                         promotion_evidence=permit["stage_evidence"])
                 ctx["recovery_normal_permission"] = recovery.normal_permission(state, active, ctx)
         ctx["new_risk_blocked"] = bool(ctx["new_risk_blocked"] or (

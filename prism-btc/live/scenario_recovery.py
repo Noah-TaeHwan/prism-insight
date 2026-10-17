@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from decimal import Decimal
 import hashlib
 import json
 import math
@@ -42,6 +43,7 @@ def ensure_schema(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS llm_scenario_recovery_events (
         event_id TEXT PRIMARY KEY, slot INTEGER, scenario_id TEXT,
         kind TEXT NOT NULL, observed_at REAL NOT NULL, body TEXT NOT NULL)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS llm_scenario_recovery_source_lookup ON llm_scenario_recovery_events(scenario_id,kind)")
 
 
 def journal(conn, kind, body, now, *, slot=None, scenario_id=None):
@@ -49,8 +51,10 @@ def journal(conn, kind, body, now, *, slot=None, scenario_id=None):
         row = conn.execute("SELECT context FROM llm_scenario_decisions WHERE slot=?", (slot,)).fetchone()
         if row and row[0]:
             body = dict(body, input_id=json.loads(row[0]).get("input_id"))
+    event_id = str(uuid.uuid4())
     conn.execute("INSERT INTO llm_scenario_recovery_events VALUES(?,?,?,?,?,?)",
-                 (str(uuid.uuid4()), slot, scenario_id, kind, now, encoded(body)))
+                 (event_id, slot, scenario_id, kind, now, encoded(body)))
+    return event_id
 
 
 @contextmanager
@@ -171,15 +175,160 @@ def _confirmed(settlement, scenario_id):
                              + settlement["funding_net"], abs_tol=1e-8))
 
 
-def _stage_evidence(equity):
-    return {"filled_count": 0, "net_pnl": 0., "peak_net_pnl": 0.,
+def _stage_evidence(equity, *, rule_version=2, window_origin=None):
+    result = {"filled_count": 0, "net_pnl": 0., "peak_net_pnl": 0.,
             "max_realized_drawdown": 0., "stage_start_equity": equity,
-            "promotion_rule_version": 2, "positive_count": 0}
+            "promotion_rule_version": rule_version, "positive_count": 0}
+    if rule_version == 3:
+        result.update(window=[], window_origin=window_origin, net_wins=0., net_losses=0.)
+    return result
+
+
+def _window_metrics(rows):
+    if not isinstance(rows, list) or len(rows) > 6:
+        raise ValueError("normalization_state_invalid")
+    seen = set()
+    total = peak = drawdown = wins = losses = Decimal(0)
+    positives = 0
+    previous_time = 0
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {"scenario_id", "settlement_hash", "net_pnl", "settled_at"}
+                or not isinstance(row["scenario_id"], str) or not row["scenario_id"]
+                or row["scenario_id"] in seen or not isinstance(row["settlement_hash"], str)
+                or len(row["settlement_hash"]) != 64
+                or any(c not in '0123456789abcdef' for c in row["settlement_hash"])
+                or not _number(row["net_pnl"]) or not _number(row["settled_at"])
+                or row["settled_at"] <= 0 or row["settled_at"] < previous_time):
+            raise ValueError("normalization_state_invalid")
+        seen.add(row["scenario_id"])
+        previous_time = row["settled_at"]
+        pnl = Decimal(str(row["net_pnl"]))
+        total += pnl
+        wins += max(pnl, Decimal(0))
+        losses += max(-pnl, Decimal(0))
+        positives += int(pnl > 0)
+        peak = max(peak, total)
+        drawdown = max(drawdown, peak-total)
+    result = dict(filled_count=len(rows), positive_count=positives, net_pnl=float(total),
+        peak_net_pnl=float(peak), max_realized_drawdown=float(drawdown),
+        net_wins=float(wins), net_losses=float(losses))
+    if any(not _number(value) for value in result.values()):
+        raise ValueError("normalization_state_invalid")
+    return result
+
+
+def _validate_canonical_window(conn, recovery):
+    """Bind the complete window, not merely a cherry-picked subset of true rows."""
+    evidence = recovery["stage_evidence"]
+    try:
+        if recovery.get("phase") == "CONSUMED":
+            rows = conn.execute("SELECT body FROM llm_scenario_recovery_events WHERE kind='PERMIT_CONSUMED' AND scenario_id=?",
+                                (recovery.get("scenario_id"),)).fetchall()
+            proof = json.loads(rows[0][0]) if len(rows) == 1 else {}
+            if (all(proof.get(key) == recovery.get(key) for key in
+                    ("policy_version", "epoch_id", "stage", "scenario_id", "permit_id"))
+                    and proof.get("stage_evidence") == evidence):
+                return
+        elif recovery.get("phase") == "OBSERVING":
+            previous_time = 0
+            previous = recovery.get("previous_scenario_id")
+            if previous is not None:
+                rows = conn.execute("SELECT observed_at,body FROM llm_scenario_recovery_events WHERE kind='SETTLEMENT' AND scenario_id=?",
+                                    (previous,)).fetchall()
+                if len(rows) != 1:
+                    raise ValueError("normalization_state_invalid")
+                previous_time, body = rows[0][0], json.loads(rows[0][1])
+                prior = body.get("stage_evidence") or {}
+                if prior.get("window_origin") == evidence.get("window_origin"):
+                    rearms = conn.execute("SELECT body FROM llm_scenario_recovery_events WHERE kind='REARM' AND scenario_id=?",
+                                          (previous,)).fetchall()
+                    after = json.loads(rearms[0][0]).get("after", {}) if len(rearms) == 1 else {}
+                    if (prior != evidence or after.get("stage_evidence") != evidence
+                            or any(after.get(key) != recovery.get(key) for key in ("epoch_id", "stage", "policy_version"))):
+                        raise ValueError("normalization_state_invalid")
+                    return
+            # Only a real recorded migration may establish a new empty origin.
+            record = conn.execute("SELECT kind,observed_at,body FROM llm_scenario_recovery_events WHERE event_id=?",
+                                  (recovery.get("bootstrap_evidence_event_id"),)).fetchone()
+            if record and record[1] >= previous_time:
+                body = json.loads(record[2])
+                expected = body.get("after", {})
+                if record[0] == "MIGRATION":
+                    valid = (expected.get("epoch_id") == recovery.get("epoch_id")
+                        and expected.get("stage") == recovery.get("stage")
+                        and expected.get("stage_evidence") == evidence)
+                elif record[0] == "PROMOTION_RULE_MIGRATION":
+                    valid = (body.get("epoch_id") == recovery.get("epoch_id")
+                        and body.get("stage") == recovery.get("stage") and expected == evidence)
+                else:
+                    valid = False
+                if valid and evidence.get("window") == []:
+                    return
+    except (AttributeError, TypeError, KeyError, ValueError):
+        pass
+    raise ValueError("normalization_state_invalid")
+
+
+def _validate_window_sources(conn, recovery):
+    evidence = recovery["stage_evidence"]
+    if evidence.get("promotion_rule_version") != 3:
+        return
+    _window_metrics(evidence.get("window"))
+    _validate_canonical_window(conn, recovery)
+    for row in evidence["window"]:
+        stored = conn.execute("SELECT evidence FROM llm_scenario_settlements WHERE scenario_id=?",
+                              (row["scenario_id"],)).fetchone()
+        try:
+            proof = json.loads(stored[0]) if stored else None
+            valid = (isinstance(proof, dict) and _confirmed(proof, row["scenario_id"])
+                     and bool(proof["execution_ids"]) and digest(proof) == row["settlement_hash"]
+                     and proof["net_pnl"] == row["net_pnl"])
+            events = conn.execute("SELECT observed_at,body FROM llm_scenario_recovery_events WHERE kind='SETTLEMENT' AND scenario_id=?",
+                                  (row["scenario_id"],)).fetchall()
+            valid = valid and len(events) == 1 and events[0][0] == row["settled_at"] and json.loads(events[0][1]).get("settlement") == proof
+            permits = conn.execute("SELECT body FROM llm_scenario_recovery_events WHERE kind='PERMIT_CONSUMED' AND scenario_id=?",
+                                   (row["scenario_id"],)).fetchall()
+            permit = json.loads(permits[0][0]) if len(permits) == 1 else {}
+            valid = (valid and permit.get("permit_id") == json.loads(events[0][1]).get("permit_id")
+                and permit.get("policy_version") == 2 and permit.get("epoch_id") == recovery.get("epoch_id")
+                and permit.get("stage") == recovery.get("stage")
+                and permit.get("scenario_id") == row["scenario_id"]
+                and (permit.get("stage_evidence") or {}).get("promotion_rule_version") == 3
+                and (permit.get("stage_evidence") or {}).get("window_origin") == evidence.get("window_origin"))
+        except (AttributeError, TypeError, ValueError, KeyError):
+            valid = False
+        if not valid:
+            raise ValueError("normalization_state_invalid")
+
+
+def _migrate_promotion_rule(conn, state, ctx, now):
+    old = state["recovery"]
+    offered_stage(old)  # Never repair corrupted legacy evidence by erasing it.
+    if old["stage_evidence"].get("promotion_rule_version") == 3:
+        _validate_window_sources(conn, old)
+        return False
+    if (old.get("phase") != "OBSERVING" or state.get("active") is not None
+            or not hard_guards(state, ctx) or ctx.get("positions") != [] or ctx.get("pending_entries") != []
+            or conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status IS NULL OR status!='TERMINAL'").fetchone()):
+        return False
+    equity = ctx.get("initial_equity")
+    if not _number(equity) or equity <= 0:
+        return False
+    new = _stage_evidence(equity, rule_version=3, window_origin=digest({"epoch":old["epoch_id"],
+        "before":old["stage_evidence"], "version":state["version"], "at":now, "kind":"promotion_rule_migration"}))
+    event_id = journal(conn, "PROMOTION_RULE_MIGRATION", {"before": old["stage_evidence"], "after": new,
+        "epoch_id":old["epoch_id"], "stage": old["stage"], "reason": "prospective_cost_net_window_no_legacy_backfill"}, now)
+    old["stage_evidence"] = new
+    old["bootstrap_evidence_event_id"] = event_id
+    state["version"] += 1
+    return True
 
 
 def migrate(conn, state, ctx, now):
     """Called under runtime mutation lock; never resets the breaker or financials."""
     old = state.get("recovery", {})
+    if old.get("policy_version") == 2:
+        return _migrate_promotion_rule(conn, state, ctx, now)
     if (old.get("policy_version", 1) not in (1,) or state.get("active") is not None
             or not hard_guards(state, ctx) or ctx.get("positions") != []
             or ctx.get("pending_entries") != []
@@ -201,13 +350,16 @@ def migrate(conn, state, ctx, now):
                 return False
         except (TypeError, ValueError):
             return False
-    new = {"policy_version": 2, "epoch_id": str(uuid.uuid4()), "stage": 0,
+    epoch_id = str(uuid.uuid4())
+    new = {"policy_version": 2, "epoch_id": epoch_id, "stage": 0,
            "phase": "OBSERVING", "started_at": now, "epoch_start_equity": equity,
-           "stage_evidence": _stage_evidence(equity),
+           "stage_evidence": _stage_evidence(equity, rule_version=3,
+               window_origin=digest({"epoch":epoch_id,"at":now,"kind":"initial_normalization"})),
            "previous_permit_id": old.get("permit_id"),
            "previous_scenario_id": old.get("scenario_id")}
-    journal(conn, "MIGRATION", {"before": old, "after": new,
+    event_id = journal(conn, "MIGRATION", {"before": old, "after": new,
             "prior_settlement_hash": digest(previous) if previous else None}, now)
+    new["bootstrap_evidence_event_id"] = event_id
     state["recovery"] = new
     state["version"] += 1
     return True
@@ -216,6 +368,24 @@ def migrate(conn, state, ctx, now):
 def offered_stage(recovery):
     stage = recovery.get("stage", 0)
     evidence = recovery.get("stage_evidence", {})
+    if not isinstance(evidence, dict):
+        raise ValueError("normalization_state_invalid")
+    if recovery.get("policy_version") == 2 and evidence.get("promotion_rule_version") == 3:
+        if type(stage) is not int or stage not in range(3) or type(evidence["promotion_rule_version"]) is not int:
+            raise ValueError("normalization_state_invalid")
+        metrics = _window_metrics(evidence.get("window"))
+        origin = evidence.get("window_origin")
+        if not isinstance(origin, str) or len(origin) != 64 or any(c not in '0123456789abcdef' for c in origin):
+            raise ValueError("normalization_state_invalid")
+        if any(type(evidence.get(k)) is not type(v) or evidence[k] != v for k, v in metrics.items()):
+            raise ValueError("normalization_state_invalid")
+        equity = evidence.get("stage_start_equity")
+        if (equity is None and evidence["window"]) or (equity is not None and (not _number(equity) or equity <= 0)):
+            raise ValueError("normalization_state_invalid")
+        if (stage < 2 and metrics["positive_count"] >= 2 and metrics["net_pnl"] > 0
+                and metrics["max_realized_drawdown"] <= STAGE_FRACTIONS[stage]*equity):
+            return stage+1
+        return stage
     if recovery.get("policy_version") == 2:
         fields = ("net_pnl", "peak_net_pnl", "max_realized_drawdown")
         if (type(stage) is not int or stage not in range(3) or not isinstance(evidence, dict)
@@ -345,8 +515,11 @@ def prepare_input(conn, state, context, snapshot, slot, now):
     if recovery.get("policy_version") == 2:
         metadata.update(current_stage=recovery["stage"], offered_stage=offered_stage(recovery),
                         promotion_evidence=recovery["stage_evidence"],
+                        promotion_rule_version=recovery["stage_evidence"].get("promotion_rule_version"),
                         required_positive_settlements=2,
-                        promotion_basis="prospective_filled_closed_confirmed_net_pnl_positive",
+                        promotion_basis=("prospective_last6_filled_confirmed_cost_net_realized_drawdown"
+                            if recovery["stage_evidence"].get("promotion_rule_version") == 3 else
+                            "prospective_filled_closed_confirmed_net_pnl_positive"),
                         risk_fraction=offered_fraction(state), one_attempt_only=False,
                         automatic_normal_resume=True, policy_version=2)
     context["recovery"] = metadata
@@ -416,6 +589,7 @@ def consume(conn, state, payload, context, slot, now):
         raise ValueError("recovery_probe_risk_invalid")
     if recovery.get("policy_version") == 2:
         evidence = recovery["stage_evidence"]
+        _validate_window_sources(conn, recovery)
         if "promotion_rule_version" not in evidence:
             # Old aggregates include zero-net trades. Preserve them for audit,
             # but never reinterpret them as two new-rule profitable trades.
@@ -433,7 +607,10 @@ def consume(conn, state, payload, context, slot, now):
                     "reason": "confirmed_stage_performance_and_fresh_probe",
                     "evidence": recovery["stage_evidence"], "input_id": context["input_id"]},
                     now, slot=slot, scenario_id=payload["scenario_id"])
-            recovery.update(stage=offered, stage_evidence=_stage_evidence(context["initial_equity"]))
+            recovery.update(stage=offered, stage_evidence=_stage_evidence(context["initial_equity"],
+                rule_version=evidence.get("promotion_rule_version", 2),
+                window_origin=digest({"previous":evidence.get("window_origin"),"scenario":payload["scenario_id"],
+                    "input":context["input_id"],"stage":offered,"kind":"promotion"})))
         recovery["risk_fraction"] = fraction
     recovery.update(phase="CONSUMED", scenario_id=payload["scenario_id"],
                     action_id=payload["action_id"], side=payload["side"],
@@ -547,7 +724,25 @@ def settled(conn, state, settlement, now):
             return
         evidence = recovery["stage_evidence"]
         old_stage = recovery["stage"]
-        if settlement["execution_ids"]:
+        if evidence.get("promotion_rule_version") == 3:
+            offered_stage(recovery)
+            _validate_window_sources(conn, recovery)
+            if settlement["execution_ids"]:
+                if settlement["scenario_id"] in {row["scenario_id"] for row in evidence["window"]}:
+                    return
+                rows = (evidence["window"] + [dict(scenario_id=settlement["scenario_id"],
+                    settlement_hash=digest(settlement), net_pnl=settlement["net_pnl"], settled_at=now)])[-6:]
+                evidence.update(window=rows, **_window_metrics(rows))
+                cap = STAGE_FRACTIONS[old_stage]*evidence["stage_start_equity"]
+                if old_stage > 0 and (evidence["net_pnl"] < 0 or evidence["max_realized_drawdown"] > cap):
+                    recovery["stage"] = old_stage-1
+                    recovery["stage_evidence"] = _stage_evidence(None, rule_version=3,
+                        window_origin=digest({"previous":evidence["window_origin"],"settlement":digest(settlement),
+                            "stage":old_stage-1,"kind":"demotion"}))
+                    journal(conn, "STAGE_TRANSITION", {"before": old_stage, "after": recovery["stage"],
+                        "reason": "cost_net_window_or_realized_drawdown", "settlement": settlement,
+                        "previous_evidence": evidence}, now, scenario_id=settlement["scenario_id"])
+        elif settlement["execution_ids"]:
             pnl = settlement["net_pnl"]
             if pnl < 0:
                 # A loss ends this checkpoint immediately. Consequently the
@@ -573,6 +768,8 @@ def settled(conn, state, settlement, now):
                 now, scenario_id=settlement["scenario_id"])
         previous = {"permit_id": recovery["permit_id"], "scenario_id": recovery["scenario_id"]}
         keep = {key: recovery[key] for key in ("policy_version", "epoch_id", "stage", "stage_evidence", "started_at", "epoch_start_equity")}
+        if "bootstrap_evidence_event_id" in recovery:
+            keep["bootstrap_evidence_event_id"] = recovery["bootstrap_evidence_event_id"]
         keep.update(phase="OBSERVING", previous_permit_id=previous["permit_id"],
                     previous_scenario_id=previous["scenario_id"], settled_at=now)
         journal(conn, "REARM", {"previous": previous, "after": keep,
