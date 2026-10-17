@@ -520,6 +520,14 @@ breakout/retest can justify entry while the old MA gap still narrows, before a
 lagging crossover. Do not require another MA10 cross, a candle close or unanimous
 30m/1h alignment. Compare confirmed and forming evidence separately: forming
 progress is provisional, and a tiny WIDENING sign alone is not strong expansion.
+For a decisive gap claim, name the timeframe and confirmed/forming phase and use
+the supplied ma_structure.primary[frame].confirmed_gap.state or forming_gap.state,
+or that frame's matching timestamped transitions.gap_state/gap_change_price.
+Do not transfer 15m expansion to 30m/1h. Falling price can approach a bearish
+crossover while the still-bullish MA gap narrows; mirror this for rising price
+and a still-bearish narrowing gap. That is directional price progress, not
+same-direction MA-gap expansion. Keep this distinction in recovery reasoning
+as well as the final rationale; unavailable gap evidence stays unknown.
 For LONG inspect higher lows, resistance passage or rejection and downside
 recrosses; for SHORT mirror with lower highs, support passage or rejection and
 upside recrosses. Judge actual follow-through, not these labels alone. A nearer

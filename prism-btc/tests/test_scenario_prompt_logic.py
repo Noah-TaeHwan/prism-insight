@@ -18,7 +18,7 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     expected = {
         'SYSTEM_PROMPT': '2c54109c97b35e193a751e709620da7af161b8119052629d5263527777c693e2',
         'MA_STRUCTURE_PROMPT': '5c9ab2f52121bccac987b7b65d3d5a494b7c7aaa0e79b9a01dc3b03d86785bf8',
-        'FLAT_ENTRY_PROMPT': 'd2889d78f08004701f63672d6fce657e2b29a9fcc3b6a6e5fe54bb5b86d07093',
+        'FLAT_ENTRY_PROMPT': '15f323b7af2c2e0a790f1c12ea819244d8722c8d7214b43a57560d557f98f193',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
                          ('FLAT_ENTRY_PROMPT', FLAT_ENTRY_PROMPT)]:

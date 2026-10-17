@@ -1,6 +1,7 @@
 """Prompt assembly/contract checks, not model behavior or profitability proof."""
 from copy import deepcopy
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,6 +43,14 @@ def test_mirrored_structural_inputs_keep_both_phases_and_host_contract(side, pat
             "Do not require another MA10 cross, a candle close or unanimous 30m/1h alignment",
             "forming progress is provisional",
             "a tiny WIDENING sign alone is not strong expansion",
+            "name the timeframe and confirmed/forming phase",
+            "ma_structure.primary[frame].confirmed_gap.state or forming_gap.state",
+            "matching timestamped transitions.gap_state/gap_change_price",
+            "Do not transfer 15m expansion to 30m/1h",
+            "while the still-bullish MA gap narrows",
+            "a still-bearish narrowing gap",
+            "directional price progress, not same-direction MA-gap expansion",
+            "in recovery reasoning as well as the final rationale",
             "For LONG inspect higher lows",
             "for SHORT mirror with lower highs",
             "not a mandatory short target for every flat entry",
@@ -85,3 +94,57 @@ def test_host_allocation_both_phases_include_priority_without_new_fields():
     assert "Do not emit entry quantity" in calls[0]["system_prompt"]
     assert "Return exactly selection_token and rationale" in calls[1]["system_prompt"]
     assert set(calls[1]["response_schema"]["properties"]) == {"selection_token", "rationale"}
+
+
+@pytest.mark.parametrize("side", ["LONG", "SHORT"])
+def test_mirrored_real_derived_gap_facts_remain_frame_and_phase_specific(side):
+    from live.scenario_calculated_review import research_review
+    from live.scenario_preview import response_contract
+    from tests.test_scenario_ma_context import NOW, point
+
+    ctx = context()
+    ctx.update(now=NOW / 1000, input_captured_at=NOW / 1000, account_captured_at=NOW / 1000)
+    # Price moves toward a cross while the old contrary-order gap contracts.
+    direction = 1 if side == "LONG" else -1
+    frames = {}
+    for frame in ("15m", "30m", "1h"):
+        before_gap, after_gap = (10, 20) if frame == "15m" else (25.86, 6.09)
+        order = direction if frame == "15m" else -direction
+        before = point(frame, 2, close=83410, fast=83410 + order * before_gap, slow=83410)
+        after = point(frame, 1, close=83410 + direction * 20,
+                      fast=83410 + order * after_gap, slow=83410, confirmed=False)
+        frames[frame] = dict(ma_path=dict(version=1, confirmed_points=[before], forming_point=after,
+            confirmed_gap=dict(state="NARROWING", absolute_price=before_gap),
+            forming_gap=dict(state="WIDENING" if frame == "15m" else "NARROWING", absolute_price=after_gap)))
+    snap = dict(valid=True, as_of_ms=NOW, timeframes=frames)
+    before_input = deepcopy((ctx, snap))
+    calls = []
+
+    def generate(**request):
+        calls.append(request)
+        payload = restore_model_input(json.loads(request["user_prompt"]))
+        primary = payload["contract_context"]["ma_structure"]["primary"]
+        assert primary["15m"]["forming_gap"]["state"] == "WIDENING"
+        for frame in ("30m", "1h"):
+            assert primary[frame]["confirmed_gap"]["state"] == "NARROWING"
+            assert primary[frame]["forming_gap"]["state"] == "NARROWING"
+            transition = primary[frame]["transitions"][-1]
+            assert transition["gap_state"] == "NARROWING"
+            assert transition["gap_change_price"] == pytest.approx(-19.77)
+            assert transition["close_change_price"] == direction * 20
+            assert transition["provisional"] is True
+        assert "matching timestamped transitions.gap_state/gap_change_price" in " ".join(request["system_prompt"].split())
+        if len(calls) == 1:
+            candidate, wait = wire(ctx, side), wire(ctx)
+            candidate["expires_at"] = wait["expires_at"] = ctx["now"] + 100
+            reply = dict(wait_proposal=wait, candidates=[candidate], no_candidate_reason="")
+        else:
+            candidate = next(c for c in payload["calculated_candidates"]["candidates"] if c["eligible"])
+            reply = dict(selection_token=f"{candidate['id']}:{candidate['receipt_sha256']}", rationale="fixture")
+        return SimpleNamespace(text=json.dumps(reply))
+
+    result = research_review(snap, ctx, response_contract(ctx), generate=generate,
+                             record=lambda _: None, clock=lambda: ctx["now"])
+    assert len(calls) == 2
+    assert result["selected"]["raw_proposal"]["side"] == side
+    assert (ctx, snap) == before_input
