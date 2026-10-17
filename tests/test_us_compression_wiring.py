@@ -107,6 +107,30 @@ def test_us_compression_derives_us_intuitions(tmp_path):
     assert rows[0][1] == "US"
 
 
+def test_us_intuition_stats_cover_all_batches(tmp_path):
+    """A second batch must not overwrite the win rate with that batch alone (prod: 'avg 0.5%' with 0% wins)."""
+    db = str(tmp_path / "shared.sqlite")
+    _create_minimal_schema(db)
+    for ticker, profit in (("AAPL", 4.0), ("MSFT", 2.0), ("NVDA", 1.0)):
+        _insert_layer2_entry(db, ticker, profit, '["breakout"]', "US")
+    asyncio.run(ctm.run_us_compression(db_path=db, min_entries=3, skip_cleanup=True))
+    for ticker, profit in (("AMD", -3.0), ("TSLA", -2.0), ("META", -1.0)):
+        _insert_layer2_entry(db, ticker, profit, '["breakout"]', "US")
+    asyncio.run(ctm.run_us_compression(db_path=db, min_entries=3, skip_cleanup=True))
+
+    conn = sqlite3.connect(db)
+    rows = conn.execute(
+        "SELECT insight, success_rate, supporting_trades, source_journal_ids "
+        "FROM trading_intuitions WHERE market = 'US' AND is_active = 1").fetchall()
+    conn.close()
+    assert len(rows) == 1
+    insight, success_rate, supporting, source_ids = rows[0]
+    assert insight == "Avg return 0.2% over 6 trades"
+    assert success_rate == 0.5
+    assert supporting == 6
+    assert source_ids == "[1, 2, 3, 4, 5, 6]"
+
+
 def test_us_compression_does_not_touch_kr_rows(tmp_path):
     """KR layer-2 rows must remain untouched (no compression, no KR intuition)."""
     db = str(tmp_path / "shared.sqlite")

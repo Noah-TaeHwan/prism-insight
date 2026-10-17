@@ -49,6 +49,19 @@ def rule(**overrides):
                 supporting_trades=2, success_rate=.5, **overrides)
 
 
+def test_success_rate_is_measured_from_cited_kr_trades_not_llm_guess():
+    mgr = manager()
+    mgr.conn.execute('CREATE TABLE trading_journal (id INTEGER PRIMARY KEY, profit_rate REAL, market TEXT)')
+    mgr.conn.executemany('INSERT INTO trading_journal VALUES (?, ?, ?)',
+                         [(1, 5.0, 'KR'), (2, -3.0, 'KR'), (3, -1.0, 'KR'), (4, 9.0, 'US')])
+    guessed = rule()
+    guessed['success_rate'] = 1.0
+    mgr._save_intuition(guessed, [1, 2])
+    assert mgr.conn.execute('SELECT success_rate FROM trading_intuitions').fetchone() == (.5,)
+    mgr._save_intuition(rule(), [3, 4])  # the US row never counts toward a KR lesson
+    assert mgr.conn.execute('SELECT success_rate FROM trading_intuitions').fetchone() == (.33,)
+
+
 def test_repeated_corpus_does_not_inflate_evidence_or_confidence():
     mgr = manager()
     assert mgr._save_intuition(rule(), [1, 2])

@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import re
+import sqlite3
 import traceback
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
@@ -524,6 +525,19 @@ Extract intuitions from these compressed records.
         logger.error(f"Compression response parse failed. Full response: {response}")
         return {"compressed_entries": [], "new_intuitions": []}
 
+    def _measured_success_rate(self, journal_ids) -> float | None:
+        """Win share of the cited KR journal trades; None (MISSING, not 0) when none are on record."""
+        ids = sorted(journal_ids)
+        if not ids:
+            return None
+        try:
+            cursor = self.conn.execute(
+                f"SELECT * FROM trading_journal WHERE id IN ({','.join('?' * len(ids))})", ids)
+        except sqlite3.Error:
+            return None
+        profits = [row['profit_rate'] for row in self._kr_rows(cursor) if row.get('profit_rate') is not None]
+        return round(sum(p > 0 for p in profits) / len(profits), 2) if profits else None
+
     def _save_intuition(self, intuition: Dict[str, Any], source_ids: List[int]) -> bool:
         """Return true only for an insertion; repeated evidence never raises confidence."""
         try:
@@ -557,11 +571,13 @@ Extract intuitions from these compressed records.
                     SET supporting_trades = ?,
                         source_journal_ids = ?,
                         verified_source_journal_ids = ?,
+                        success_rate = COALESCE(?, success_rate),
                         last_validated_at = ?
                     WHERE id = ?
                 """, (
                     max(existing.get('supporting_trades') or 0, len(verified | evidence)),
-                    json.dumps(sorted(previous | evidence)), json.dumps(sorted(verified | evidence)), now, existing['id']
+                    json.dumps(sorted(previous | evidence)), json.dumps(sorted(verified | evidence)),
+                    self._measured_success_rate(verified | evidence), now, existing['id']
                 ))
             else:
                 if not intuition.get('condition') or not intuition.get('insight'):
@@ -579,7 +595,8 @@ Extract intuitions from these compressed records.
                     intuition.get('insight', ''),
                     intuition.get('confidence', 0.5),
                     len(evidence),
-                    intuition.get('success_rate', 0.5),
+                    # The LLM's success_rate is a guess (seen 0.0/1.0 against ~30% real wins).
+                    self._measured_success_rate(evidence),
                     json.dumps(sorted(evidence)), now, now, 1, json.dumps(sorted(evidence)),
                     json.dumps(normalize_application_context(None, 'KR'), ensure_ascii=False)
                 ))

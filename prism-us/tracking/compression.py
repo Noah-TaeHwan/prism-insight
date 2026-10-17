@@ -204,37 +204,9 @@ class USCompressionManager:
             layer2_entries = self.cursor.fetchall()
 
             if len(layer2_entries) >= min_entries_for_compression:
-                # Extract patterns and create intuitions
-                pattern_groups = {}
+                batch_tags = set()
                 for entry in layer2_entries:
-                    try:
-                        pattern_tags = json.loads(entry[7]) if entry[7] else []
-                        for tag in pattern_tags:
-                            if tag not in pattern_groups:
-                                pattern_groups[tag] = []
-                            pattern_groups[tag].append({
-                                "ticker": entry[1],
-                                "profit_rate": entry[3],
-                                "lessons": json.loads(entry[6]) if entry[6] else []
-                            })
-                    except Exception:
-                        pass
-
-                # Generate intuitions from patterns
-                for pattern, trades in pattern_groups.items():
-                    if len(trades) >= 2:
-                        avg_profit = sum(t["profit_rate"] for t in trades) / len(trades)
-                        success_rate = sum(1 for t in trades if t["profit_rate"] > 0) / len(trades)
-
-                        self._save_intuition(
-                            category=pattern,
-                            condition=f"Pattern: {pattern}",
-                            insight=f"Avg return {avg_profit:.1f}% over {len(trades)} trades",
-                            confidence=min(0.9, 0.4 + success_rate * 0.5),
-                            success_rate=success_rate,
-                            supporting_count=len(trades)
-                        )
-                        results["intuitions_generated"] += 1
+                    batch_tags.update(self._tags(entry[7]))
 
                 # Update entries to Layer 3
                 for entry in layer2_entries:
@@ -244,6 +216,31 @@ class USCompressionManager:
                         WHERE id = ?
                     """, (entry[0],))
                     results["layer2_to_layer3"]["compressed"] += 1
+
+                # Stats per tag cover ALL compressed trades, so text, count and
+                # success rate always describe the same sample (was: latest batch only).
+                self.cursor.execute("""
+                    SELECT id, profit_rate, pattern_tags FROM trading_journal
+                    WHERE compression_layer = 3 AND market = ? AND profit_rate IS NOT NULL
+                """, (self.MARKET,))
+                pattern_groups = {}
+                for entry_id, profit_rate, tags in self.cursor.fetchall():
+                    for tag in self._tags(tags) & batch_tags:
+                        pattern_groups.setdefault(tag, []).append((entry_id, profit_rate))
+
+                for pattern, trades in pattern_groups.items():
+                    if len(trades) >= 2:
+                        avg_profit = sum(p for _, p in trades) / len(trades)
+                        success_rate = sum(1 for _, p in trades if p > 0) / len(trades)
+
+                        results["intuitions_generated"] += self._save_intuition(
+                            category=pattern,
+                            condition=f"Pattern: {pattern}",
+                            insight=f"Avg return {avg_profit:.1f}% over {len(trades)} trades",
+                            confidence=min(0.9, 0.4 + success_rate * 0.5),
+                            success_rate=success_rate,
+                            source_ids=sorted(i for i, _ in trades)
+                        )
 
                 self.conn.commit()
                 logger.info(f"US: Compressed {results['layer2_to_layer3']['compressed']} entries from Layer 2 to Layer 3")
@@ -280,6 +277,14 @@ class USCompressionManager:
             logger.warning(f"US: Failed to fetch hindsight prices: {e}")
             return {}
 
+    @staticmethod
+    def _tags(raw) -> set:
+        try:
+            tags = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return set()
+        return {t for t in tags if isinstance(t, str)} if isinstance(tags, list) else set()
+
     def _save_intuition(
         self,
         category: str,
@@ -287,15 +292,20 @@ class USCompressionManager:
         insight: str,
         confidence: float,
         success_rate: float,
-        supporting_count: int
+        source_ids: List[int]
     ) -> bool:
-        """Save an intuition to database with market='US'."""
+        """Save an intuition to database with market='US'.
+
+        Stats are recomputed over the full sample by the caller, so an update
+        replaces every field together instead of accumulating counts.
+        """
         try:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            encoded_ids = json.dumps(source_ids)
 
             # Check for existing similar intuition
             self.cursor.execute("""
-                SELECT id, supporting_trades
+                SELECT id
                 FROM trading_intuitions
                 WHERE category = ? AND condition = ? AND is_active = 1 AND market = ?
             """, (category, condition, self.MARKET))
@@ -306,21 +316,23 @@ class USCompressionManager:
                 # Update existing
                 self.cursor.execute("""
                     UPDATE trading_intuitions
-                    SET confidence = ?,
+                    SET insight = ?,
+                        confidence = ?,
                         success_rate = ?,
-                        supporting_trades = supporting_trades + ?,
+                        supporting_trades = ?,
+                        source_journal_ids = ?,
                         last_validated_at = ?
                     WHERE id = ?
-                """, (confidence, success_rate, supporting_count, now, existing[0]))
+                """, (insight, confidence, success_rate, len(source_ids), encoded_ids, now, existing[0]))
             else:
                 # Insert new
                 self.cursor.execute("""
                     INSERT INTO trading_intuitions
                     (category, condition, insight, confidence, success_rate,
-                     supporting_trades, created_at, is_active, market)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                     supporting_trades, source_journal_ids, created_at, last_validated_at, is_active, market)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """, (category, condition, insight, confidence, success_rate,
-                      supporting_count, now, self.MARKET))
+                      len(source_ids), encoded_ids, now, now, self.MARKET))
 
             self.conn.commit()
             return True
