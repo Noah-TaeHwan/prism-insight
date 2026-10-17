@@ -570,3 +570,52 @@ def test_material_source_qualifiers_cannot_be_silently_removed(missing):
     mgr._save_intuition(second, [2, 3])
     group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': first['insight'].replace(missing, '')}
     assert mgr._consolidate_intuitions([group]) == 0
+
+
+def _fake_llm_agent(monkeypatch, response):
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def attach_llm(self, _cls):
+            return SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps(response)))
+
+    module = ModuleType('mcp_agent.agents.agent')
+    module.Agent = FakeAgent
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+
+@pytest.mark.asyncio
+async def test_situation_tags_accept_only_listed_regimes_and_sectors(monkeypatch):
+    mgr = manager()
+    mgr.conn.execute('CREATE TABLE watchlist_history (analyzed_date TEXT, scenario TEXT)')
+    mgr.conn.execute("INSERT INTO watchlist_history VALUES ('2999-01-01', ?)", (json.dumps({'sector': '전기·전자'}),))
+    mgr._save_intuition(rule(), [1, 2])
+    other = rule()
+    other.update(condition='약세장 금융주 반등', insight='시장 안정 확인 전 관망')
+    mgr._save_intuition(other, [3, 4])
+    _fake_llm_agent(monkeypatch, {'tags': [
+        {'id': 1, 'regimes': ['bear'], 'sectors': ['전기·전자']},
+        {'id': 2, 'regimes': ['bear'], 'sectors': ['금융']},  # not a sector BUY ever receives
+    ]})
+    assert (await mgr.tag_buy_situations())['tagged'] == 1
+    tags = dict(mgr.conn.execute('SELECT id, situation_tags FROM trading_intuitions'))
+    assert json.loads(tags[1]) == {'regimes': ['bear'], 'sectors': ['전기·전자']}
+    assert tags[2] is None  # stays unrecallable until a valid tag arrives
+
+
+def test_us_manager_saves_and_reads_only_us_memory():
+    conn = sqlite3.connect(':memory:')
+    conn.executescript(TABLE_TRADING_INTUITIONS)
+    conn.execute("ALTER TABLE trading_intuitions ADD COLUMN market TEXT DEFAULT 'KR'")
+    kr = CompressionManager(conn.cursor(), conn, enable_journal=True)
+    us = CompressionManager(conn.cursor(), conn, enable_journal=True, market='US')
+    assert us._save_intuition(rule(), [1, 2])
+    assert conn.execute('SELECT market FROM trading_intuitions').fetchall() == [('US',)]
+    assert kr._active_intuitions() == [] and len(us._active_intuitions()) == 1

@@ -1196,7 +1196,7 @@ class StockTrackingAgent:
                 journal_context = self._get_relevant_journal_context(
                     ticker=ticker,
                     sector=sector,
-                    market_condition=None,
+                    market_condition=self._journal_regime(),
                     trigger_type=trigger_type
                 )
                 if journal_context:
@@ -2948,6 +2948,13 @@ class StockTrackingAgent:
                 "reason": f"deterministic buy gate unavailable: {type(exc).__name__}",
             }
 
+    def _journal_regime(self):
+        """Trigger-batch regime enum (as the scenario stamp), for recalling regime-specific memory."""
+        try:
+            return getattr(self, "_pipeline_market_regime", None) or self._buy_floor_regime()
+        except Exception:  # noqa: BLE001 - unknown regime only narrows recall
+            return None
+
     def _stamp_scenario_market_regime(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
         """Use the trigger-batch regime for gates and user-facing text."""
         try:
@@ -3439,7 +3446,8 @@ class StockTrackingAgent:
             return effects_for(self, "process_reports").journal(ticker)["context"]
         from observability.recent_exit_context import append_recent_exit_context
         try:
-            context = self.journal_manager.get_context_for_ticker(ticker, sector, trigger_type)
+            context = self.journal_manager.get_context_for_ticker(
+                ticker, sector, trigger_type, market_regime=market_condition)
         except Exception as error:  # noqa: BLE001 - optional lessons must not hide canonical facts
             logger.warning("[JOURNAL][KR] narrative unavailable: %s", type(error).__name__)
             context = ""

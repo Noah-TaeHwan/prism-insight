@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS trading_intuitions (
     source_journal_ids TEXT,
     created_at TEXT NOT NULL,
     last_validated_at TEXT,
-    is_active INTEGER DEFAULT 1
+    is_active INTEGER DEFAULT 1,
+    situation_tags TEXT
 );
 
 CREATE TABLE IF NOT EXISTS trading_principles (
@@ -111,22 +112,28 @@ def _setup_db() -> tuple:
     return conn, cur
 
 
+BEAR = {"regimes": ["bear"], "sectors": []}
+
+
 def _insert_intuition(
     cur: sqlite3.Cursor,
     category: str,
     idx: int,
     confidence: float,
     now: str = "2026-01-01 00:00:00",
+    tags=BEAR,
 ) -> None:
     cur.execute(
         """INSERT INTO trading_intuitions
            (category, condition, insight, confidence, supporting_trades,
-            success_rate, source_journal_ids, created_at, last_validated_at, is_active, application_context)
-           VALUES (?, ?, ?, ?, 2, 0.6, '[]', ?, ?, 1, ?)""",
+            success_rate, source_journal_ids, created_at, last_validated_at, is_active, application_context,
+            situation_tags)
+           VALUES (?, ?, ?, ?, 2, 0.6, '[]', ?, ?, 1, ?, ?)""",
         (category, f"{category}_cond_{idx}", f"{category}_ins_{idx}", confidence, now, now,
          json.dumps({"version": 1, "market": "KR", "status": "current_pipeline", "stage": "batch_buy",
                      "required_capabilities": ["batch_report", "entry_advisory"],
-                     "reason": "Reviewed current report check."})),
+                     "reason": "Reviewed current report check."}),
+         None if tags is None else json.dumps(tags)),
     )
 
 
@@ -283,7 +290,7 @@ class TestContextIntuitionDiversity:
             _insert_intuition(self.cur, "volatility", i, 0.50, now)
         self.conn.commit()
 
-        context = self._mgr().get_context_for_ticker("AAPL")
+        context = self._mgr().get_context_for_ticker("AAPL", market_regime="moderate_bear")
         assert context, "Expected non-empty context when intuitions exist"
         assert "#### Accumulated Trading Intuitions" in context
 
@@ -314,7 +321,7 @@ class TestContextIntuitionDiversity:
                 _insert_intuition(self.cur, cat, i, 0.70, now)
         self.conn.commit()
 
-        context = self._mgr().get_context_for_ticker("AAPL")
+        context = self._mgr().get_context_for_ticker("AAPL", market_regime="moderate_bear")
         all_intuition_lines = self._intuition_lines(context)
         assert len(all_intuition_lines) <= INTUITION_TOTAL_LIMIT, (
             f"Total {len(all_intuition_lines)} > limit {INTUITION_TOTAL_LIMIT}"
@@ -329,7 +336,7 @@ class TestContextIntuitionDiversity:
             _insert_intuition(self.cur, "pattern", i, 0.70, now)
         self.conn.commit()
 
-        context = self._mgr().get_context_for_ticker("AAPL")
+        context = self._mgr().get_context_for_ticker("AAPL", market_regime="moderate_bear")
         pattern_lines = [ln for ln in context.split("\n") if ln.startswith("- [pattern]")]
         # Only 5 total: cap pass takes 3, backfill adds 2 → all 5 included
         assert len(pattern_lines) == 5, (
@@ -342,6 +349,44 @@ class TestContextIntuitionDiversity:
         _insert_intuition(self.cur, "pattern", 0, 1.0, now)  # all 5 dots
         self.conn.commit()
 
-        context = self._mgr().get_context_for_ticker("AAPL")
+        context = self._mgr().get_context_for_ticker("AAPL", market_regime="moderate_bear")
         # Format: - [category] condition → insight (Confidence: ●●●●●)
         assert "- [pattern] pattern_cond_0 → pattern_ins_0 (Confidence: ●●●●●)" in context
+
+
+class TestSituationRecall:
+    """Only memory about the current regime/sector is recalled; unrelated memory is left out."""
+
+    def setup_method(self):
+        self.conn, self.cur = _setup_db()
+
+    def teardown_method(self):
+        self.conn.close()
+
+    def _context(self, **kwargs):
+        mgr = JournalManager(cursor=self.cur, conn=self.conn, language="ko", enable_journal=True)
+        return mgr.get_context_for_ticker("005930", **kwargs)
+
+    def test_regime_and_sector_select_the_matching_lessons(self):
+        _insert_intuition(self.cur, "bear", 0, 0.9)
+        _insert_intuition(self.cur, "bull", 0, 0.9, tags={"regimes": ["bull"], "sectors": []})
+        _insert_intuition(self.cur, "chip", 0, 0.9, tags={"regimes": [], "sectors": ["전기·전자"]})
+        _insert_intuition(self.cur, "chipbear", 0, 0.9, tags={"regimes": ["bear"], "sectors": ["전기·전자"]})
+        _insert_intuition(self.cur, "general", 0, 0.9, tags={"regimes": [], "sectors": []})
+        _insert_intuition(self.cur, "untagged", 0, 0.9, tags=None)
+        self.conn.commit()
+
+        bull_chip = self._context(sector="전기·전자", market_regime="strong_bull")
+        assert "bull_cond_0" in bull_chip and "chip_cond_0" in bull_chip
+        assert "bear_cond_0" not in bull_chip and "chipbear_cond_0" not in bull_chip
+
+        bear_bank = self._context(sector="금융", market_regime="moderate_bear — KOSPI below 50MA")
+        assert "bear_cond_0" in bear_bank
+        assert "chip_cond_0" not in bear_bank and "chipbear_cond_0" not in bear_bank
+        for text in (bull_chip, bear_bank):
+            assert "general_cond_0" not in text and "untagged_cond_0" not in text
+
+    def test_unknown_regime_recalls_nothing_regime_specific(self):
+        _insert_intuition(self.cur, "bear", 0, 0.9)
+        self.conn.commit()
+        assert "Accumulated Trading Intuitions" not in self._context(sector="금융", market_regime=None)

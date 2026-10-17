@@ -23,6 +23,7 @@ from observability.events import emit_event
 from trading_memory_policy import (
     ensure_application_columns,
     is_current_buy_memory,
+    matches_situation,
     normalize_application_context,
 )
 
@@ -532,7 +533,8 @@ Please review the following completed trade:
         parts.append("")
         return parts
 
-    def get_context_for_ticker(self, ticker: str, sector: str = None, trigger_type: str = None) -> str:
+    def get_context_for_ticker(self, ticker: str, sector: str = None, trigger_type: str = None,
+                               market_regime: str = None) -> str:
         """Retrieve relevant trading journal context for buy decisions."""
         if not self.enable_journal:
             return ""
@@ -634,9 +636,11 @@ Please review the following completed trade:
                 SELECT * FROM trading_intuitions WHERE is_active = 1
                 ORDER BY confidence DESC
             """)
+            # Recall only memory about the current regime/sector; nothing beats an unrelated lesson.
             all_intuitions = [
                 row for row in self._market_rows()
                 if is_current_buy_memory(row.get("application_context"), "KR")
+                and matches_situation(row.get("situation_tags"), market_regime, sector)
             ]
 
             # First pass: fill up to per-category cap while respecting total limit

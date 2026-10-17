@@ -71,6 +71,7 @@ async def _review_memory_application(manager, market):
             result['consolidated'] = await manager._reconcile_existing_intuitions()
             if result['consolidated']:
                 result['post_consolidation_review'] = await manager.review_memory_applicability(market=market)
+        result['situation_tags'] = await manager.tag_buy_situations()
         logger.info('%s memory applicability review: %s', market, result)
         return result
     except Exception as exc:
@@ -477,7 +478,16 @@ async def run_us_compression(
         logger.info(f"  US Intuitions generated: {results['intuitions_generated']}")
 
         from tracking.compression import CompressionManager
-        application_manager = CompressionManager(cursor, conn, enable_journal=True)
+        application_manager = CompressionManager(cursor, conn, enable_journal=True, market='US')
+        # The tag statistics above are not actionable; extract conditional lessons like KR does.
+        try:
+            refresh = await application_manager.refresh_intuitions()
+            logger.info(f"💡 US Intuitions Refreshed (corpus): generated={refresh.get('intuitions_generated', 0)} "
+                        f"consolidated={refresh.get('intuitions_consolidated', 0)} "
+                        f"corpus={refresh.get('corpus', 0)} extracted={refresh.get('extracted', 0)}")
+            results['refresh'] = refresh
+        except Exception as _re:
+            logger.warning(f"US intuition refresh skipped: {_re}")
         results['application_review'] = await _review_memory_application(application_manager, 'US')
 
         cleanup_results = {}

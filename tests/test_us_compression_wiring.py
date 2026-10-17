@@ -11,10 +11,21 @@ any prism-us package modules — avoiding the documented KR/US ``cores`` shadowi
 
 import asyncio
 import sqlite3
+from unittest.mock import AsyncMock
 from datetime import datetime, timedelta
+
+import pytest
 
 import compress_trading_memory as ctm
 from tracking.db_schema import TABLE_TRADING_INTUITIONS
+
+
+@pytest.fixture(autouse=True)
+def _no_llm(monkeypatch):
+    """These tests cover the deterministic pass; the LLM memory steps have their own tests."""
+    from tracking.compression import CompressionManager
+    for name in ("refresh_intuitions", "review_memory_applicability", "tag_buy_situations"):
+        monkeypatch.setattr(CompressionManager, name, AsyncMock(return_value={}))
 
 
 def _create_minimal_schema(db_path: str) -> None:
