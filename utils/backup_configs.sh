@@ -87,6 +87,15 @@ find $BACKUP_DIR -type f -exec chmod 600 {} \;
 BACKUP_SIZE=$(du -sh $BACKUP_DIR | cut -f1)
 log "백업 완료: $BACKUP_SIZE"
 
+# Only the verified database, its manifest and Git history go offsite, never settings.
+if python3 "$PROJECT_DIR/utils/btc_offsite_archive.py" \
+    --repo "$PROJECT_DIR" --snapshot "$BACKUP_DIR/stock_tracking_db.sqlite.gz" | tee -a "$LOG_FILE"; then
+    log "✓ 별도 서버 DB·Git 복원 검증 ACK 완료"
+else
+    log "CRITICAL: 별도 서버 백업 미확인/비활성; 기존 백업 보존, 보존기간 삭제 중단"
+    exit 1
+fi
+
 # 7일 이상 된 백업 삭제
 log "오래된 백업 정리 중..."
 find $BACKUP_BASE_DIR -maxdepth 1 -type d -mtime +7 ! -path $BACKUP_BASE_DIR -exec rm -rf {} \; 2>/dev/null
