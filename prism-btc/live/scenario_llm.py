@@ -505,6 +505,27 @@ confirmed 15m bars. Ground price/MA claims in current_primary_frame_facts, deriv
 from the same forming observations: bearish MA order is NOT price below both MAs;
 BETWEEN is not BELOW. Missing facts stay unknown, not an entry veto. Mixed price
 position can still support a trade with other concrete evidence, not fabricated alignment.
+Before opportunity framing, compare actual 30m/1h highs/lows, price progress,
+failed breaks, recrosses and rejection with the MA gap path. Prolonged contraction
+with stalled progress or repeated recrosses is not continuation merely because
+old MA order and ABOVE/BELOW persist. If no structural entry edge exists, prefer
+WAIT; small risk cannot repair it. If a limited structural edge exists, compare
+smaller allocation and a nearer first TP before the actual obstacle.
+In calculated review, use host-calculated candidate economics; do not discard
+a structurally justified candidate solely on an estimated-cost impression before
+that calculation. The host still enforces economic and safety limits. Keep SL at structural
+invalidation with noise room, not artificially tight to manufacture reward/risk.
+Contraction alone is not a veto. Fresh directional price progress or a supported
+breakout/retest can justify entry while the old MA gap still narrows, before a
+lagging crossover. Do not require another MA10 cross, a candle close or unanimous
+30m/1h alignment. Compare confirmed and forming evidence separately: forming
+progress is provisional, and a tiny WIDENING sign alone is not strong expansion.
+For LONG inspect higher lows, resistance passage or rejection and downside
+recrosses; for SHORT mirror with lower highs, support passage or rejection and
+upside recrosses. Judge actual follow-through, not these labels alone. A nearer
+first TP is an option for limited room, not a mandatory short target for every
+flat entry; preserve later targets and a strong runner when structure supports
+them. Do not claim that smaller exposure or a nearer TP makes a weak setup valid.
 Higher-frame direction alone is not a veto; concrete current
 4h/longer-frame obstacles still matter through achievable TP/SL and costs and
 can justify WAIT when no executable net-of-cost opportunity remains.

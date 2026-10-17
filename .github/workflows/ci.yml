@@ -294,6 +294,7 @@ jobs:
             prism-btc/tests/test_scenario_normalization_execution.py \
             prism-btc/tests/test_scenario_tp_ladder.py \
             prism-btc/tests/test_scenario_prompt_logic.py \
+            prism-btc/tests/test_scenario_contraction_entry_prompt.py \
             prism-btc/tests/test_scenario_oauth.py \
             prism-btc/tests/test_scenario_preview.py \
             prism-btc/tests/test_scenario_runtime.py \
