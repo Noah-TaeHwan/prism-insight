@@ -13,7 +13,7 @@ import shlex
 import shutil
 import sqlite3
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed git/ssh executables, validated argv, no local shell
 import sys
 import tarfile
 import tempfile
@@ -26,11 +26,63 @@ RAW_CAP = 20 * 1024**3
 REMOTE_ROOT = Path('/root/prism-btc-archive')
 FILES = ('snapshot.sqlite.gz', 'snapshot.manifest.json', 'history.bundle', 'archive.json')
 COMMIT_KEYS = {'git_revision', 'source_commit', 'code_commit', 'source_reference'}
+EVIDENCE_QUERIES = {
+    'llm_scenario_audit_manifests': {'body': 'SELECT body FROM llm_scenario_audit_manifests'},
+    'llm_scenario_audit_events': {'body': 'SELECT body FROM llm_scenario_audit_events'},
+    'llm_scenario_recovery_events': {'body': 'SELECT body FROM llm_scenario_recovery_events'},
+    'llm_scenario_review_events': {'body': 'SELECT body FROM llm_scenario_review_events'},
+    'llm_scenario_decisions': {'context': 'SELECT context FROM llm_scenario_decisions',
+                               'snapshot': 'SELECT snapshot FROM llm_scenario_decisions'},
+    'llm_scenario_review_tapes': {'body': 'SELECT body FROM llm_scenario_review_tapes'},
+}
 
 
 def run(args, *, cwd=None, timeout=600):
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True,
+    if not isinstance(args, list) or not all(isinstance(x, str) and '\x00' not in x for x in args):
+        raise ValueError('invalid_command_argv')
+    if not args or args[0] != 'git':
+        raise ValueError('invalid_command_executable')
+    tail = args[1:]
+    def absolute(path):
+        return Path(path).is_absolute()
+    def commit(value):
+        return re.fullmatch('[0-9a-f]{40}', value) is not None
+    valid = (tail in [['fsck', '--full'], ['rev-parse', 'HEAD'], ['rev-parse', '--git-path', 'objects']]
+             or len(tail) == 3 and tail[:2] == ['cat-file', '-e'] and tail[2].endswith('^{commit}') and commit(tail[2][:-9])
+             or len(tail) == 3 and tail[0] == 'update-ref' and commit(tail[2]) and tail[1] == 'refs/archive-evidence/' + tail[2]
+             or len(tail) == 4 and tail[:2] == ['bundle', 'create'] and absolute(tail[2]) and tail[3] == '--all'
+             or len(tail) == 3 and tail[:2] == ['bundle', 'verify'] and absolute(tail[2])
+             or len(tail) == 6 and tail[:4] == ['clone', '--mirror', '--shared', '--no-hardlinks'] and all(map(absolute, tail[4:]))
+             or len(tail) == 4 and tail[:2] == ['clone', '--bare'] and all(map(absolute, tail[2:])))
+    if not valid or cwd is not None and not Path(cwd).is_absolute():
+        raise ValueError('invalid_git_command')
+    return subprocess.run(['/usr/bin/git', *tail], cwd=cwd, check=True, capture_output=True, shell=False,  # nosec B603  # nosemgrep
                           text=True, timeout=timeout).stdout
+
+
+def validate_host(host):
+    if not isinstance(host, str) or len(host) > 253 or any(
+            not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label) for label in host.split('.')):
+        raise ValueError('invalid_backend_host')
+    if re.fullmatch(r'[0-9.]+', host):
+        ipaddress.IPv4Address(host)
+
+
+def ssh_archive(host, needed, *, stream=None):
+    validate_host(host)
+    if type(needed) is not int or not 0 <= needed <= 4 * RAW_CAP:
+        raise ValueError('invalid_space_requirement')
+    source = Path(__file__).read_text()
+    suffix = ('\nprivate_root(REMOTE_ROOT); space(REMOTE_ROOT, ' + str(needed) + '); print("READY")\n'
+              if stream is None else '\nprint(json.dumps(receive(sys.stdin.buffer, REMOTE_ROOT, ' + str(needed) + ')))\n')
+    command = '/usr/bin/python3 -c ' + shlex.quote(
+        "exec(compile(" + repr(source + suffix) + ", '<archive>', 'exec'), {'__name__':'offsite_receiver'})")
+    # Only this repository's receiver source and a bounded integer reach the remote command.
+    return subprocess.run(['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',  # nosec B603  # nosemgrep
+                           '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
+                           '-o', 'ServerAliveCountMax=3', 'root@' + host, command],
+                          stdin=stream, capture_output=True, check=True, shell=False,
+                          timeout=60 if stream is None else 1800)
 
 
 def digest(path):
@@ -122,16 +174,14 @@ def referenced_commits(raw):
     with closing(sqlite3.connect(raw.as_uri() + '?mode=ro', uri=True)) as db:
         db.set_progress_handler(lambda: int(time.monotonic() > deadline), 10000)
         # Only known evidence columns, not unrelated application secrets/settings.
-        for table in ('llm_scenario_audit_manifests', 'llm_scenario_audit_events',
-                      'llm_scenario_recovery_events', 'llm_scenario_review_events',
-                      'llm_scenario_decisions', 'llm_scenario_review_tapes'):
-            cols = [r[1] for r in db.execute(f'PRAGMA table_info("{table}")')]
+        for table, queries in EVIDENCE_QUERIES.items():
+            cols = [r[0] for r in db.execute('SELECT name FROM pragma_table_info(?)', (table,))]
             if table == 'llm_scenario_audit_manifests':
                 coverage['manifest_table_present'] = bool(cols)
-            for col in ('body', 'context', 'snapshot'):
+            for col, query in queries.items():
                 if col not in cols:
                     continue
-                for (value,) in db.execute(f'SELECT "{col}" FROM "{table}"'):
+                for (value,) in db.execute(query):
                     if time.monotonic() > deadline:
                         raise TimeoutError('commit_scan_deadline')
                     if value is None or value == '':
@@ -258,11 +308,7 @@ def backend_host(config):
             values.append(line.strip().split('=', 1)[1].strip().strip('\"\''))
     if len(values) != 1 or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?', values[0]):
         raise ValueError('invalid_backend_host')
-    if (len(values[0]) > 253 or any(not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
-                                  for label in values[0].split('.'))):
-        raise ValueError('invalid_backend_host')
-    if re.fullmatch(r'[0-9.]+', values[0]):
-        ipaddress.IPv4Address(values[0])
+    validate_host(values[0])
     return values[0]
 
 
@@ -298,25 +344,15 @@ def archive(repo, snapshot, config):
                         code_reference_coverage=coverage, sha256=hashes, required_space=needed)
         meta = stage / 'archive.json'
         meta.write_text(json.dumps(metadata, sort_keys=True))
-        ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-               '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
-               '-o', 'ServerAliveCountMax=3', 'root@' + host]
-        source = Path(__file__).read_text()
-        preflight = source + '\nprivate_root(REMOTE_ROOT); space(REMOTE_ROOT, ' + str(needed) + '); print("READY")\n'
-        # __name__ is not __main__: remote code must not run the local CLI.
-        command = 'python3 -c ' + shlex.quote("exec(compile(" + repr(preflight) + ", '<archive>', 'exec'), {'__name__':'offsite_receiver'})")
-        if run(ssh + [command], timeout=60).strip() != 'READY':
+        if ssh_archive(host, needed).stdout.decode().strip() != 'READY':
             raise ValueError('archive_preflight')
-        receiver = source + '\nprint(json.dumps(receive(sys.stdin.buffer, REMOTE_ROOT, ' + str(needed) + ')))\n'
-        command = 'python3 -c ' + shlex.quote("exec(compile(" + repr(receiver) + ", '<archive>', 'exec'), {'__name__':'offsite_receiver'})")
         # Selected files only; never recurse over the backup directory or copy .env.
         tar_path = stage / 'transfer.tar'
         with tarfile.open(tar_path, 'w') as tar:
             for path, name in ((snapshot, FILES[0]), (manifest_path, FILES[1]), (bundle, FILES[2]), (meta, FILES[3])):
                 tar.add(path, arcname=name, recursive=False)
         with tar_path.open('rb') as stream:
-            completed = subprocess.run(ssh + [command], stdin=stream, capture_output=True,
-                                       check=True, timeout=1800)
+            completed = ssh_archive(host, needed, stream=stream)
         ack = json.loads(completed.stdout)
         if (ack.get('status') != 'VERIFIED' or ack.get('raw_sha256') != manifest['raw_sha256'] or
                 ack.get('compressed_sha256') != hashes[FILES[0]] or ack.get('manifest_sha256') != hashes[FILES[1]] or

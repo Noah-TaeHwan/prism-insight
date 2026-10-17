@@ -15,7 +15,8 @@ from utils import btc_offsite_archive as archive
 
 
 def git(repo, *args):
-    return archive.run(['git', *args], cwd=repo).strip()
+    return subprocess.run(['/usr/bin/git', *args], cwd=repo, capture_output=True,
+                          check=True, text=True, timeout=30).stdout.strip()
 
 
 @pytest.fixture
@@ -273,13 +274,14 @@ def test_local_preparation_upload_and_ack_binding_without_network(payload, monke
     original = subprocess.run
     calls = []
     def transport(args, **kwargs):
-        if args[0] != 'ssh':
+        if args[0] != '/usr/bin/ssh':
             return original(args, **kwargs)
         calls.append(args)
         assert 'StrictHostKeyChecking=yes' in args and 'BatchMode=yes' in args
         assert 'root@archive.example.invalid' in args
-        if 'stdin' not in kwargs:
-            return subprocess.CompletedProcess(args, 0, stdout='READY\n', stderr='')
+        assert kwargs['shell'] is False
+        if kwargs.get('stdin') is None:
+            return subprocess.CompletedProcess(args, 0, stdout=b'READY\n', stderr=b'')
         stream = kwargs['stdin']
         with tarfile.open(fileobj=stream, mode='r:') as tar:
             assert set(tar.getnames()) == set(archive.FILES)
@@ -291,3 +293,31 @@ def test_local_preparation_upload_and_ack_binding_without_network(payload, monke
     ack = archive.archive(repo, snapshot, config)
     assert ack['status'] == 'VERIFIED' and len(calls) == 2
     assert not list(path.glob('.btc-offsite-*'))
+
+
+@pytest.mark.parametrize('args', [[], ['sh', '-c', 'id'], ['git', '-c', 'core.sshCommand=bad', 'fetch'],
+    ['git', 'clone', '--bare', '-option', '/tmp/destination'], ['git', 'checkout', 'HEAD'],
+    ['git', 'cat-file', '-e', 'HEAD'], ['git', 'update-ref', 'refs/heads/main', 'a' * 40],
+    ['git', 'bundle', 'create', 'relative.bundle', '--all'], ['git', None]])
+def test_command_boundary_rejects_unregistered_argv(args, monkeypatch):
+    monkeypatch.setattr(archive.subprocess, 'run', lambda *a, **k: pytest.fail('must not execute'))
+    with pytest.raises(ValueError):
+        archive.run(args)
+
+
+@pytest.mark.parametrize('host', ['host; id', '-oProxyCommand=bad', 'host\nother', 'a.-b', '999.1.2.3'])
+def test_ssh_boundary_validates_host_before_process(host, monkeypatch):
+    monkeypatch.setattr(archive.subprocess, 'run', lambda *a, **k: pytest.fail('must not execute'))
+    with pytest.raises(ValueError):
+        archive.ssh_archive(host, 100)
+
+
+def test_git_boundary_uses_fixed_executable_without_shell(monkeypatch, tmp_path):
+    calls = []
+    def capture(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout='ok')
+    monkeypatch.setattr(archive.subprocess, 'run', capture)
+    assert archive.run(['git', 'rev-parse', 'HEAD'], cwd=tmp_path) == 'ok'
+    assert calls[0][0] == ['/usr/bin/git', 'rev-parse', 'HEAD']
+    assert calls[0][1]['shell'] is False
