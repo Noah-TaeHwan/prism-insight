@@ -13,8 +13,8 @@ import {
 import type { Market } from "@/types/dashboard"
 
 interface DashboardHeaderProps {
-  activeTab: "dashboard" | "ai-decisions" | "trading" | "watchlist" | "insights" | "stance"
-  onTabChange: (tab: "dashboard" | "ai-decisions" | "trading" | "watchlist" | "insights" | "stance") => void
+  activeTab: "dashboard" | "ai-decisions" | "trading" | "watchlist" | "insights" | "ops-report" | "stance"
+  onTabChange: (tab: "dashboard" | "ai-decisions" | "trading" | "watchlist" | "insights" | "ops-report" | "stance") => void
   lastUpdated?: string
   market?: Market
   onMarketChange?: (market: Market) => void
@@ -317,6 +317,13 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
             💡 {t("header.insights")}
           </Button>
           <Button
+            variant={activeTab === "ops-report" ? "secondary" : "ghost"}
+            onClick={() => onTabChange("ops-report")}
+            className="font-medium"
+          >
+            📊 {t("header.opsReport")}
+          </Button>
+          <Button
             variant={activeTab === "stance" ? "secondary" : "ghost"}
             onClick={() => onTabChange("stance")}
             className={`font-medium ${
@@ -370,6 +377,14 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
             className="font-medium whitespace-nowrap"
           >
             💡 {t("header.insights")}
+          </Button>
+          <Button
+            variant={activeTab === "ops-report" ? "secondary" : "ghost"}
+            onClick={() => onTabChange("ops-report")}
+            size="sm"
+            className="font-medium whitespace-nowrap"
+          >
+            📊 {t("header.opsReport")}
           </Button>
           <Button
             variant={activeTab === "stance" ? "secondary" : "ghost"}

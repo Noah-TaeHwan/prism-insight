@@ -12,6 +12,7 @@ import { TradingHistoryPage } from "@/components/trading-history-page"
 import { WatchlistPage } from "@/components/watchlist-page"
 import { TradingInsightsPage } from "@/components/trading-insights-page"
 import { StanceLeaderboardPage } from "@/components/stance-leaderboard-page"
+import { OpsReportPage } from "@/components/ops-report-page"
 import { StockDetailModal } from "@/components/stock-detail-modal"
 import { ProjectFooter } from "@/components/project-footer"
 import { useLanguage } from "@/components/language-provider"
@@ -19,8 +20,8 @@ import { useMarket } from "@/components/market-selector"
 import { TriggerReliabilityBadge } from "@/components/trigger-reliability-badge"
 import type { DashboardData, Holding, Market, ObservabilityInsightsSnapshot } from "@/types/dashboard"
 
-type TabType = "dashboard" | "ai-decisions" | "trading" | "watchlist" | "insights" | "stance"
-const VALID_TABS: TabType[] = ["dashboard", "ai-decisions", "trading", "watchlist", "insights", "stance"]
+type TabType = "dashboard" | "ai-decisions" | "trading" | "watchlist" | "insights" | "ops-report" | "stance"
+const VALID_TABS: TabType[] = ["dashboard", "ai-decisions", "trading", "watchlist", "insights", "ops-report", "stance"]
 
 // Get data file path based on market and language
 function getDataFilePath(market: Market, language: string): string {
@@ -133,9 +134,9 @@ function DashboardContent() {
     setIsRealTrading(isReal)
   }
 
-  // Stance is a standalone public surface. Keep onboarding and the leaderboard
-  // available even when the unrelated portfolio data feed is missing or delayed.
-  if (activeTab === "stance") {
+  // Stance and the ops report are standalone public surfaces. Keep them available
+  // even when the unrelated portfolio data feed is missing or delayed.
+  if (activeTab === "stance" || activeTab === "ops-report") {
     return (
       <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-background">
         <DashboardHeader
@@ -146,7 +147,7 @@ function DashboardContent() {
           onMarketChange={handleMarketChange}
         />
         <main className="container mx-auto w-full min-w-0 max-w-[1600px] px-4 py-6">
-          <StanceLeaderboardPage />
+          {activeTab === "stance" ? <StanceLeaderboardPage /> : <OpsReportPage />}
         </main>
         <ProjectFooter />
       </div>
