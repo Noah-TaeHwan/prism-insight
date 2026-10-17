@@ -61,6 +61,8 @@ def test_runtime_stale_and_rejected_metadata_never_adopted(setup):
     assert runtime.tick()["status"] == "stale_proposal"
     assert len(runtime.state()["active"]["review_memory"]) == 1
     now[0] += 300
+    # This case targets an expired proposal, not an expired account observation.
+    broker.ctx["account_captured_at"] = now[0]
     runtime.propose = lambda s, c: dict(wait_proposal(s, c, action_id="w2", expires_at=c["now"]-1),
         review={"conditions": [condition(120)], "acknowledgements": []})
     assert runtime.tick()["status"] == "blocked"
