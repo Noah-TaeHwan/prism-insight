@@ -535,7 +535,7 @@ class ScenarioRuntime:
                     reason = "snapshot_slot_changed"
                 elif not 0 <= now-captured <= 120:
                     reason = "snapshot_stale"
-                elif ((snapshot_lock["contended"] or account_at is not None)
+                elif (snapshot_lock["contended"]
                         and (not _finite(account_at) or not 0 <= now-account_at <= 120)):
                     reason = "snapshot_account_stale"
                 if reason:

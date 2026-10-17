@@ -207,3 +207,12 @@ def test_contended_invalid_or_future_account_time_blocks_model(setup,monkeypatch
     outcome=r.tick()
     assert outcome['reason']=='snapshot_account_stale'
     assert outcome['model_called'] is False and not b.executed
+
+
+def test_uncontended_legacy_contract_does_not_gain_account_age_gate(setup):  # noqa: F811
+    r,b,now,_=setup
+    b.ctx['account_captured_at']=now[0]-300
+    calls=[]
+    r.propose=lambda s,c:(calls.append(True) or wait_proposal(s,c))
+    assert r.tick()['status']=='wait'
+    assert calls==[True] and not b.executed
