@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import type React from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Accordion,
@@ -15,29 +16,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import {
-  Lightbulb,
-  BookOpen,
-  Brain,
-  TrendingUp,
-  TrendingDown,
-  AlertCircle,
-  CheckCircle,
-  Zap,
-  BarChart3,
-  ArrowUpRight,
-  ArrowDownRight,
-  Timer,
-  Eye,
-  Trophy,
-  XCircle,
-  HelpCircle,
-  Filter,
-  Target,
-  Globe
-} from "lucide-react"
+import { HelpCircle } from "lucide-react"
 import { useLanguage } from "@/components/language-provider"
-import type { TradingInsightsData, TradingPrinciple, TradingJournal, TradingIntuition, SituationAnalysis, JudgmentEvaluation, Market, TriggerReliabilityData, ObservabilityInsightsSnapshot } from "@/types/dashboard"
+import type { TradingInsightsData, SituationAnalysis, JudgmentEvaluation, Market, ObservabilityInsightsSnapshot } from "@/types/dashboard"
 import { TriggerReliabilityCard } from "./trigger-reliability-card"
 import { ObservabilityInsightsPanel } from "./observability-insights-panel"
 
@@ -57,6 +38,69 @@ function tryParseJSON<T>(str: string | T): T | null {
   } catch {
     return null
   }
+}
+
+const CARD = "gap-0 py-0 rounded-lg shadow-none"
+const META_BADGE = "text-[10px] font-normal text-muted-foreground"
+const TH = "h-9 px-2 text-xs font-normal text-muted-foreground whitespace-nowrap text-right first:pl-5 first:text-left last:pr-5"
+const TD_NUM = "px-2 py-2 text-right font-mono tabular-nums text-[13px] last:pr-5"
+const TD_FIRST = "pl-5 pr-2 py-2 font-medium"
+const ROW = "border-b last:border-b-0 hover:bg-muted/50 transition-colors"
+
+// Sign-only coloring for returns
+const signTone = (value: number | null | undefined) =>
+  value === null || value === undefined || value === 0 ? "" : value > 0 ? "text-success" : "text-destructive"
+
+function Help({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger aria-label={text}>
+        <HelpCircle className="w-3 h-3 text-muted-foreground" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        <p>{text}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function SubHeading({ children, help }: { children: React.ReactNode; help?: string }) {
+  return (
+    <h4 className="px-5 text-[13px] font-medium text-foreground flex items-center gap-1.5">
+      {children}
+      {help && <Help text={help} />}
+    </h4>
+  )
+}
+
+function Stat({ label, value, className, sub }: { label: React.ReactNode; value: React.ReactNode; className?: string; sub?: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <span className="text-[13px] text-muted-foreground flex items-center gap-1">{label}</span>
+      <p className={`font-serif text-[1.75rem] sm:text-[2rem] leading-none tracking-tight tabular-nums ${className || ""}`}>
+        {value}
+      </p>
+      {sub && <p className="text-xs text-muted-foreground tabular-nums">{sub}</p>}
+    </div>
+  )
+}
+
+function MiniStat({ label, value, className }: { label: React.ReactNode; value: React.ReactNode; className?: string }) {
+  return (
+    <div className="bg-card p-3">
+      <span className="text-xs text-muted-foreground flex items-center gap-1">{label}</span>
+      <p className={`mt-1 font-mono tabular-nums text-[15px] ${className || ""}`}>{value}</p>
+    </div>
+  )
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      <h3 className="text-base font-semibold tracking-tight">{children}</h3>
+      <div className="flex-1 h-px bg-border" />
+    </div>
+  )
 }
 
 export function TradingInsightsPage({ data, market = "KR", observability }: TradingInsightsPageProps) {
@@ -101,108 +145,56 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
     return `${sign}${value.toFixed(2)}%`
   }
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "high":
-        return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
-      case "medium":
-        return "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20"
-      case "low":
-        return "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
-      default:
-        return "bg-gray-500/10 text-gray-600 dark:text-gray-400"
-    }
-  }
-
-  const getScopeColor = (scope: string) => {
-    switch (scope) {
-      case "universal":
-        return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20"
-      case "sector":
-        return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
-      case "market":
-        return "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20"
-      default:
-        return "bg-gray-500/10 text-gray-600 dark:text-gray-400"
-    }
-  }
+  // High priority stands out by weight, not hue
+  const getPriorityColor = (priority: string) =>
+    priority === "high" ? "border-foreground/30 text-foreground" : "text-muted-foreground"
 
   const getConfidenceBar = (confidence: number) => {
     const percentage = Math.round(confidence * 100)
     return (
       <div className="flex items-center gap-2">
-        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full ${
-              percentage >= 70 ? "bg-green-500" :
-              percentage >= 40 ? "bg-yellow-500" :
-              "bg-red-500"
-            }`}
-            style={{ width: `${percentage}%` }}
-          />
+        <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+          <div className="h-full rounded-full bg-foreground/60" style={{ width: `${percentage}%` }} />
         </div>
-        <span className="text-xs text-muted-foreground w-12">{percentage}%</span>
+        <span className="text-xs text-muted-foreground font-mono tabular-nums w-9 text-right">{percentage}%</span>
       </div>
     )
   }
 
+  const marketBadge = (m: string) => (
+    <Badge variant="outline" className={`${META_BADGE} font-mono`}>{m}</Badge>
+  )
+
+  const filterButton = (value: MarketFilter, label: string) => (
+    <button
+      onClick={() => setMarketFilter(value)}
+      aria-pressed={marketFilter === value}
+      className={`px-3 h-7 rounded-md text-xs transition-colors ${
+        marketFilter === value
+          ? "bg-secondary text-foreground font-medium"
+          : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  )
+
+  const pa = data.performance_analysis
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-lg bg-gradient-to-br from-amber-500/20 to-yellow-500/20">
-            <Lightbulb className="w-6 h-6 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-foreground">{t("insights.title")}</h2>
-            <p className="text-sm text-muted-foreground">{t("insights.description")}</p>
-          </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">{t("insights.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("insights.description")}</p>
         </div>
 
         {/* Market Filter */}
-        <div className="flex items-center gap-2">
-          <Globe className="w-4 h-4 text-muted-foreground" />
-          <div className="flex bg-muted/50 rounded-lg p-1 gap-1">
-            <button
-              onClick={() => setMarketFilter("all")}
-              className={`
-                px-3 py-1.5 rounded-md text-sm font-medium transition-all
-                ${marketFilter === "all"
-                  ? "bg-gradient-to-r from-amber-500 to-yellow-500 text-white shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }
-              `}
-            >
-              {language === "ko" ? "전체" : "All"}
-            </button>
-            <button
-              onClick={() => setMarketFilter("KR")}
-              className={`
-                flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all
-                ${marketFilter === "KR"
-                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }
-              `}
-            >
-              <span>🇰🇷</span>
-              <span>{language === "ko" ? "한국" : "Korea"}</span>
-            </button>
-            <button
-              onClick={() => setMarketFilter("US")}
-              className={`
-                flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all
-                ${marketFilter === "US"
-                  ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }
-              `}
-            >
-              <span>🇺🇸</span>
-              <span>{language === "ko" ? "미국" : "US"}</span>
-            </button>
-          </div>
+        <div className="inline-flex self-start sm:self-auto items-center rounded-lg border p-0.5 gap-0.5">
+          {filterButton("all", language === "ko" ? "전체" : "All")}
+          {filterButton("KR", language === "ko" ? "한국" : "Korea")}
+          {filterButton("US", language === "ko" ? "미국" : "US")}
         </div>
       </div>
 
@@ -216,260 +208,167 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
       )}
 
       {/* Two Category Summary Boxes */}
-      <div className="grid md:grid-cols-2 gap-4">
-        {/* 📊 Performance Analysis Summary */}
-        <Card className="border-2 border-blue-500/20">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="p-1.5 rounded-md bg-blue-500/10">
-                <BarChart3 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              </div>
-              <span className="font-semibold">{t("insights.category.performance")}</span>
-              <Badge variant="outline" className="text-xs ml-auto">
-                {language === "ko" ? "최근 1개월" : "Last 30d"}
-              </Badge>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-muted-foreground text-xs">
-                  {language === "ko" ? "실제 매매" : "Actual Trades"}
-                </span>
-                <p className="font-bold text-green-600">
-                  {data.performance_analysis?.actual_trading?.count || 0}{language === "ko" ? "건" : ""}
-                  {data.performance_analysis?.actual_trading?.win_rate !== undefined && (
-                    <span className="text-muted-foreground font-normal text-xs ml-1">
-                      ({language === "ko" ? "승률" : "WR"} {(data.performance_analysis.actual_trading.win_rate * 100).toFixed(0)}%)
-                    </span>
-                  )}
-                </p>
-              </div>
-              <div>
-                <span className="text-muted-foreground text-xs">
-                  {language === "ko" ? "평균 수익률" : "Avg Return"}
-                </span>
-                <p className={`font-bold ${
-                  (data.performance_analysis?.actual_trading?.avg_profit_rate || 0) >= 0
-                    ? "text-green-600" : "text-red-600"
-                }`}>
-                  {data.performance_analysis?.actual_trading?.avg_profit_rate !== undefined
-                    ? formatPercent(data.performance_analysis.actual_trading.avg_profit_rate)
-                    : "-"}
-                </p>
-              </div>
-              <TooltipProvider>
-                <div>
-                  <span className="text-muted-foreground text-xs flex items-center gap-1">
-                    {language === "ko" ? "관망 종목" : "Watched Stocks"}
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <HelpCircle className="w-3 h-3" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>{language === "ko"
-                          ? "분석 후 매수하지 않고 관망한 종목. 30일 추적 완료된 종목만 성과 분석에 포함."
-                          : "Stocks analyzed but not purchased. Only 30-day completed stocks included in analysis."}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </span>
-                  <p className="font-bold">
-                    {data.performance_analysis?.overview.total || 0}{language === "ko" ? "건" : ""}
-                    <span className="text-muted-foreground font-normal text-xs ml-1">
-                      ({t("insights.performance.completed")} {data.performance_analysis?.overview.completed || 0})
-                    </span>
-                  </p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground text-xs flex items-center gap-1">
-                    {language === "ko" ? "관망 승률" : "Watched Win Rate"}
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <HelpCircle className="w-3 h-3" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>{language === "ko"
-                          ? "관망 종목 중 30일 후 수익인 종목 비율 (30일 추적 완료 기준)"
-                          : "Percentage of watched stocks profitable after 30 days"}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </span>
-                  <p className="font-bold">
-                    {(() => {
-                      const triggers = data.performance_analysis?.trigger_performance || []
-                      const totalWins = triggers.reduce((sum, t) => sum + ((t.win_rate_30d || 0) * t.count), 0)
-                      const totalCount = triggers.reduce((sum, t) => sum + t.count, 0)
-                      return totalCount > 0 ? `${((totalWins / totalCount) * 100).toFixed(0)}%` : "-"
-                    })()}
-                  </p>
-                </div>
-              </TooltipProvider>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 🧠 Trading Wisdom Summary */}
-        <Card className="border-2 border-purple-500/20">
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="p-1.5 rounded-md bg-purple-500/10">
-                <Brain className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-              </div>
-              <span className="font-semibold">{t("insights.category.wisdom")}</span>
-              {marketFilter !== "all" && (
-                <Badge variant="outline" className={
-                  marketFilter === "KR"
-                    ? "bg-blue-500/10 text-blue-600 border-blue-500/20 text-xs"
-                    : "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-xs"
-                }>
-                  {marketFilter === "KR" ? "🇰🇷" : "🇺🇸"} {language === "ko" ? "필터 적용" : "Filtered"}
+      <TooltipProvider>
+        <div className="grid md:grid-cols-2 gap-3">
+          {/* Performance Analysis Summary */}
+          <Card className={CARD}>
+            <CardHeader className="px-5 pt-4 pb-3">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm font-medium">{t("insights.category.performance")}</CardTitle>
+                <Badge variant="outline" className={META_BADGE}>
+                  {language === "ko" ? "최근 1개월" : "Last 30d"}
                 </Badge>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-muted-foreground text-xs">{t("insights.summary.totalPrinciples")}</span>
-                <p className="font-bold">
-                  {filteredPrinciples.length}{language === "ko" ? "개" : ""}
-                  {marketFilter !== "all" && filteredPrinciples.length !== data.principles.length && (
-                    <span className="text-muted-foreground font-normal text-xs ml-1">
-                      / {data.principles.length}
-                    </span>
-                  )}
-                </p>
               </div>
-              <div>
-                <span className="text-muted-foreground text-xs">{t("insights.summary.highPriority")}</span>
-                <p className="font-bold text-red-600">
-                  {filteredPrinciples.filter(p => p.priority === "high").length}{language === "ko" ? "개" : ""}
-                </p>
+            </CardHeader>
+            <CardContent className="px-5 pb-5 pt-1">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+                <Stat
+                  label={language === "ko" ? "실제 매매" : "Actual Trades"}
+                  value={`${pa?.actual_trading?.count || 0}${language === "ko" ? "건" : ""}`}
+                  sub={pa?.actual_trading?.win_rate !== undefined
+                    ? `${language === "ko" ? "승률" : "WR"} ${(pa.actual_trading.win_rate * 100).toFixed(0)}%`
+                    : undefined}
+                />
+                <Stat
+                  label={language === "ko" ? "평균 수익률" : "Avg Return"}
+                  value={pa?.actual_trading?.avg_profit_rate !== undefined
+                    ? formatPercent(pa.actual_trading.avg_profit_rate)
+                    : "-"}
+                  className={signTone(pa?.actual_trading?.avg_profit_rate)}
+                />
+                <Stat
+                  label={<>
+                    {language === "ko" ? "관망 종목" : "Watched Stocks"}
+                    <Help text={language === "ko"
+                      ? "분석 후 매수하지 않고 관망한 종목. 30일 추적 완료된 종목만 성과 분석에 포함."
+                      : "Stocks analyzed but not purchased. Only 30-day completed stocks included in analysis."} />
+                  </>}
+                  value={`${pa?.overview.total || 0}${language === "ko" ? "건" : ""}`}
+                  sub={`${t("insights.performance.completed")} ${pa?.overview.completed || 0}`}
+                />
+                <Stat
+                  label={<>
+                    {language === "ko" ? "관망 승률" : "Watched Win Rate"}
+                    <Help text={language === "ko"
+                      ? "관망 종목 중 30일 후 수익인 종목 비율 (30일 추적 완료 기준)"
+                      : "Percentage of watched stocks profitable after 30 days"} />
+                  </>}
+                  value={(() => {
+                    const triggers = pa?.trigger_performance || []
+                    const totalWins = triggers.reduce((sum, t) => sum + ((t.win_rate_30d || 0) * t.count), 0)
+                    const totalCount = triggers.reduce((sum, t) => sum + t.count, 0)
+                    return totalCount > 0 ? `${((totalWins / totalCount) * 100).toFixed(0)}%` : "-"
+                  })()}
+                />
               </div>
-              <div>
-                <span className="text-muted-foreground text-xs">{t("insights.summary.totalIntuitions")}</span>
-                <p className="font-bold">
-                  {filteredIntuitions.length}{language === "ko" ? "개" : ""}
-                  {marketFilter !== "all" && filteredIntuitions.length !== data.intuitions.length && (
-                    <span className="text-muted-foreground font-normal text-xs ml-1">
-                      / {data.intuitions.length}
-                    </span>
-                  )}
-                </p>
-              </div>
-              <div>
-                <span className="text-muted-foreground text-xs">{t("insights.summary.avgConfidence")}</span>
-                <p className="font-bold">
-                  {filteredIntuitions.length > 0
-                    ? ((filteredIntuitions.reduce((sum, i) => sum + i.confidence, 0) / filteredIntuitions.length) * 100).toFixed(0)
-                    : 0}%
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* 📊 Performance Analysis Section Header */}
-      <div className="flex items-center gap-3 pt-2">
-        <div className="p-2 rounded-lg bg-blue-500/10">
-          <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          {/* Trading Wisdom Summary */}
+          <Card className={CARD}>
+            <CardHeader className="px-5 pt-4 pb-3">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm font-medium">{t("insights.category.wisdom")}</CardTitle>
+                {marketFilter !== "all" && (
+                  <Badge variant="outline" className={META_BADGE}>
+                    {marketFilter} · {language === "ko" ? "필터 적용" : "Filtered"}
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="px-5 pb-5 pt-1">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+                <Stat
+                  label={t("insights.summary.totalPrinciples")}
+                  value={`${filteredPrinciples.length}${language === "ko" ? "개" : ""}`}
+                  sub={marketFilter !== "all" && filteredPrinciples.length !== data.principles.length
+                    ? `/ ${data.principles.length}`
+                    : undefined}
+                />
+                <Stat
+                  label={t("insights.summary.highPriority")}
+                  value={`${filteredPrinciples.filter(p => p.priority === "high").length}${language === "ko" ? "개" : ""}`}
+                />
+                <Stat
+                  label={t("insights.summary.totalIntuitions")}
+                  value={`${filteredIntuitions.length}${language === "ko" ? "개" : ""}`}
+                  sub={marketFilter !== "all" && filteredIntuitions.length !== data.intuitions.length
+                    ? `/ ${data.intuitions.length}`
+                    : undefined}
+                />
+                <Stat
+                  label={t("insights.summary.avgConfidence")}
+                  value={`${filteredIntuitions.length > 0
+                    ? ((filteredIntuitions.reduce((sum, i) => sum + i.confidence, 0) / filteredIntuitions.length) * 100).toFixed(0)
+                    : 0}%`}
+                />
+              </div>
+            </CardContent>
+          </Card>
         </div>
-        <h3 className="text-lg font-semibold">{t("insights.category.performance")}</h3>
-        <div className="flex-1 h-px bg-border" />
-      </div>
+      </TooltipProvider>
 
       {/* Performance Analysis Section */}
-      {data.performance_analysis && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>{t("insights.performance.description")}</CardDescription>
+      <SectionHeading>{t("insights.category.performance")}</SectionHeading>
+
+      {pa && (
+        <Card className={CARD}>
+          <CardHeader className="px-5 pt-4 pb-3">
+            <p className="text-xs text-muted-foreground">{t("insights.performance.description")}</p>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {data.performance_analysis.overview.completed === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12">
-                <BarChart3 className="w-12 h-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground text-center">{t("insights.performance.noData")}</p>
-                <p className="text-sm text-muted-foreground mt-2">{t("insights.performance.noDataHint")}</p>
+          <CardContent className="px-0 pb-5 space-y-7">
+            {pa.overview.completed === 0 ? (
+              <div className="px-5 py-10 text-center">
+                <p className="text-sm text-muted-foreground">{t("insights.performance.noData")}</p>
+                <p className="text-xs text-muted-foreground mt-1">{t("insights.performance.noDataHint")}</p>
               </div>
             ) : (
               <TooltipProvider>
-                {/* Trigger Type Performance - 관망종목의 트리거 유형별 성과 */}
-                {data.performance_analysis.trigger_performance.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium flex items-center gap-2">
-                      <Eye className="w-4 h-4 text-cyan-500" />
+                {/* Trigger Type Performance */}
+                {pa.trigger_performance.length > 0 && (
+                  <div className="space-y-2">
+                    <SubHeading help={language === "ko"
+                      ? "분석 후 관망한 종목들의 7/14/30일 가격 변화 추적 결과"
+                      : "Price tracking results for stocks analyzed but not traded"}>
                       {language === "ko" ? "관망종목의 트리거 유형별 성과" : "Watched Stocks by Trigger Type"}
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          <p>{language === "ko"
-                            ? "분석 후 관망한 종목들의 7/14/30일 가격 변화 추적 결과"
-                            : "Price tracking results for stocks analyzed but not traded"}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </h4>
+                    </SubHeading>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full min-w-[560px] text-sm">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left py-2 px-3 font-medium text-muted-foreground">
-                              {language === "ko" ? "트리거" : "Trigger"}
-                            </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              {t("insights.performance.count")}
-                            </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              {t("insights.performance.day7")}
-                            </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              {t("insights.performance.day14")}
-                            </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              {t("insights.performance.day30")}
-                            </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              <div className="flex items-center justify-center gap-1">
+                            <th className={TH}>{language === "ko" ? "트리거" : "Trigger"}</th>
+                            <th className={TH}>{t("insights.performance.count")}</th>
+                            <th className={TH}>{t("insights.performance.day7")}</th>
+                            <th className={TH}>{t("insights.performance.day14")}</th>
+                            <th className={TH}>{t("insights.performance.day30")}</th>
+                            <th className={TH}>
+                              <div className="flex items-center justify-end gap-1">
                                 {t("insights.performance.winRate")}
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p>{language === "ko"
-                                      ? "30일 후에도 수익인 종목의 비율"
-                                      : "Percentage of stocks still profitable after 30 days"}</p>
-                                  </TooltipContent>
-                                </Tooltip>
+                                <Help text={language === "ko"
+                                  ? "30일 후에도 수익인 종목의 비율"
+                                  : "Percentage of stocks still profitable after 30 days"} />
                               </div>
                             </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {data.performance_analysis.trigger_performance.map((trigger, idx) => (
-                            <tr key={idx} className="border-b hover:bg-muted/50">
-                              <td className="py-2 px-3 font-medium">{trigger.trigger_type}</td>
-                              <td className="py-2 px-3 text-center">{trigger.count}</td>
-                              <td className={`py-2 px-3 text-center ${
-                                trigger.avg_7d_return !== null && (trigger.avg_7d_return || 0) >= 0 ? "text-green-600" : "text-red-600"
-                              }`}>
+                          {pa.trigger_performance.map((trigger, idx) => (
+                            <tr key={idx} className={ROW}>
+                              <td className={TD_FIRST}>{trigger.trigger_type}</td>
+                              <td className={TD_NUM}>{trigger.count}</td>
+                              <td className={`${TD_NUM} ${signTone(trigger.avg_7d_return)}`}>
                                 {trigger.avg_7d_return !== null ? formatPercent(trigger.avg_7d_return) : "-"}
                               </td>
-                              <td className={`py-2 px-3 text-center ${
-                                trigger.avg_14d_return !== null && (trigger.avg_14d_return || 0) >= 0 ? "text-green-600" : "text-red-600"
-                              }`}>
+                              <td className={`${TD_NUM} ${signTone(trigger.avg_14d_return)}`}>
                                 {trigger.avg_14d_return !== null ? formatPercent(trigger.avg_14d_return) : "-"}
                               </td>
-                              <td className={`py-2 px-3 text-center font-medium ${
-                                trigger.avg_30d_return !== null && (trigger.avg_30d_return || 0) >= 0 ? "text-green-600" : "text-red-600"
-                              }`}>
+                              <td className={`${TD_NUM} font-medium ${signTone(trigger.avg_30d_return)}`}>
                                 {trigger.avg_30d_return !== null ? formatPercent(trigger.avg_30d_return) : "-"}
                               </td>
-                              <td className="py-2 px-3 text-center">
-                                {trigger.win_rate_30d !== null && trigger.win_rate_30d !== undefined ? (
-                                  <Badge variant={trigger.win_rate_30d >= 0.5 ? "default" : "secondary"} className="text-xs">
-                                    {(trigger.win_rate_30d * 100).toFixed(0)}%
-                                  </Badge>
-                                ) : "-"}
+                              <td className={`${TD_NUM} ${trigger.win_rate_30d !== null && trigger.win_rate_30d !== undefined && trigger.win_rate_30d >= 0.5 ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                                {trigger.win_rate_30d !== null && trigger.win_rate_30d !== undefined
+                                  ? `${(trigger.win_rate_30d * 100).toFixed(0)}%`
+                                  : "-"}
                               </td>
                             </tr>
                           ))}
@@ -479,50 +378,37 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                   </div>
                 )}
 
-                {/* Risk/Reward Threshold Analysis - 관망종목의 손익비 구간별 분석 */}
-                {data.performance_analysis.rr_threshold_analysis.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-cyan-500" />
+                {/* Risk/Reward Threshold Analysis */}
+                {pa.rr_threshold_analysis.length > 0 && (
+                  <div className="space-y-2">
+                    <SubHeading help={language === "ko"
+                      ? "관망 종목의 손익비(목표가÷손절가) 구간별 30일 후 수익률. 30일 추적 완료된 종목 기준."
+                      : "30-day returns of watched stocks by Risk/Reward ratio range."}>
                       {language === "ko" ? "관망종목의 손익비 구간별 분석" : "Watched Stocks by R/R Ratio"}
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          <p>{language === "ko"
-                            ? "관망 종목의 손익비(목표가÷손절가) 구간별 30일 후 수익률. 30일 추적 완료된 종목 기준."
-                            : "30-day returns of watched stocks by Risk/Reward ratio range."}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </h4>
+                    </SubHeading>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full min-w-[560px] text-sm">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.range")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.count")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.traded")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.watched")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.allAvg")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.watchedAvg")}</th>
+                            <th className={TH}>{t("insights.performance.range")}</th>
+                            <th className={TH}>{t("insights.performance.count")}</th>
+                            <th className={TH}>{t("insights.performance.traded")}</th>
+                            <th className={TH}>{t("insights.performance.watched")}</th>
+                            <th className={TH}>{t("insights.performance.allAvg")}</th>
+                            <th className={TH}>{t("insights.performance.watchedAvg")}</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {data.performance_analysis.rr_threshold_analysis.map((rr, idx) => (
-                            <tr key={idx} className="border-b hover:bg-muted/50">
-                              <td className="py-2 px-3 font-medium">{rr.range}</td>
-                              <td className="py-2 px-3 text-center">{rr.total_count}</td>
-                              <td className="py-2 px-3 text-center text-purple-600">{rr.traded_count}</td>
-                              <td className="py-2 px-3 text-center text-cyan-600">{rr.watched_count}</td>
-                              <td className={`py-2 px-3 text-center ${
-                                rr.avg_all_return !== null && rr.avg_all_return >= 0 ? "text-green-600" : "text-red-600"
-                              }`}>
+                          {pa.rr_threshold_analysis.map((rr, idx) => (
+                            <tr key={idx} className={ROW}>
+                              <td className={`${TD_FIRST} font-mono tabular-nums text-[13px]`}>{rr.range}</td>
+                              <td className={TD_NUM}>{rr.total_count}</td>
+                              <td className={TD_NUM}>{rr.traded_count}</td>
+                              <td className={TD_NUM}>{rr.watched_count}</td>
+                              <td className={`${TD_NUM} ${signTone(rr.avg_all_return)}`}>
                                 {rr.avg_all_return !== null ? formatPercent(rr.avg_all_return) : "-"}
                               </td>
-                              <td className={`py-2 px-3 text-center ${
-                                rr.avg_watched_return !== null && rr.avg_watched_return >= 0 ? "text-green-600" : "text-red-600"
-                              }`}>
+                              <td className={`${TD_NUM} ${signTone(rr.avg_watched_return)}`}>
                                 {rr.avg_watched_return !== null ? formatPercent(rr.avg_watched_return) : "-"}
                               </td>
                             </tr>
@@ -533,186 +419,130 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                   </div>
                 )}
 
-                {/* Actual Trading Performance - 실제 매매 성과 */}
-                {data.performance_analysis.actual_trading && data.performance_analysis.actual_trading.count > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-green-500" />
+                {/* Actual Trading Performance */}
+                {pa.actual_trading && pa.actual_trading.count > 0 && (
+                  <div className="space-y-2">
+                    <SubHeading help={language === "ko"
+                      ? "최근 30일간 매도 완료된 거래 기준. 현재 보유중인 종목은 제외."
+                      : "Based on trades sold in the last 30 days. Current holdings excluded."}>
                       {language === "ko" ? "실제 매매 성과 (최근 30일)" : "Actual Trading (Last 30 Days)"}
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          <p>{language === "ko"
-                            ? "최근 30일간 매도 완료된 거래 기준. 현재 보유중인 종목은 제외."
-                            : "Based on trades sold in the last 30 days. Current holdings excluded."}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </h4>
-                    <div className="p-4 rounded-lg bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-medium text-green-700 dark:text-green-400">
-                          {data.performance_analysis.actual_trading.count || 0}{language === "ko" ? "건 완료" : " trades"}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                        {/* 평균 수익률 */}
-                        <div>
-                          <span className="text-muted-foreground text-xs">{language === "ko" ? "평균 수익률" : "Avg Return"}</span>
-                          <p className={`font-bold text-lg ${
-                            (data.performance_analysis.actual_trading.avg_profit_rate || 0) >= 0 ? "text-green-600" : "text-red-600"
-                          }`}>
-                            {formatPercent(data.performance_analysis.actual_trading.avg_profit_rate)}
-                          </p>
-                        </div>
-                        {/* 승률 */}
-                        <div>
-                          <span className="text-muted-foreground text-xs">{language === "ko" ? "승률" : "Win Rate"}</span>
-                          <p className="font-bold text-lg">
-                            {data.performance_analysis.actual_trading.win_rate !== null
-                              ? `${(data.performance_analysis.actual_trading.win_rate * 100).toFixed(0)}%`
+                      <span className="ml-1 text-xs font-normal text-muted-foreground font-mono tabular-nums">
+                        {pa.actual_trading.count || 0}{language === "ko" ? "건 완료" : " trades"}
+                      </span>
+                    </SubHeading>
+                    <div className="px-5">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border rounded-md overflow-hidden">
+                        <MiniStat
+                          label={language === "ko" ? "평균 수익률" : "Avg Return"}
+                          value={formatPercent(pa.actual_trading.avg_profit_rate)}
+                          className={signTone(pa.actual_trading.avg_profit_rate)}
+                        />
+                        <MiniStat
+                          label={language === "ko" ? "승률" : "Win Rate"}
+                          value={<>
+                            {pa.actual_trading.win_rate !== null
+                              ? `${(pa.actual_trading.win_rate * 100).toFixed(0)}%`
                               : "-"}
-                            <span className="text-xs font-normal text-muted-foreground ml-1">
-                              ({data.performance_analysis.actual_trading.win_count || 0}W/{data.performance_analysis.actual_trading.loss_count || 0}L)
+                            <span className="text-xs text-muted-foreground ml-1">
+                              ({pa.actual_trading.win_count || 0}W/{pa.actual_trading.loss_count || 0}L)
                             </span>
-                          </p>
-                        </div>
-                        {/* 평균 수익 (수익건) */}
-                        <div>
-                          <span className="text-muted-foreground text-xs">{language === "ko" ? "평균 수익 (수익건)" : "Avg Profit (wins)"}</span>
-                          <p className="font-bold text-green-600">
-                            {formatPercent(data.performance_analysis.actual_trading.avg_profit)}
-                          </p>
-                        </div>
-                        {/* 평균 손실 (손실건) */}
-                        <div>
-                          <span className="text-muted-foreground text-xs">{language === "ko" ? "평균 손실 (손실건)" : "Avg Loss (losses)"}</span>
-                          <p className="font-bold text-red-600">
-                            {formatPercent(data.performance_analysis.actual_trading.avg_loss)}
-                          </p>
-                        </div>
-                        {/* 최대 수익 */}
-                        <div>
-                          <span className="text-muted-foreground text-xs">{language === "ko" ? "최대 수익" : "Max Profit"}</span>
-                          <p className="font-bold text-green-600">
-                            {formatPercent(data.performance_analysis.actual_trading.max_profit)}
-                          </p>
-                        </div>
-                        {/* 최대 손실 */}
-                        <div>
-                          <span className="text-muted-foreground text-xs">{language === "ko" ? "최대 손실" : "Max Loss"}</span>
-                          <p className="font-bold text-red-600">
-                            {formatPercent(data.performance_analysis.actual_trading.max_loss)}
-                          </p>
-                        </div>
-                        {/* Profit Factor */}
-                        <div>
-                          <span className="text-muted-foreground text-xs flex items-center gap-1">
+                          </>}
+                        />
+                        <MiniStat
+                          label={language === "ko" ? "평균 수익 (수익건)" : "Avg Profit (wins)"}
+                          value={formatPercent(pa.actual_trading.avg_profit)}
+                          className="text-success"
+                        />
+                        <MiniStat
+                          label={language === "ko" ? "평균 손실 (손실건)" : "Avg Loss (losses)"}
+                          value={formatPercent(pa.actual_trading.avg_loss)}
+                          className="text-destructive"
+                        />
+                        <MiniStat
+                          label={language === "ko" ? "최대 수익" : "Max Profit"}
+                          value={formatPercent(pa.actual_trading.max_profit)}
+                          className="text-success"
+                        />
+                        <MiniStat
+                          label={language === "ko" ? "최대 손실" : "Max Loss"}
+                          value={formatPercent(pa.actual_trading.max_loss)}
+                          className="text-destructive"
+                        />
+                        <MiniStat
+                          label={<>
                             Profit Factor
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <HelpCircle className="w-3 h-3" />
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-xs">
-                                <p>{language === "ko"
-                                  ? "총수익 ÷ 총손실. 1.0 이상이면 수익, 2.0 이상이면 우수"
-                                  : "Total Profit ÷ Total Loss. Above 1.0 is profitable, above 2.0 is excellent"}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </span>
-                          <p className={`font-bold ${
-                            data.performance_analysis.actual_trading.profit_factor !== null &&
-                            data.performance_analysis.actual_trading.profit_factor >= 1 ? "text-green-600" : "text-red-600"
-                          }`}>
-                            {data.performance_analysis.actual_trading.profit_factor !== null
-                              ? data.performance_analysis.actual_trading.profit_factor.toFixed(2)
-                              : "-"}
-                          </p>
-                        </div>
+                            <Help text={language === "ko"
+                              ? "총수익 ÷ 총손실. 1.0 이상이면 수익, 2.0 이상이면 우수"
+                              : "Total Profit ÷ Total Loss. Above 1.0 is profitable, above 2.0 is excellent"} />
+                          </>}
+                          value={pa.actual_trading.profit_factor !== null
+                            ? pa.actual_trading.profit_factor.toFixed(2)
+                            : "-"}
+                          className={pa.actual_trading.profit_factor !== null && pa.actual_trading.profit_factor >= 1
+                            ? "text-success" : "text-destructive"}
+                        />
+                        <div className="bg-card" />
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Actual Trading by Trigger Type - 실제 매매 종목의 트리거 유형별 성과 (2026.01.12~) */}
-                {data.performance_analysis.actual_trading_by_trigger && data.performance_analysis.actual_trading_by_trigger.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium flex items-center gap-2">
-                      <Filter className="w-4 h-4 text-purple-500" />
+                {/* Actual Trading by Trigger Type (2026.01.12~) */}
+                {pa.actual_trading_by_trigger && pa.actual_trading_by_trigger.length > 0 && (
+                  <div className="space-y-2">
+                    <SubHeading help={language === "ko"
+                      ? "2026.01.12부터 트리거 유형 추적 시작. 어떤 트리거로 진입한 매매가 성과가 좋은지 비교."
+                      : "Trigger type tracking started from 2026.01.12. Compare performance by entry trigger type."}>
                       {language === "ko" ? "실제 매매 종목의 트리거 유형별 성과 (2026.01.12~)" : "Actual Trading by Trigger Type (Since 2026.01.12)"}
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          <p>{language === "ko"
-                            ? "2026.01.12부터 트리거 유형 추적 시작. 어떤 트리거로 진입한 매매가 성과가 좋은지 비교."
-                            : "Trigger type tracking started from 2026.01.12. Compare performance by entry trigger type."}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </h4>
+                    </SubHeading>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full min-w-[600px] text-sm">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.triggerType")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{t("insights.performance.count")}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">{language === "ko" ? "승률" : "Win Rate"}</th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              <div className="flex items-center justify-center gap-1">
+                            <th className={TH}>{t("insights.performance.triggerType")}</th>
+                            <th className={TH}>{t("insights.performance.count")}</th>
+                            <th className={TH}>{language === "ko" ? "승률" : "Win Rate"}</th>
+                            <th className={TH}>
+                              <div className="flex items-center justify-end gap-1">
                                 {language === "ko" ? "평균 수익" : "Avg Profit"}
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <HelpCircle className="w-3 h-3" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>{language === "ko" ? "수익 거래만의 평균" : "Average of winning trades only"}</p>
-                                  </TooltipContent>
-                                </Tooltip>
+                                <Help text={language === "ko" ? "수익 거래만의 평균" : "Average of winning trades only"} />
                               </div>
                             </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">
-                              <div className="flex items-center justify-center gap-1">
+                            <th className={TH}>
+                              <div className="flex items-center justify-end gap-1">
                                 {language === "ko" ? "평균 손실" : "Avg Loss"}
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <HelpCircle className="w-3 h-3" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>{language === "ko" ? "손실 거래만의 평균" : "Average of losing trades only"}</p>
-                                  </TooltipContent>
-                                </Tooltip>
+                                <Help text={language === "ko" ? "손실 거래만의 평균" : "Average of losing trades only"} />
                               </div>
                             </th>
-                            <th className="text-center py-2 px-3 font-medium text-muted-foreground">Profit Factor</th>
+                            <th className={TH}>Profit Factor</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {data.performance_analysis.actual_trading_by_trigger.map((item, idx) => (
-                            <tr key={idx} className="border-b hover:bg-muted/50">
-                              <td className="py-2 px-3 font-medium">{item.trigger_type}</td>
-                              <td className="py-2 px-3 text-center">
+                          {pa.actual_trading_by_trigger.map((item, idx) => (
+                            <tr key={idx} className={ROW}>
+                              <td className={TD_FIRST}>{item.trigger_type}</td>
+                              <td className={TD_NUM}>
                                 {item.count}
-                                <span className="text-xs text-muted-foreground ml-1">
+                                <span className="text-[11px] text-muted-foreground ml-1">
                                   ({item.win_count || 0}W/{item.loss_count || 0}L)
                                 </span>
                               </td>
-                              <td className="py-2 px-3 text-center">
+                              <td className={TD_NUM}>
                                 {item.win_rate !== null ? `${(item.win_rate * 100).toFixed(0)}%` : "-"}
                               </td>
-                              <td className="py-2 px-3 text-center text-green-600">
+                              <td className={`${TD_NUM} ${item.avg_profit != null ? "text-success" : "text-muted-foreground"}`}>
                                 {item.avg_profit !== null && item.avg_profit !== undefined
                                   ? formatPercent(item.avg_profit)
                                   : "-"}
                               </td>
-                              <td className="py-2 px-3 text-center text-red-600">
+                              <td className={`${TD_NUM} ${item.avg_loss != null ? "text-destructive" : "text-muted-foreground"}`}>
                                 {item.avg_loss !== null && item.avg_loss !== undefined
                                   ? formatPercent(item.avg_loss)
                                   : "-"}
                               </td>
-                              <td className={`py-2 px-3 text-center ${
-                                item.profit_factor !== null && item.profit_factor >= 1 ? "text-green-600" : "text-red-600"
+                              <td className={`${TD_NUM} ${
+                                item.profit_factor === null ? "text-muted-foreground"
+                                  : item.profit_factor >= 1 ? "text-success" : "text-destructive"
                               }`}>
                                 {item.profit_factor !== null ? item.profit_factor.toFixed(2) : "-"}
                               </td>
@@ -725,129 +555,68 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                 )}
 
                 {/* Missed Opportunities & Avoided Losses */}
-                <div className="grid md:grid-cols-2 gap-4">
-                  {/* Missed Opportunities */}
-                  {data.performance_analysis.missed_opportunities.length > 0 && (
-                    <div className="space-y-3">
-                      <h4 className="text-sm font-medium flex items-center gap-2">
-                        <XCircle className="w-4 h-4 text-red-500" />
-                        {t("insights.performance.missedOpportunities")}
-                        <Tooltip>
-                          <TooltipTrigger>
-                            <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <p>{language === "ko"
-                              ? "관망했지만 30일 후 +10% 이상 상승한 종목. 분석 시점 가격 기준."
-                              : "Stocks skipped but rose +10%+ after 30 days from analysis price."}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                        <Badge variant="destructive" className="text-xs">
-                          {data.performance_analysis.missed_opportunities.length}
-                        </Badge>
-                      </h4>
-                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                        {data.performance_analysis.missed_opportunities.map((opp, idx) => (
-                          <div key={idx} className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <span className="font-medium">{opp.company_name}</span>
-                                <span className="text-muted-foreground text-sm ml-2">({opp.ticker})</span>
+                <div className="grid md:grid-cols-2 gap-7 md:gap-0 md:divide-x">
+                  {[
+                    {
+                      key: "missed",
+                      items: pa.missed_opportunities,
+                      title: t("insights.performance.missedOpportunities"),
+                      help: language === "ko"
+                        ? "관망했지만 30일 후 +10% 이상 상승한 종목. 분석 시점 가격 기준."
+                        : "Stocks skipped but rose +10%+ after 30 days from analysis price.",
+                    },
+                    {
+                      key: "avoided",
+                      items: pa.avoided_losses,
+                      title: t("insights.performance.avoidedLosses"),
+                      help: language === "ko"
+                        ? "관망하여 30일 후 -10% 이상 하락을 피한 종목. 분석 시점 가격 기준."
+                        : "Stocks skipped that fell -10%+ after 30 days. Avoided loss from analysis price.",
+                    },
+                  ].filter(group => group.items.length > 0).map(group => (
+                    <div key={group.key} className="space-y-2 min-w-0">
+                      <SubHeading help={group.help}>
+                        {group.title}
+                        <span className="text-xs font-normal text-muted-foreground font-mono tabular-nums">
+                          {group.items.length}
+                        </span>
+                      </SubHeading>
+                      <div className="max-h-[300px] overflow-y-auto border-t divide-y">
+                        {group.items.map((opp, idx) => (
+                          <div key={idx} className="px-5 py-2.5 hover:bg-muted/50 transition-colors">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <div className="min-w-0 truncate">
+                                <span className="font-medium text-sm">{opp.company_name}</span>
+                                <span className="text-muted-foreground text-xs font-mono ml-1.5">{opp.ticker}</span>
                               </div>
-                              <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+                              <span className={`font-mono tabular-nums text-[13px] shrink-0 ${signTone(opp.tracked_30d_return)}`}>
                                 {formatPercent(opp.tracked_30d_return)}
-                              </Badge>
+                              </span>
                             </div>
-                            <div className="mt-2 text-xs text-muted-foreground grid grid-cols-3 gap-2">
-                              <div>
-                                <span>{language === "ko" ? "분석일" : "Analyzed"}: </span>
-                                <span>{opp.analyzed_date?.split(' ')[0] || '-'}</span>
-                              </div>
-                              <div>
-                                <span>{language === "ko" ? "트리거" : "Trigger"}: </span>
-                                <span>{opp.trigger_type}</span>
-                              </div>
-                              <div>
-                                <span>{language === "ko" ? "판정" : "Decision"}: </span>
-                                <span className="text-red-600">{opp.decision || opp.skip_reason || '-'}</span>
-                              </div>
+                            <div className="mt-1 text-[11px] text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+                              <span>{language === "ko" ? "분석일" : "Analyzed"}: <span className="font-mono">{opp.analyzed_date?.split(' ')[0] || '-'}</span></span>
+                              <span>{language === "ko" ? "트리거" : "Trigger"}: {opp.trigger_type}</span>
+                              <span>{language === "ko" ? "판정" : "Decision"}: {opp.decision || opp.skip_reason || '-'}</span>
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  )}
-
-                  {/* Avoided Losses */}
-                  {data.performance_analysis.avoided_losses.length > 0 && (
-                    <div className="space-y-3">
-                      <h4 className="text-sm font-medium flex items-center gap-2">
-                        <Trophy className="w-4 h-4 text-green-500" />
-                        {t("insights.performance.avoidedLosses")}
-                        <Tooltip>
-                          <TooltipTrigger>
-                            <HelpCircle className="w-3 h-3 text-muted-foreground" />
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <p>{language === "ko"
-                              ? "관망하여 30일 후 -10% 이상 하락을 피한 종목. 분석 시점 가격 기준."
-                              : "Stocks skipped that fell -10%+ after 30 days. Avoided loss from analysis price."}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                        <Badge variant="default" className="bg-green-500 text-xs">
-                          {data.performance_analysis.avoided_losses.length}
-                        </Badge>
-                      </h4>
-                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                        {data.performance_analysis.avoided_losses.map((loss, idx) => (
-                          <div key={idx} className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <span className="font-medium">{loss.company_name}</span>
-                                <span className="text-muted-foreground text-sm ml-2">({loss.ticker})</span>
-                              </div>
-                              <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-500/20">
-                                {formatPercent(loss.tracked_30d_return)}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 text-xs text-muted-foreground grid grid-cols-3 gap-2">
-                              <div>
-                                <span>{language === "ko" ? "분석일" : "Analyzed"}: </span>
-                                <span>{loss.analyzed_date?.split(' ')[0] || '-'}</span>
-                              </div>
-                              <div>
-                                <span>{language === "ko" ? "트리거" : "Trigger"}: </span>
-                                <span>{loss.trigger_type}</span>
-                              </div>
-                              <div>
-                                <span>{language === "ko" ? "판정" : "Decision"}: </span>
-                                <span className="text-green-600">{loss.decision || loss.skip_reason || '-'}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  ))}
                 </div>
 
                 {/* Recommendations */}
-                {data.performance_analysis.recommendations.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium flex items-center gap-2">
-                      <Lightbulb className="w-4 h-4 text-amber-500" />
-                      {t("insights.performance.recommendations")}
-                    </h4>
-                    <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/20">
-                      <ul className="space-y-2">
-                        {data.performance_analysis.recommendations.map((rec, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm">
-                            <span className="text-amber-500 mt-0.5">•</span>
-                            <span>{rec}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                {pa.recommendations.length > 0 && (
+                  <div className="space-y-2">
+                    <SubHeading>{t("insights.performance.recommendations")}</SubHeading>
+                    <ul className="px-5 space-y-1.5">
+                      {pa.recommendations.map((rec, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-sm">
+                          <span className="text-muted-foreground mt-0.5">•</span>
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </TooltipProvider>
@@ -856,96 +625,59 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
         </Card>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* 🧠 Trading Wisdom Section Header */}
-      <div className="flex items-center gap-3 pt-2">
-        <div className="p-2 rounded-lg bg-purple-500/10">
-          <Brain className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-        </div>
-        <h3 className="text-lg font-semibold">{t("insights.category.wisdom")}</h3>
-        <div className="flex-1 h-px bg-border" />
-      </div>
+      {/* Trading Wisdom Section */}
+      <SectionHeading>{t("insights.category.wisdom")}</SectionHeading>
 
       {/* Principles Section */}
-      <Card>
-        <CardHeader>
+      <Card className={CARD}>
+        <CardHeader className="px-5 pt-4 pb-3">
           <div className="flex items-center gap-2">
-            <Target className="w-5 h-5 text-purple-500" />
-            <CardTitle>{t("insights.principles")}</CardTitle>
-            <Badge variant="secondary" className="text-xs">
-              {filteredPrinciples.length}
-            </Badge>
-            {marketFilter !== "all" && (
-              <Badge
-                variant="outline"
-                className={
-                  marketFilter === "KR"
-                    ? "bg-blue-500/10 text-blue-600 border-blue-500/20 text-xs"
-                    : "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-xs"
-                }
-              >
-                {marketFilter === "KR" ? "🇰🇷" : "🇺🇸"} {marketFilter}
-              </Badge>
-            )}
+            <CardTitle className="text-sm font-medium">{t("insights.principles")}</CardTitle>
+            <span className="text-xs text-muted-foreground font-mono tabular-nums">{filteredPrinciples.length}</span>
+            {marketFilter !== "all" && marketBadge(marketFilter)}
           </div>
-          <CardDescription>{t("insights.principlesDescription")}</CardDescription>
+          <p className="text-xs text-muted-foreground">{t("insights.principlesDescription")}</p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-0 pb-1">
           {filteredPrinciples.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">{t("insights.noPrinciples")}</p>
+            <p className="text-sm text-muted-foreground text-center py-8">{t("insights.noPrinciples")}</p>
           ) : (
-            <div className="space-y-4">
+            <div className="border-t divide-y">
               {filteredPrinciples.map((principle) => (
-                <div
-                  key={principle.id}
-                  className="p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {principle.market && (
-                          <Badge
-                            variant="outline"
-                            className={
-                              principle.market === "KR"
-                                ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
-                                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                            }
-                          >
-                            {principle.market === "KR" ? "🇰🇷" : "🇺🇸"} {principle.market}
-                          </Badge>
-                        )}
-                        <Badge variant="outline" className={getPriorityColor(principle.priority)}>
+                <div key={principle.id} className="px-5 py-4 hover:bg-muted/50 transition-colors">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {principle.market && marketBadge(principle.market)}
+                        <Badge variant="outline" className={`text-[10px] font-normal ${getPriorityColor(principle.priority)}`}>
                           {t(`insights.priority.${principle.priority}`)}
                         </Badge>
-                        <Badge variant="outline" className={getScopeColor(principle.scope)}>
+                        <Badge variant="outline" className={META_BADGE}>
                           {t(`insights.scope.${principle.scope}`)}
                           {principle.scope_context && `: ${principle.scope_context}`}
                         </Badge>
                       </div>
-                      <div className="space-y-1">
-                        <p className="font-medium">
+                      <div className="space-y-1 text-sm">
+                        <p>
                           <span className="text-muted-foreground">{t("insights.condition")}:</span>{" "}
                           {principle.condition}
                         </p>
-                        <p className="text-primary">
-                          <span className="text-muted-foreground">{t("insights.action")}:</span>{" "}
+                        <p className="font-medium">
+                          <span className="text-muted-foreground font-normal">{t("insights.action")}:</span>{" "}
                           {principle.action}
                         </p>
                         {principle.reason && (
-                          <p className="text-sm text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             <span>{t("insights.reason")}:</span> {principle.reason}
                           </p>
                         )}
                       </div>
                     </div>
-                    <div className="text-right space-y-1 min-w-[120px]">
-                      <div className="text-sm">
-                        <span className="text-muted-foreground">{t("insights.confidence")}:</span>
-                      </div>
+                    <div className="space-y-1 sm:w-[140px] shrink-0">
+                      <div className="text-xs text-muted-foreground">{t("insights.confidence")}</div>
                       {getConfidenceBar(principle.confidence)}
-                      <div className="text-xs text-muted-foreground">
-                        {t("insights.supportingTrades")}: {principle.supporting_trades}
+                      <div className="text-[11px] text-muted-foreground">
+                        {t("insights.supportingTrades")}: <span className="font-mono tabular-nums">{principle.supporting_trades}</span>
                       </div>
                     </div>
                   </div>
@@ -957,81 +689,69 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
       </Card>
 
       {/* Journal Section - Shared across markets */}
-      <Card>
-        <CardHeader>
+      <Card className={CARD}>
+        <CardHeader className="px-5 pt-4 pb-3">
           <div className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-blue-500" />
-            <CardTitle>{t("insights.journal")}</CardTitle>
-            <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs">
+            <CardTitle className="text-sm font-medium">{t("insights.journal")}</CardTitle>
+            <Badge variant="outline" className={META_BADGE}>
               {language === "ko" ? "KR+US 공통" : "All Markets"}
             </Badge>
           </div>
-          <CardDescription>{t("insights.journalDescription")}</CardDescription>
+          <p className="text-xs text-muted-foreground">{t("insights.journalDescription")}</p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-0 pb-1">
           {journalEntries.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">{t("insights.noJournal")}</p>
+            <p className="text-sm text-muted-foreground text-center py-8">{t("insights.noJournal")}</p>
           ) : (
-            <Accordion type="single" collapsible className="w-full">
+            <Accordion type="single" collapsible className="w-full border-t">
               {journalEntries.map((entry) => (
-                <AccordionItem key={entry.id} value={`journal-${entry.id}`}>
-                  <AccordionTrigger className="hover:no-underline">
-                    <div className="flex items-center justify-between w-full pr-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${
-                          entry.profit_rate >= 0 ? "bg-green-500" : "bg-red-500"
-                        }`} />
-                        {entry.market && (
-                          <span className={`text-sm ${entry.market === "KR" ? "text-blue-500" : "text-emerald-500"}`}>
-                            {entry.market === "KR" ? "🇰🇷" : "🇺🇸"}
-                          </span>
-                        )}
-                        <span className="font-medium">{entry.company_name}</span>
-                        <span className="text-muted-foreground text-sm">({entry.ticker})</span>
+                <AccordionItem key={entry.id} value={`journal-${entry.id}`} className="px-5">
+                  <AccordionTrigger className="hover:no-underline py-3 min-w-0">
+                    <div className="flex items-center justify-between gap-3 w-full min-w-0 pr-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {entry.market && marketBadge(entry.market)}
+                        <span className="font-medium text-sm truncate">{entry.company_name}</span>
+                        <span className="text-muted-foreground text-xs font-mono hidden sm:inline">{entry.ticker}</span>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`font-medium ${
-                          entry.profit_rate >= 0 ? "text-green-600" : "text-red-600"
-                        }`}>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className={`font-mono tabular-nums text-[13px] ${signTone(entry.profit_rate)}`}>
                           {formatPercentDirect(entry.profit_rate)}
                         </span>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-xs text-muted-foreground font-mono tabular-nums hidden sm:inline">
                           {formatDate(entry.trade_date)}
                         </span>
-                        <Badge variant="outline" className="text-xs">
+                        <Badge variant="outline" className={`${META_BADGE} font-mono`}>
                           L{entry.compression_layer}
                         </Badge>
                       </div>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
-                    <div className="space-y-4 pt-2">
+                    <div className="space-y-5 pt-1">
                       {/* One-line Summary */}
                       {entry.one_line_summary && (
-                        <div className="p-3 rounded-lg bg-muted/50">
-                          <p className="font-medium">{entry.one_line_summary}</p>
-                        </div>
+                        <p className="text-sm font-medium border-l-2 border-border pl-3">{entry.one_line_summary}</p>
                       )}
 
                       {/* Trade Details */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
-                          <span className="text-muted-foreground">{t("insights.tradeDate")}</span>
-                          <p className="font-medium">{formatDate(entry.trade_date)}</p>
+                          <span className="text-xs text-muted-foreground">{t("insights.tradeDate")}</span>
+                          <p className="font-mono tabular-nums text-[13px]">{formatDate(entry.trade_date)}</p>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">{t("insights.holdingDays")}</span>
-                          <p className="font-medium">{entry.holding_days}{language === "ko" ? "일" : " days"}</p>
+                          <span className="text-xs text-muted-foreground">{t("insights.holdingDays")}</span>
+                          <p className="font-mono tabular-nums text-[13px]">{entry.holding_days}{language === "ko" ? "일" : " days"}</p>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">{t("insights.profitRate")}</span>
-                          <p className={`font-medium ${entry.profit_rate >= 0 ? "text-green-600" : "text-red-600"}`}>
+                          <span className="text-xs text-muted-foreground">{t("insights.profitRate")}</span>
+                          <p className={`font-mono tabular-nums text-[13px] ${signTone(entry.profit_rate)}`}>
                             {formatPercentDirect(entry.profit_rate)}
                           </p>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">{t("insights.layer")}</span>
-                          <p className="font-medium">Layer {entry.compression_layer}</p>
+                          <span className="text-xs text-muted-foreground">{t("insights.layer")}</span>
+                          <p className="font-mono tabular-nums text-[13px]">Layer {entry.compression_layer}</p>
                         </div>
                       </div>
 
@@ -1040,68 +760,59 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                         const parsed = tryParseJSON<SituationAnalysis>(entry.situation_analysis)
                         if (!parsed) return (
                           <div>
-                            <h4 className="text-sm font-medium text-muted-foreground mb-1">
+                            <h4 className="text-xs font-medium text-muted-foreground mb-1">
                               {t("insights.situationAnalysis")}
                             </h4>
                             <p className="text-sm">{entry.situation_analysis}</p>
                           </div>
                         )
                         return (
-                          <div className="space-y-3">
-                            <h4 className="text-sm font-medium text-muted-foreground">
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-medium text-muted-foreground">
                               {t("insights.situationAnalysis")}
                             </h4>
-                            <div className="grid gap-3 text-sm">
+                            <div className="grid gap-2 text-sm">
                               {parsed.buy_context_summary && (
-                                <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/10">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <TrendingUp className="w-4 h-4 text-green-600" />
-                                    <span className="font-medium text-green-700 dark:text-green-400">
-                                      {language === "ko" ? "매수 컨텍스트" : "Buy Context"}
-                                    </span>
-                                  </div>
-                                  <p className="text-muted-foreground">{parsed.buy_context_summary}</p>
+                                <div className="p-3 rounded-md border">
+                                  <span className="text-xs font-medium">
+                                    {language === "ko" ? "매수 컨텍스트" : "Buy Context"}
+                                  </span>
+                                  <p className="mt-1 text-muted-foreground">{parsed.buy_context_summary}</p>
                                 </div>
                               )}
                               {parsed.sell_context_summary && (
-                                <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/10">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <TrendingDown className="w-4 h-4 text-red-600" />
-                                    <span className="font-medium text-red-700 dark:text-red-400">
-                                      {language === "ko" ? "매도 컨텍스트" : "Sell Context"}
-                                    </span>
-                                  </div>
-                                  <p className="text-muted-foreground">{parsed.sell_context_summary}</p>
+                                <div className="p-3 rounded-md border">
+                                  <span className="text-xs font-medium">
+                                    {language === "ko" ? "매도 컨텍스트" : "Sell Context"}
+                                  </span>
+                                  <p className="mt-1 text-muted-foreground">{parsed.sell_context_summary}</p>
                                 </div>
                               )}
                               {(parsed.market_at_buy || parsed.market_at_sell) && (
-                                <div className="grid md:grid-cols-2 gap-3">
+                                <div className="grid md:grid-cols-2 gap-2">
                                   {parsed.market_at_buy && (
-                                    <div className="p-2 rounded bg-muted/30">
+                                    <div className="p-3 rounded-md bg-muted/40">
                                       <span className="text-xs text-muted-foreground">{language === "ko" ? "매수시점 시장" : "Market at Buy"}</span>
-                                      <p className="text-sm">{parsed.market_at_buy}</p>
+                                      <p className="text-sm mt-0.5">{parsed.market_at_buy}</p>
                                     </div>
                                   )}
                                   {parsed.market_at_sell && (
-                                    <div className="p-2 rounded bg-muted/30">
+                                    <div className="p-3 rounded-md bg-muted/40">
                                       <span className="text-xs text-muted-foreground">{language === "ko" ? "매도시점 시장" : "Market at Sell"}</span>
-                                      <p className="text-sm">{parsed.market_at_sell}</p>
+                                      <p className="text-sm mt-0.5">{parsed.market_at_sell}</p>
                                     </div>
                                   )}
                                 </div>
                               )}
                               {parsed.key_changes && parsed.key_changes.length > 0 && (
-                                <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/10">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Zap className="w-4 h-4 text-blue-600" />
-                                    <span className="font-medium text-blue-700 dark:text-blue-400">
-                                      {language === "ko" ? "핵심 변화" : "Key Changes"}
-                                    </span>
-                                  </div>
-                                  <ul className="space-y-1 text-muted-foreground">
+                                <div className="p-3 rounded-md border">
+                                  <span className="text-xs font-medium">
+                                    {language === "ko" ? "핵심 변화" : "Key Changes"}
+                                  </span>
+                                  <ul className="mt-1.5 space-y-1 text-muted-foreground">
                                     {parsed.key_changes.map((change, i) => (
                                       <li key={i} className="flex items-start gap-2">
-                                        <span className="text-blue-500 mt-1">•</span>
+                                        <span className="mt-0.5">•</span>
                                         <span>{change}</span>
                                       </li>
                                     ))}
@@ -1118,98 +829,68 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                         const parsed = tryParseJSON<JudgmentEvaluation>(entry.judgment_evaluation)
                         if (!parsed) return (
                           <div>
-                            <h4 className="text-sm font-medium text-muted-foreground mb-1">
+                            <h4 className="text-xs font-medium text-muted-foreground mb-1">
                               {t("insights.judgmentEvaluation")}
                             </h4>
                             <p className="text-sm">{entry.judgment_evaluation}</p>
                           </div>
                         )
+                        const qualityClass = (q: string) =>
+                          q === "적절" || q === "Good" ? "text-success" : "text-amber-600 dark:text-amber-400"
                         return (
-                          <div className="space-y-3">
-                            <h4 className="text-sm font-medium text-muted-foreground">
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-medium text-muted-foreground">
                               {t("insights.judgmentEvaluation")}
                             </h4>
-                            <div className="grid md:grid-cols-2 gap-3 text-sm">
+                            <div className="grid md:grid-cols-2 gap-2 text-sm">
                               {parsed.buy_quality && (
-                                <div className="p-3 rounded-lg bg-muted/30">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <Badge variant="outline" className={
-                                      parsed.buy_quality === "적절" || parsed.buy_quality === "Good"
-                                        ? "bg-green-500/10 text-green-600 border-green-500/20"
-                                        : "bg-yellow-500/10 text-yellow-600 border-yellow-500/20"
-                                    }>
-                                      {language === "ko" ? "매수" : "Buy"}: {parsed.buy_quality}
-                                    </Badge>
-                                  </div>
+                                <div className="p-3 rounded-md border">
+                                  <Badge variant="outline" className={`text-[10px] font-normal ${qualityClass(parsed.buy_quality)}`}>
+                                    {language === "ko" ? "매수" : "Buy"}: {parsed.buy_quality}
+                                  </Badge>
                                   {parsed.buy_quality_reason && (
                                     <p className="text-muted-foreground text-xs mt-2">{parsed.buy_quality_reason}</p>
                                   )}
                                 </div>
                               )}
                               {parsed.sell_quality && (
-                                <div className="p-3 rounded-lg bg-muted/30">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <Badge variant="outline" className={
-                                      parsed.sell_quality === "적절" || parsed.sell_quality === "Good"
-                                        ? "bg-green-500/10 text-green-600 border-green-500/20"
-                                        : "bg-yellow-500/10 text-yellow-600 border-yellow-500/20"
-                                    }>
-                                      {language === "ko" ? "매도" : "Sell"}: {parsed.sell_quality}
-                                    </Badge>
-                                  </div>
+                                <div className="p-3 rounded-md border">
+                                  <Badge variant="outline" className={`text-[10px] font-normal ${qualityClass(parsed.sell_quality)}`}>
+                                    {language === "ko" ? "매도" : "Sell"}: {parsed.sell_quality}
+                                  </Badge>
                                   {parsed.sell_quality_reason && (
                                     <p className="text-muted-foreground text-xs mt-2">{parsed.sell_quality_reason}</p>
                                   )}
                                 </div>
                               )}
                             </div>
-                            {parsed.missed_signals && parsed.missed_signals.length > 0 && (
-                              <div className="p-3 rounded-lg bg-orange-500/5 border border-orange-500/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <AlertCircle className="w-4 h-4 text-orange-600" />
-                                  <span className="font-medium text-orange-700 dark:text-orange-400 text-sm">
-                                    {language === "ko" ? "놓친 신호" : "Missed Signals"}
-                                  </span>
-                                </div>
-                                <ul className="space-y-1 text-xs text-muted-foreground">
-                                  {parsed.missed_signals.map((signal, i) => (
+                            {[
+                              { key: "missed", items: parsed.missed_signals, label: language === "ko" ? "놓친 신호" : "Missed Signals" },
+                              { key: "over", items: parsed.overreacted_signals, label: language === "ko" ? "과잉 반응 신호" : "Overreacted Signals" },
+                            ].filter(g => g.items && g.items.length > 0).map(g => (
+                              <div key={g.key} className="p-3 rounded-md border">
+                                <span className="text-xs font-medium">{g.label}</span>
+                                <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                                  {g.items!.map((signal, i) => (
                                     <li key={i} className="flex items-start gap-2">
-                                      <span className="text-orange-500 mt-0.5">•</span>
+                                      <span>•</span>
                                       <span>{signal}</span>
                                     </li>
                                   ))}
                                 </ul>
                               </div>
-                            )}
-                            {parsed.overreacted_signals && parsed.overreacted_signals.length > 0 && (
-                              <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Target className="w-4 h-4 text-purple-600" />
-                                  <span className="font-medium text-purple-700 dark:text-purple-400 text-sm">
-                                    {language === "ko" ? "과잉 반응 신호" : "Overreacted Signals"}
-                                  </span>
-                                </div>
-                                <ul className="space-y-1 text-xs text-muted-foreground">
-                                  {parsed.overreacted_signals.map((signal, i) => (
-                                    <li key={i} className="flex items-start gap-2">
-                                      <span className="text-purple-500 mt-0.5">•</span>
-                                      <span>{signal}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
+                            ))}
                           </div>
                         )
                       })()}
 
                       {/* Lessons */}
                       {entry.lessons && entry.lessons.length > 0 && (
-                        <div className="space-y-3">
-                          <h4 className="text-sm font-medium text-muted-foreground">
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-medium text-muted-foreground">
                             {t("insights.lessons")}
                           </h4>
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {entry.lessons.map((lesson, idx) => {
                               // L2 압축 데이터 호환: 문자열이면 객체로 변환, priority 기본값 'medium'
                               const normalizedLesson = typeof lesson === 'string'
@@ -1218,39 +899,32 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                               const priority = normalizedLesson.priority || 'medium'
 
                               return (
-                                <div key={idx} className="p-3 rounded-lg border bg-card">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Badge
-                                      variant="outline"
-                                      className={`${getPriorityColor(priority)} text-xs`}
-                                    >
-                                      {t(`insights.priority.${priority}`)}
-                                    </Badge>
-                                  </div>
-                                  <div className="space-y-2 text-sm">
-                                    {normalizedLesson.condition && (
-                                      <div>
-                                        <span className="text-muted-foreground font-medium">
-                                          {language === "ko" ? "조건" : "Condition"}:
-                                        </span>
-                                        <p className="mt-0.5">{normalizedLesson.condition}</p>
-                                      </div>
-                                    )}
+                                <div key={idx} className="p-3 rounded-md border space-y-2 text-sm">
+                                  <Badge variant="outline" className={`text-[10px] font-normal ${getPriorityColor(priority)}`}>
+                                    {t(`insights.priority.${priority}`)}
+                                  </Badge>
+                                  {normalizedLesson.condition && (
                                     <div>
-                                      <span className="text-muted-foreground font-medium">
-                                        {language === "ko" ? "행동" : "Action"}:
+                                      <span className="text-xs text-muted-foreground">
+                                        {language === "ko" ? "조건" : "Condition"}
                                       </span>
-                                      <p className="mt-0.5 text-primary">{normalizedLesson.action}</p>
+                                      <p className="mt-0.5">{normalizedLesson.condition}</p>
                                     </div>
-                                    {normalizedLesson.reason && (
-                                      <div>
-                                        <span className="text-muted-foreground font-medium">
-                                          {language === "ko" ? "이유" : "Reason"}:
-                                        </span>
-                                        <p className="mt-0.5 text-muted-foreground text-xs">{normalizedLesson.reason}</p>
-                                      </div>
-                                    )}
+                                  )}
+                                  <div>
+                                    <span className="text-xs text-muted-foreground">
+                                      {language === "ko" ? "행동" : "Action"}
+                                    </span>
+                                    <p className="mt-0.5 font-medium">{normalizedLesson.action}</p>
                                   </div>
+                                  {normalizedLesson.reason && (
+                                    <div>
+                                      <span className="text-xs text-muted-foreground">
+                                        {language === "ko" ? "이유" : "Reason"}
+                                      </span>
+                                      <p className="mt-0.5 text-muted-foreground text-xs">{normalizedLesson.reason}</p>
+                                    </div>
+                                  )}
                                 </div>
                               )
                             })}
@@ -1261,12 +935,12 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
                       {/* Pattern Tags */}
                       {entry.pattern_tags && entry.pattern_tags.length > 0 && (
                         <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-2">
+                          <h4 className="text-xs font-medium text-muted-foreground mb-2">
                             {t("insights.patternTags")}
                           </h4>
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-1.5">
                             {entry.pattern_tags.map((tag, idx) => (
-                              <Badge key={idx} variant="secondary" className="text-xs">
+                              <Badge key={idx} variant="outline" className={META_BADGE}>
                                 {tag}
                               </Badge>
                             ))}
@@ -1283,80 +957,52 @@ export function TradingInsightsPage({ data, market = "KR", observability }: Trad
       </Card>
 
       {/* Intuitions Section */}
-      <Card>
-        <CardHeader>
+      <Card className={CARD}>
+        <CardHeader className="px-5 pt-4 pb-3">
           <div className="flex items-center gap-2">
-            <Brain className="w-5 h-5 text-cyan-500" />
-            <CardTitle>{t("insights.intuitions")}</CardTitle>
-            <Badge variant="secondary" className="text-xs">
-              {filteredIntuitions.length}
-            </Badge>
-            {marketFilter !== "all" && (
-              <Badge
-                variant="outline"
-                className={
-                  marketFilter === "KR"
-                    ? "bg-blue-500/10 text-blue-600 border-blue-500/20 text-xs"
-                    : "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-xs"
-                }
-              >
-                {marketFilter === "KR" ? "🇰🇷" : "🇺🇸"} {marketFilter}
-              </Badge>
-            )}
+            <CardTitle className="text-sm font-medium">{t("insights.intuitions")}</CardTitle>
+            <span className="text-xs text-muted-foreground font-mono tabular-nums">{filteredIntuitions.length}</span>
+            {marketFilter !== "all" && marketBadge(marketFilter)}
           </div>
-          <CardDescription>{t("insights.intuitionsDescription")}</CardDescription>
+          <p className="text-xs text-muted-foreground">{t("insights.intuitionsDescription")}</p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-0 pb-1">
           {filteredIntuitions.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">{t("insights.noIntuitions")}</p>
+            <p className="text-sm text-muted-foreground text-center py-8">{t("insights.noIntuitions")}</p>
           ) : (
-            <div className="space-y-4">
+            <div className="border-t divide-y">
               {filteredIntuitions.map((intuition) => (
-                <div
-                  key={intuition.id}
-                  className="p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2">
-                        {intuition.market && (
-                          <Badge
-                            variant="outline"
-                            className={
-                              intuition.market === "KR"
-                                ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
-                                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                            }
-                          >
-                            {intuition.market === "KR" ? "🇰🇷" : "🇺🇸"} {intuition.market}
-                          </Badge>
-                        )}
-                        <Badge variant="outline" className="bg-cyan-500/10 text-cyan-600 dark:text-cyan-400">
+                <div key={intuition.id} className="px-5 py-4 hover:bg-muted/50 transition-colors">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {intuition.market && marketBadge(intuition.market)}
+                        <Badge variant="outline" className={META_BADGE}>
                           {intuition.category}
                         </Badge>
                         {intuition.subcategory && (
-                          <Badge variant="outline" className="bg-gray-500/10 text-gray-600 dark:text-gray-400">
+                          <Badge variant="outline" className={META_BADGE}>
                             {intuition.subcategory}
                           </Badge>
                         )}
                       </div>
-                      <p className="font-medium">
-                        <span className="text-muted-foreground">{t("insights.condition")}:</span>{" "}
-                        {intuition.condition}
-                      </p>
-                      <p className="text-primary">
-                        <span className="text-muted-foreground">{t("insights.insight")}:</span>{" "}
-                        {intuition.insight}
-                      </p>
-                    </div>
-                    <div className="text-right space-y-2 min-w-[140px]">
-                      <div>
-                        <div className="text-sm text-muted-foreground">{t("insights.confidence")}</div>
-                        {getConfidenceBar(intuition.confidence)}
+                      <div className="space-y-1 text-sm">
+                        <p>
+                          <span className="text-muted-foreground">{t("insights.condition")}:</span>{" "}
+                          {intuition.condition}
+                        </p>
+                        <p className="font-medium">
+                          <span className="text-muted-foreground font-normal">{t("insights.insight")}:</span>{" "}
+                          {intuition.insight}
+                        </p>
                       </div>
-                      <div className="flex items-center justify-end gap-4 text-xs text-muted-foreground">
-                        <span>{t("insights.successRate")}: {(intuition.success_rate * 100).toFixed(0)}%</span>
-                        <span>{t("insights.supportingTrades")}: {intuition.supporting_trades}</span>
+                    </div>
+                    <div className="space-y-1 sm:w-[160px] shrink-0">
+                      <div className="text-xs text-muted-foreground">{t("insights.confidence")}</div>
+                      {getConfidenceBar(intuition.confidence)}
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                        <span>{t("insights.successRate")}: <span className="font-mono tabular-nums">{(intuition.success_rate * 100).toFixed(0)}%</span></span>
+                        <span>{t("insights.supportingTrades")}: <span className="font-mono tabular-nums">{intuition.supporting_trades}</span></span>
                       </div>
                     </div>
                   </div>
