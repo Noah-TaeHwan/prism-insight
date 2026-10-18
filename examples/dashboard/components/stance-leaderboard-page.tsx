@@ -10,6 +10,8 @@ import { StanceAgentConnectCard } from "@/components/stance-agent-connect-card"
 import type { StanceLeaderboard, StanceBoard, StanceEntry } from "@/types/dashboard"
 
 const SPEC_URL = "https://github.com/dragon1086/prism-insight/blob/main/stance/spec/core-spec.md"
+const CARD = "gap-0 py-0 rounded-lg shadow-none"
+const MUTED_BADGE = "text-[10px] font-normal text-muted-foreground"
 
 function pct(v: number | null | undefined, digits = 2) {
   if (v === null || v === undefined) return "—"
@@ -79,81 +81,80 @@ export function StanceLeaderboardPage() {
   return (
     <div className="space-y-6">
       {/* ── 처음 온 사람을 위한 소개 ────────────────────────────── */}
-      <Card className="border-border/50 overflow-hidden">
-        <div className="bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-800 dark:to-slate-900 px-6 py-8 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <h2 className="text-2xl font-bold tracking-tight">Stance</h2>
-            <Badge variant="outline" className="text-white/80 border-white/30 text-xs">
+      <section className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold tracking-tight">Stance</h2>
+            <Badge variant="outline" className={MUTED_BADGE}>
               {ko ? "베타" : "Beta"}
             </Badge>
           </div>
-          <p className="max-w-3xl break-keep text-2xl font-bold leading-snug text-white sm:text-3xl">
+          <p className="max-w-3xl break-keep text-xl font-semibold leading-snug tracking-tight sm:text-2xl">
             {ko
               ? "말로만 잘하는 투자 전략, 이제 기록으로 비교하세요."
               : "Stop taking trading claims on faith. Compare the record."}
           </p>
-          <p className="mt-3 max-w-3xl break-keep text-base leading-relaxed text-white/75">
+          <p className="max-w-3xl break-keep text-sm leading-relaxed text-muted-foreground">
             {ko
               ? "Stance는 전략이 등록한 뒤 내리는 판단을 결과가 나오기 전에 기록하고, 수익과 위험을 같은 기준으로 계산합니다."
               : "Stance records each decision after registration, before its outcome, then measures return and risk under the same rules."}
           </p>
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5 pt-1">
             {(ko
               ? ["과거 실적 제출 없음", "소급 입력 없음", "등록 이후만 공개"]
               : ["No submitted history", "No backfills", "Public from registration onward"]
             ).map((item) => (
-              <span
-                key={item}
-                className="rounded-full border border-amber-300/35 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100"
-              >
+              <Badge key={item} variant="outline" className="text-xs font-normal text-muted-foreground">
                 {item}
-              </span>
+              </Badge>
             ))}
           </div>
         </div>
 
-        <CardContent className="space-y-5 pt-6 text-sm leading-relaxed">
-          <p className="break-keep text-base text-foreground">
-            {ko ? (
-              <>
-                오늘 등록하고 어제의 수익을 가져오는 일은 불가능합니다. Stance는
-                <strong> 등록 이후, 결과가 나오기 전의 선택부터</strong> 공개 기록합니다.
-              </>
-            ) : (
-              <>
-                Registering today and importing yesterday&apos;s gains is impossible. Stance publicly records
-                <strong> each choice before its outcome, from registration onward</strong>.
-              </>
-            )}
-          </p>
+        <Card className={CARD}>
+          <CardContent className="space-y-4 p-4 sm:p-5 text-sm leading-relaxed">
+            <p className="break-keep text-foreground">
+              {ko ? (
+                <>
+                  오늘 등록하고 어제의 수익을 가져오는 일은 불가능합니다. Stance는
+                  <strong className="font-medium"> 등록 이후, 결과가 나오기 전의 선택부터</strong> 공개 기록합니다.
+                </>
+              ) : (
+                <>
+                  Registering today and importing yesterday&apos;s gains is impossible. Stance publicly records
+                  <strong className="font-medium"> each choice before its outcome, from registration onward</strong>.
+                </>
+              )}
+            </p>
 
-          <div className="grid gap-3 sm:grid-cols-3 pt-2">
-            {[
-              [ko ? "1. 등록한 날부터 새 기록" : "1. A fresh record from day one", ko ? "과거 실적 업로드·소급 입력 없음" : "No uploaded history and no backfills"],
-              [ko ? "2. 결과 전에 판단 기록" : "2. Decisions before outcomes", ko ? "서버가 판단 시각과 당시 시장가격을 보관" : "The server saves decision time and market price"],
-              [ko ? "3. 실력과 위험 자동 누적" : "3. Skill and risk accumulate", ko ? "수익·하락폭·투자비중을 같은 기준으로 계산" : "Return, drawdown, and exposure on one rulebook"],
-            ].map(([title, desc]) => (
-              <div key={title} className="rounded-lg border border-border/50 bg-muted/30 p-4">
-                <div className="font-semibold mb-1">{title}</div>
-                <div className="text-xs text-muted-foreground leading-relaxed">{desc}</div>
-              </div>
-            ))}
-          </div>
+            <ol className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-3">
+              {[
+                [ko ? "1. 등록한 날부터 새 기록" : "1. A fresh record from day one", ko ? "과거 실적 업로드·소급 입력 없음" : "No uploaded history and no backfills"],
+                [ko ? "2. 결과 전에 판단 기록" : "2. Decisions before outcomes", ko ? "서버가 판단 시각과 당시 시장가격을 보관" : "The server saves decision time and market price"],
+                [ko ? "3. 실력과 위험 자동 누적" : "3. Skill and risk accumulate", ko ? "수익·하락폭·투자비중을 같은 기준으로 계산" : "Return, drawdown, and exposure on one rulebook"],
+              ].map(([title, desc]) => (
+                <li key={title} className="bg-card p-4">
+                  <div className="font-medium mb-1">{title}</div>
+                  <div className="text-xs text-muted-foreground leading-relaxed">{desc}</div>
+                </li>
+              ))}
+            </ol>
 
-          <a
-            href={SPEC_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm text-primary hover:underline pt-1"
-          >
-            {ko ? "개발자를 위한 계산·기록 규칙 보기 →" : "Technical recording and calculation rules →"}
-          </a>
-        </CardContent>
-      </Card>
+            <a
+              href={SPEC_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              {ko ? "개발자를 위한 계산·기록 규칙 보기 →" : "Technical recording and calculation rules →"}
+            </a>
+          </CardContent>
+        </Card>
+      </section>
 
       {/* ── 리더보드 ────────────────────────────────────────────── */}
       {failed && (
-        <Card className="border-border/50">
+        <Card className={CARD}>
           <CardContent className="py-10 text-center text-muted-foreground text-sm">
             {ko ? "전략 순위표를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." : "The strategy ranking could not be loaded. Please try again shortly."}
           </CardContent>
@@ -161,7 +162,7 @@ export function StanceLeaderboardPage() {
       )}
 
       {!failed && !data && (
-        <Card className="border-border/50">
+        <Card className={CARD}>
           <CardContent className="py-10 text-center text-muted-foreground text-sm">
             {ko ? "불러오는 중..." : "Loading..."}
           </CardContent>
@@ -181,13 +182,13 @@ export function StanceLeaderboardPage() {
 
       {/* ── 채점 방식 ───────────────────────────────────────────── */}
       {data && (
-        <Card className="border-border/50">
-          <CardHeader>
-            <CardTitle className="text-base">
+        <Card className={CARD}>
+          <CardHeader className="px-5 pt-4 pb-3">
+            <CardTitle className="text-sm font-medium">
               {ko ? "왜 종합점수 하나로 줄 세우지 않나요?" : "Why isn't there one overall score?"}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-3 leading-relaxed">
+          <CardContent className="px-5 pb-5 text-sm text-muted-foreground space-y-3 leading-relaxed">
             <p>
               {ko
                 ? "수익률만 보면 큰 위험을 감수한 전략이 유리하고, 위험만 낮추면 현금을 오래 들고 있던 전략이 유리합니다. 어떤 종합점수도 한쪽을 편들게 됩니다."
@@ -196,17 +197,17 @@ export function StanceLeaderboardPage() {
             <p>
               {ko ? (
                 <>
-                  그래서 <strong className="text-foreground">얼마나 벌었는지, 얼마나 크게 떨어졌는지, 실제로 얼마를 투자했는지</strong>를
+                  그래서 <strong className="font-medium text-foreground">얼마나 벌었는지, 얼마나 크게 떨어졌는지, 실제로 얼마를 투자했는지</strong>를
                   함께 보여줍니다. 무엇을 중요하게 볼지는 직접 선택할 수 있습니다.
                 </>
               ) : (
                 <>
-                  So we show several metrics side by side, always next to <strong className="text-foreground">average exposure</strong> —
+                  So we show several metrics side by side, always next to <strong className="font-medium text-foreground">average exposure</strong> —
                   a score only means something once you know how much was at risk.
                 </>
               )}
             </p>
-            <div className="grid gap-2 pt-1 sm:grid-cols-2 lg:grid-cols-3">
+            <dl className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2 lg:grid-cols-3">
               {[
                 [ko ? "누적 수익" : "Total return", ko ? "기록을 시작한 날부터 지금까지 번 비율" : "Gain or loss since the record began"],
                 [ko ? "가장 큰 하락" : "Worst drop", ko ? "고점에서 가장 많이 떨어졌던 폭" : "The deepest fall from a previous high"],
@@ -215,13 +216,13 @@ export function StanceLeaderboardPage() {
                 [ko ? "기록한 비율" : "Record rate", ko ? "정해둔 판단 시점에 빠짐없이 기록한 비율" : "How consistently scheduled decisions were recorded"],
                 [ko ? "매매 빈도" : "Trading activity", ko ? "자산을 얼마나 자주 사고팔았는지" : "How frequently the portfolio was bought and sold"],
               ].map(([label, description]) => (
-                <div key={label} className="rounded-md border border-border/50 bg-muted/20 p-3">
-                  <div className="text-xs font-semibold text-foreground">{label}</div>
-                  <div className="mt-1 text-xs">{description}</div>
+                <div key={label} className="bg-card p-3">
+                  <dt className="text-xs font-medium text-foreground">{label}</dt>
+                  <dd className="mt-1 text-xs">{description}</dd>
                 </div>
               ))}
-            </div>
-            <p className="text-xs font-mono pt-1 opacity-70">
+            </dl>
+            <p className="text-xs font-mono tabular-nums">
               {ko ? "계산 규칙 버전" : "Calculation rules"}: {data.score_profile}
             </p>
           </CardContent>
@@ -234,16 +235,16 @@ export function StanceLeaderboardPage() {
 function PreparingNotice({ boards, ko }: { boards: StanceBoard[]; ko: boolean }) {
   const board = boards[0]
   return (
-    <Card className="border-border/50">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+    <Card className={CARD}>
+      <CardHeader className="px-5 pt-4 pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-medium">
           {ko ? "첫 전략을 기다리고 있어요" : "Waiting for the first strategy"}
-          <Badge variant="outline" className="text-xs">
+          <Badge variant="outline" className={MUTED_BADGE}>
             {ko ? "현재 0개" : "0 so far"}
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5 text-sm">
+      <CardContent className="space-y-4 px-5 pb-5 text-sm">
         <p className="text-muted-foreground leading-relaxed">
           {ko
             ? "아직 참가한 전략이 없습니다. 등록하면 즉시 ‘기록 쌓는 중’ 목록에 나타나고, 첫 판단부터 성과가 공개됩니다. 충분한 기간과 거래 기록이 쌓이면 공식 순위에 들어갑니다."
@@ -251,8 +252,8 @@ function PreparingNotice({ boards, ko }: { boards: StanceBoard[]; ko: boolean })
         </p>
 
         {board && (
-          <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-2 text-xs">
-            <div className="font-semibold text-sm mb-2">
+          <div className="rounded-md border p-4 space-y-2 text-xs">
+            <div className="font-medium text-sm mb-2">
               {ko ? "이 시장에서는 이렇게 계산해요" : "How this market is measured"}
             </div>
             <Row label={ko ? "시장" : "Market"} value={`${board.market} (${board.currency})`} />
@@ -264,15 +265,15 @@ function PreparingNotice({ boards, ko }: { boards: StanceBoard[]; ko: boolean })
             />
             {board.support !== "stable" && (
               <div className="pt-2 text-amber-600 dark:text-amber-500">
-                ⚠️ {ko ? "시험 운영 중인 시장입니다" : "This market is in experimental support"}
+                {ko ? "시험 운영 중인 시장입니다" : "This market is in experimental support"}
               </div>
             )}
           </div>
         )}
 
-        <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
-          <div className="font-semibold mb-2">{ko ? "자동매매 전략이 있다면 바로 참여할 수 있어요" : "Already have an automated strategy? Join now"}</div>
-          <p className="text-muted-foreground text-xs mb-2 leading-relaxed">
+        <div className="rounded-md border p-4">
+          <div className="font-medium mb-2">{ko ? "자동매매 전략이 있다면 바로 참여할 수 있어요" : "Already have an automated strategy? Join now"}</div>
+          <p className="text-muted-foreground text-xs leading-relaxed">
             {ko
               ? "위의 연결 지시문을 코딩 에이전트에 붙여넣으면 등록과 코드 연결을 도와줍니다. 실계좌는 없어도 됩니다."
               : "Paste the connection instruction above into a coding agent. It can handle registration and integration. No live brokerage account is required."}
@@ -287,7 +288,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4">
       <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="text-right">{value}</span>
+      <span className="text-right font-mono tabular-nums">{value}</span>
     </div>
   )
 }
@@ -297,33 +298,35 @@ function BoardTable({ board, ko }: { board: StanceBoard; ko: boolean }) {
   const provisional = board.entries.filter((e) => !e.qualified)
 
   return (
-    <Card className="border-border/50">
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+    <Card className={CARD}>
+      <CardHeader className="px-5 pt-4 pb-3">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-medium">
           {board.market}
-          <Badge variant="outline" className="text-xs">
+          <Badge variant="outline" className={`${MUTED_BADGE} font-mono`}>
             {board.currency}
           </Badge>
           {board.support !== "stable" && (
-            <Badge variant="outline" className="text-xs text-amber-600 border-amber-500/50">
+            <Badge variant="outline" className="text-[10px] font-normal text-amber-600 dark:text-amber-500 border-amber-500/40">
               {ko ? "시험 운영" : "experimental"}
             </Badge>
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-5 px-0 pb-2">
         <EntryTable entries={qualified} ko={ko} />
 
         {provisional.length > 0 && (
           <div>
-            <div className="text-sm font-semibold mb-2 text-muted-foreground">
-              {ko ? "기록 쌓는 중" : "Building a record"}
+            <div className="px-5 border-t pt-4">
+              <div className="text-sm font-medium mb-1">
+                {ko ? "기록 쌓는 중" : "Building a record"}
+              </div>
+              <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                {ko
+                  ? "공식 순위에 필요한 기간과 거래 수를 채우기 전입니다. 이 단계에서도 모든 기록과 성과를 그대로 볼 수 있습니다."
+                  : "These strategies are still completing the time and trade requirements for official ranking. Their full records remain visible."}
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-              {ko
-                ? "공식 순위에 필요한 기간과 거래 수를 채우기 전입니다. 이 단계에서도 모든 기록과 성과를 그대로 볼 수 있습니다."
-                : "These strategies are still completing the time and trade requirements for official ranking. Their full records remain visible."}
-            </p>
             <EntryTable entries={provisional} ko={ko} provisional />
           </div>
         )}
@@ -343,57 +346,60 @@ function EntryTable({
 }) {
   if (entries.length === 0) {
     return (
-      <div className="text-sm text-muted-foreground py-6 text-center">
+      <div className="text-sm text-muted-foreground py-6 px-5 text-center">
         {ko ? "아직 공식 순위에 오른 전략이 없습니다." : "No strategy has reached the official ranking yet."}
       </div>
     )
   }
 
+  const th = "text-right text-xs font-normal text-muted-foreground py-2 px-3 whitespace-nowrap"
+  const td = "text-right px-3 py-3 align-top font-mono tabular-nums text-[13px] whitespace-nowrap"
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border/50 text-xs text-muted-foreground">
-            <th className="text-left font-medium py-2 pr-4">{ko ? "전략" : "Strategy"}</th>
-            <th className="text-right font-medium py-2 px-3">{ko ? "누적 수익" : "Total return"}</th>
-            <th className="text-right font-medium py-2 px-3">{ko ? "위험 대비 수익" : "Risk-adjusted"}</th>
-            <th className="text-right font-medium py-2 px-3">{ko ? "가장 큰 하락" : "Worst drop"}</th>
-            <th className="text-right font-medium py-2 px-3 text-primary">
+          <tr className="border-b">
+            <th className="text-left text-xs font-normal text-muted-foreground py-2 pl-5 pr-4">{ko ? "전략" : "Strategy"}</th>
+            <th className={th}>{ko ? "누적 수익" : "Total return"}</th>
+            <th className={th}>{ko ? "위험 대비 수익" : "Risk-adjusted"}</th>
+            <th className={th}>{ko ? "가장 큰 하락" : "Worst drop"}</th>
+            <th className={`${th} text-foreground`}>
               {ko ? "평균 투자 비율" : "Avg invested"}
             </th>
-            <th className="text-right font-medium py-2 px-3">{ko ? "기록한 비율" : "Record rate"}</th>
-            <th className="text-right font-medium py-2 px-3">{ko ? "매매 빈도" : "Trading activity"}</th>
-            <th className="text-right font-medium py-2 pl-3">{ko ? "완료 거래" : "Closed trades"}</th>
+            <th className={th}>{ko ? "기록한 비율" : "Record rate"}</th>
+            <th className={th}>{ko ? "매매 빈도" : "Trading activity"}</th>
+            <th className={`${th} pr-5`}>{ko ? "완료 거래" : "Closed trades"}</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((e) => (
-            <tr key={e.strategy} className="border-b border-border/30 last:border-0">
-              <td className="py-3 pr-4">
+            <tr key={e.strategy} className="border-b last:border-0">
+              <td className="py-3 pl-5 pr-4 align-top min-w-56">
                 <div className="font-medium">{e.display_name}</div>
                 <div className="text-xs text-muted-foreground">
                   <span className="font-mono">{e.handle}</span>
                   {e.owner_name && <span> · {e.owner_name}</span>}
                 </div>
                 {e.tagline && <div className="mt-1 max-w-sm text-xs text-muted-foreground">{e.tagline}</div>}
-                <div className="mt-2 inline-flex rounded-full border border-primary/25 bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary">
-                  {ko ? "최근 판단" : "Latest"}: {latestDecision(e, ko)}
+                <div className="mt-2 inline-flex rounded border px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {ko ? "최근 판단" : "Latest"}:&nbsp;<span className="text-foreground">{latestDecision(e, ko)}</span>
                 </div>
                 {(e.description || e.website_url || e.source_url) && (
                   <details className="mt-1.5 max-w-sm text-xs">
-                    <summary className="cursor-pointer text-primary hover:underline">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                       {ko ? "전략 소개" : "Strategy profile"}
                     </summary>
-                    <div className="mt-2 space-y-2 rounded-md border border-border/50 bg-muted/20 p-3 text-muted-foreground">
+                    <div className="mt-2 space-y-2 rounded-md border p-3 text-muted-foreground">
                       {e.description && <p className="whitespace-pre-wrap leading-relaxed">{e.description}</p>}
                       <div className="flex flex-wrap gap-3">
                         {e.website_url && (
-                          <a href={e.website_url} target="_blank" rel="nofollow ugc noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                          <a href={e.website_url} target="_blank" rel="nofollow ugc noopener noreferrer" className="inline-flex items-center gap-1 text-foreground hover:underline">
                             {ko ? "대표 링크" : "Website"}<ExternalLink className="h-3 w-3" />
                           </a>
                         )}
                         {e.source_url && (
-                          <a href={e.source_url} target="_blank" rel="nofollow ugc noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                          <a href={e.source_url} target="_blank" rel="nofollow ugc noopener noreferrer" className="inline-flex items-center gap-1 text-foreground hover:underline">
                             {ko ? "소스" : "Source"}<Github className="h-3 w-3" />
                           </a>
                         )}
@@ -408,27 +414,23 @@ function EntryTable({
                   </div>
                 )}
               </td>
-              <td
-                className={`text-right px-3 tabular-nums ${
-                  e.metrics.cumulative_return >= 0 ? "text-emerald-600" : "text-rose-600"
-                }`}
-              >
+              <td className={`${td} ${e.metrics.cumulative_return >= 0 ? "text-success" : "text-destructive"}`}>
                 {pct(e.metrics.cumulative_return)}
               </td>
-              <td className="text-right px-3 tabular-nums">{e.metrics.sortino.toFixed(2)}</td>
-              <td className="text-right px-3 tabular-nums text-muted-foreground">
+              <td className={td}>{e.metrics.sortino.toFixed(2)}</td>
+              <td className={`${td} text-muted-foreground`}>
                 {(e.metrics.max_drawdown * 100).toFixed(1)}%
               </td>
-              <td className="text-right px-3 tabular-nums font-medium">
+              <td className={`${td} font-medium`}>
                 {(e.metrics.avg_exposure * 100).toFixed(0)}%
               </td>
-              <td className="text-right px-3 tabular-nums text-muted-foreground">
+              <td className={`${td} text-muted-foreground`}>
                 {(e.metrics.coverage * 100).toFixed(0)}%
               </td>
-              <td className="text-right px-3 tabular-nums text-muted-foreground">
+              <td className={`${td} text-muted-foreground`}>
                 {e.metrics.turnover.toFixed(1)}
               </td>
-              <td className="text-right pl-3 tabular-nums text-muted-foreground">
+              <td className={`${td} pr-5 text-muted-foreground`}>
                 {e.metrics.closed_trades}
               </td>
             </tr>
