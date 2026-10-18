@@ -89,6 +89,10 @@ def response_schema(context):
             "invalidation": {"type": "string"}}), {"type": "null"}]}
         if recovery.get("phase") == "OBSERVING" and recovery.get("first_observation") is True:
             properties["action"]["enum"] = ["WAIT"]
+    if context.get("entry_contract_version") == 1:
+        from live.scenario_entry_contract import assessment_schema, entry_contract_schema
+        properties["entry_contract"] = {"anyOf": [entry_contract_schema(), {"type": "null"}]}
+        properties["thesis_assessment"] = assessment_schema(context)
     return _object(properties)
 
 
@@ -117,10 +121,12 @@ def _matches(value, schema):
                 all(_matches(value[key], child) for key, child in schema["properties"].items()))
     if actual == "array":
         return schema.get("minItems", 0) <= len(value) <= min(20, schema.get("maxItems",20)) and all(_matches(item, schema["items"]) for item in value)
+    if actual == "string":
+        return schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", len(value))
     return True
 
 
-def validate_wire_proposal(payload, context):
+def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=False):
     schema = response_schema(context)
     if not isinstance(payload, dict):
         raise ValueError("response_contract_mismatch")
@@ -163,6 +169,9 @@ def validate_wire_proposal(payload, context):
         raise ValueError("response_identity_mismatch")
     if not _matches(payload, schema):
         raise ValueError("response_contract_mismatch")
+    if context.get("entry_contract_version") == 1:
+        from live.scenario_entry_contract import validate_metadata
+        validate_metadata(payload, context, allow_failed_wait_template=_allow_failed_wait_template)
     normalized = dict(payload)
     normalized["entries"] = [{key: value for key, value in row.items()
                               if key != "trigger_price" or value is not None}

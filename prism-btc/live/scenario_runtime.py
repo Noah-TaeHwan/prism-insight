@@ -27,6 +27,9 @@ from live.entry_reservations import LockBusy
 from live.scenario_llm import ScenarioModelError
 from live.scenario_review_memory import apply_review, observe_review, review_context
 from live import scenario_recovery as recovery
+from live.scenario_entry_contract import (bind_contract, contract_context, observe_contract,
+                                          strip_metadata, validate_metadata)
+from live.scenario_entry_contract import valid_record
 
 REQUIRED_CAPABILITIES = frozenset({"exact_fills", "atomic_protection",
     "exact_settlement", "idempotent_intents", "fresh_risk_context"})
@@ -139,7 +142,10 @@ class ScenarioRuntime:
     def __init__(self, conn, broker, propose, snapshot, *, clock=time.time,
                  recovery_enabled=False, automatic_normalization_enabled=False,
                  calculated_review_enabled=False, calculated_review_propose=None,
-                 research_review_mode="legacy"):
+                 research_review_mode="legacy", entry_contract_enabled=False):
+        if type(entry_contract_enabled) is not bool:
+            raise ValueError("entry_contract_flag_must_be_bool")
+        self.entry_contract_enabled = entry_contract_enabled
         if research_review_mode not in {"legacy", "allocation-single", "allocation-calculated",
                                      "action-allocation-single-v1", "action-allocation-calculated-v1",
                                      "economic-reject-single-v1", "economic-reject-calculated-v1"}:
@@ -174,6 +180,10 @@ class ScenarioRuntime:
                     scenario_id TEXT PRIMARY KEY, evidence TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS llm_scenario_notice_errors (
                     captured_at REAL NOT NULL, reason TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS llm_scenario_entry_contracts (
+                    scenario_id TEXT PRIMARY KEY, body TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS llm_scenario_entry_failures (
+                    scenario_id TEXT PRIMARY KEY, body TEXT NOT NULL);
             """)
             conn.execute("INSERT OR IGNORE INTO llm_scenario_state VALUES(1, ?)",
                          (_json({"version": 0, "active": None, "breaker": {}}),))
@@ -400,6 +410,20 @@ class ScenarioRuntime:
         ctx.update(scenario_id=active["scenario_id"] if active else None,
                    revision=active["revision"] if active else 0,
                    seen_action_ids=[r[0] for r in self.conn.execute("SELECT id FROM llm_scenario_intents")])
+        has_registered_contract = bool(active and self.conn.execute(
+            "SELECT 1 FROM llm_scenario_entry_contracts WHERE scenario_id=?", (active["scenario_id"],)).fetchone())
+        if self.entry_contract_enabled or has_registered_contract or (active and "entry_contract" in active):
+            # Broker REST may finish after the caller's pre-capture timestamp.
+            # Judge freshness at the actual post-capture clock; never rewrite
+            # exchange/account timestamps or reset samples using the old time.
+            observed_now = self.clock()
+            if active and (has_registered_contract or "entry_contract" in active) and not self._entry_contract_registered(active):
+                ctx.update(entry_contract_version=1, registered_entry_contract=None,
+                           entry_contract_status="CORRUPT", entry_contract_observation=None,
+                           entry_contract_failure_rule=None)
+            else:
+                observe_contract(active, ctx, int(observed_now // 300), observed_now)
+                ctx.update(contract_context(active, True))
         if active:
             ctx.update(initial_equity=active["initial_equity"], side=active["side"],
                        previous_hard_stop=active["hard_stop"])
@@ -480,6 +504,124 @@ class ScenarioRuntime:
         self._save(state)
         return ctx
 
+    def _entry_contract_registered(self, active):
+        """The original insert-only registration is independent of mutable state."""
+        if not active or not valid_record(active.get("entry_contract"), active.get("scenario_id")):
+            return False
+        row = self.conn.execute("SELECT body FROM llm_scenario_entry_contracts WHERE scenario_id=?",
+                                (active["scenario_id"],)).fetchone()
+        if row is None or row[0] != _json(active["entry_contract"]):
+            return False
+        record = active["entry_contract"]
+        original = self.conn.execute("SELECT payload FROM llm_scenario_intents WHERE id=? AND scenario_id=?",
+            (record["origin"]["action_id"], active["scenario_id"])).fetchone()
+        if original is None:
+            return False
+        try:
+            plan = json.loads(original[0])
+            if (plan.get("action") != "OPEN" or plan.get("side") != active.get("side")
+                    or plan.get("scenario_id") != active["scenario_id"]
+                    or plan.get("action_id") != record["origin"]["action_id"]
+                    or plan.get("input_id") != record["origin"]["input_id"]):
+                return False
+            return bind_contract(record["definition"], plan, record["origin"]["registered_at"]) == record
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return False
+
+    def _entry_contract_exit(self, state, ctx, slot):
+        """Commit a latched sampled failure through the normal broker EXIT adapter."""
+        observation = ctx.get("entry_contract_observation") or {}
+        active = state.get("active") or {}
+        cached_failure = active.get("entry_contract_model_failure") or active.get("entry_contract_failure")
+        last_failed = isinstance(active.get("last_thesis_assessment"), dict) and active["last_thesis_assessment"].get("status") == "FAILED"
+        failure_row = self.conn.execute("SELECT body FROM llm_scenario_entry_failures WHERE scenario_id=?",
+            (state["active"]["scenario_id"],)).fetchone() if state.get("active") else None
+        contract_id = active.get("entry_contract", {}).get("contract_id") if isinstance(active.get("entry_contract"), dict) else None
+        host_intent = self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE id=? AND scenario_id=?",
+            ("ec_exit_" + contract_id[:40], active.get("scenario_id"))).fetchone() if isinstance(contract_id, str) else None
+        cached_observation = active.get("entry_contract_observation")
+        suspect = bool(failure_row or cached_failure or host_intent or last_failed
+                       or (isinstance(cached_observation, dict) and cached_observation.get("status") == "FAILED"))
+        trusted = ctx.get("entry_contract_status") == "REGISTERED" and self._entry_contract_registered(active)
+        if suspect and not trusted:
+            return dict(status="blocked", reason="entry_contract_failed_state_untrusted", model_called=False)
+        if not trusted:
+            return None
+        if failure_row or cached_failure or host_intent or last_failed:
+            try:
+                failure = json.loads(failure_row[0]) if failure_row else None
+                record = ctx["registered_entry_contract"]
+                if (not isinstance(failure, dict) or failure.get("contract") != record
+                        or failure.get("contract_id") != record["contract_id"]
+                        or failure.get("source") not in ("HOST_SAMPLED_MARK_PRICE", "MODEL_ASSESSMENT")):
+                    raise ValueError("failure_registration")
+                row = self.conn.execute("SELECT payload,status FROM llm_scenario_intents WHERE id=? AND scenario_id=?",
+                    (failure.get("intent_id"), active["scenario_id"])).fetchone()
+                if not row or json.loads(row[0]).get("action") != "EXIT":
+                    raise ValueError("failure_intent")
+                if failure["source"] == "MODEL_ASSESSMENT":
+                    if (failure.get("assessment", {}).get("status") != "FAILED"
+                            or failure.get("assessment", {}).get("contract_id") != record["contract_id"]):
+                        raise ValueError("failure_assessment")
+                else:
+                    if (failure.get("observation", {}).get("status") != "FAILED"
+                            or failure.get("observation", {}).get("contract_id") != record["contract_id"]):
+                        raise ValueError("failure_samples")
+            except (ValueError, TypeError, AttributeError):
+                return dict(status="blocked", reason="entry_contract_failed_state_untrusted", model_called=False)
+            return dict(status="blocked" if row[1] == "TERMINAL" else "intent_pending",
+                        reason="entry_contract_failed_exit_unresolved", model_called=False)
+        if observation.get("status") != "FAILED":
+            return None
+        if ctx["legacy_fenced"] or not ctx["protection_ok"]:
+            return dict(status="fenced")
+        if self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING'").fetchone():
+            return dict(status="intent_pending")
+        for body, in self.conn.execute("SELECT payload FROM llm_scenario_intents WHERE scenario_id=? AND status!='TERMINAL'",
+                                       (state["active"]["scenario_id"],)):
+            if json.loads(body).get("action") == "EXIT":
+                return dict(status="intent_pending", reason="entry_contract_exit_already_committed")
+        now = self.clock()
+        captured = ctx.get("account_captured_at")
+        if not _finite(captured) or not 0 <= now-captured <= 120:
+            return dict(status="blocked", reason="entry_contract_exit_account_stale")
+        record = ctx["registered_entry_contract"]
+        identity = "ec_exit_" + record["contract_id"][:40]
+        # A durable intent is never resubmitted, including uncertain responses.
+        existing = self.conn.execute("SELECT status FROM llm_scenario_intents WHERE id=?", (identity,)).fetchone()
+        if existing:
+            return dict(status="blocked" if existing[0] == "TERMINAL" else "intent_pending",
+                        reason="entry_contract_failed_exit_unresolved")
+        fresh = dict(ctx, now=now, input_id="ec_" + record["contract_id"],
+                     input_captured_at=captured, max_input_age_seconds=120)
+        payload = dict(schema_version=1, scenario_id=state["active"]["scenario_id"],
+            revision=ctx["revision"]+1, input_id=fresh["input_id"], action_id=identity,
+            action="EXIT", confidence=1, expires_at=now+90, entries=[], take_profits=[],
+            partial_stops=[], cancel_entry_ids=[row["id"] for row in ctx["pending_entries"]],
+            rationale="Registered entry failure confirmed by consecutive sampled MARK_PRICE observations", leverage=10)
+        validated = validate_execution_prices(payload, fresh)
+        failure = dict(source="HOST_SAMPLED_MARK_PRICE", contract=record, contract_id=record["contract_id"],
+                       intent_id=identity, observation=observation)
+        self.conn.execute("INSERT INTO llm_scenario_entry_failures VALUES(?,?)",
+                          (validated["scenario_id"], _json(failure)))
+        state["active"]["entry_contract_failure"] = failure
+        state["active"]["revision"] = validated["revision"]
+        state["version"] += 1
+        self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
+                          (identity, validated["scenario_id"], _json(validated)))
+        self._save(state)
+        from live.scenario_provenance import record_hashed
+        record_hashed("entry_contract_failure_exit", dict(contract=record, observation=observation,
+            payload=validated, source="HOST_SAMPLED_MARK_PRICE"),
+            scenario_id=validated["scenario_id"], intent_id=identity, decision_slot=slot)
+        try:
+            self.broker.execute(validated, identity)
+        except Exception as exc:
+            from live.scenario_broker import BrokerCancellationPending
+            return dict(status="intent_pending", reason="awaiting_cancellation" if isinstance(
+                exc, BrokerCancellationPending) else "submission_unknown", model_called=False)
+        return dict(status="intent_pending", reason="awaiting_exact_evidence", model_called=False)
+
     def _tick(self, claimed):
         """One synchronous tick; callers may run independent protection separately."""
         slot = int(self.clock() // 300)
@@ -505,6 +647,9 @@ class ScenarioRuntime:
                                 and not self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status IS NULL OR status!='TERMINAL'").fetchone())}
                 if self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING'").fetchone():
                     return {"status": "intent_pending"}
+                contract_exit = self._entry_contract_exit(state, ctx, slot)
+                if contract_exit is not None:
+                    return contract_exit
                 if self.conn.execute("SELECT 1 FROM llm_scenario_slots WHERE slot=?", (slot,)).fetchone():
                     return {"status": "duplicate_slot"}
                 self.conn.execute("INSERT INTO llm_scenario_slots VALUES(?, 'CLAIMED')", (slot,))
@@ -618,6 +763,9 @@ class ScenarioRuntime:
                 state = self.state()
                 self._reconcile(state)
                 fresh = self._context(state)
+                contract_exit = self._entry_contract_exit(state, fresh, slot)
+                if contract_exit is not None:
+                    return contract_exit
                 if self.recovery_enabled:
                     stage = "recovery_recheck"
                     try:
@@ -678,6 +826,9 @@ class ScenarioRuntime:
                     commit_at = self.clock()
                     self._reconcile(state, observed_at=commit_at)
                     commit_context = self._context(state, observed_at=commit_at)
+                    contract_exit = self._entry_contract_exit(state, commit_context, slot)
+                    if contract_exit is not None:
+                        return contract_exit
                     # Broker REST capture occurs after observation started.
                     # Never stamp validation before the captured account itself.
                     commit_at = self.clock()
@@ -703,9 +854,12 @@ class ScenarioRuntime:
                     validated = final_guard["validated"]
                     fresh = commit_context
                 if not self.calculated_review_enabled:
-                    core_payload = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
+                    validate_metadata(payload, fresh)
+                    core_payload = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
                     validated = validate_execution_prices(core_payload, fresh)
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids"):
+                    if state["active"] and payload.get("thesis_assessment") is not None:
+                        state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
                     receipt = self._apply_review(state["active"], payload, validated,
                                                  ctx["review_memory"], input_id, slot,
                                                  observed_at=commit_at if self.calculated_review_enabled else None)
@@ -724,9 +878,23 @@ class ScenarioRuntime:
                         "created_at": commit_at if self.calculated_review_enabled else self.clock(), "expires_at": validated["expires_at"],
                         "stop_policy": {"version": 1, "initial_hard_stop": validated["hard_stop"],
                                         "initial_action_id": validated["action_id"]}}
+                    if fresh.get("entry_contract_version") == 1:
+                        state["active"]["entry_contract"] = bind_contract(payload["entry_contract"], validated,
+                            commit_at if self.calculated_review_enabled else self.clock())
+                        self.conn.execute("INSERT INTO llm_scenario_entry_contracts VALUES(?,?)",
+                            (validated["scenario_id"], _json(state["active"]["entry_contract"])))
                 receipt = self._apply_review(state["active"], payload, validated,
                                              ctx["review_memory"], input_id, slot,
                                              observed_at=commit_at if self.calculated_review_enabled else None)
+                if payload.get("thesis_assessment") is not None:
+                    state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
+                    if payload["thesis_assessment"]["status"] == "FAILED":
+                        state["active"]["entry_contract_model_failure"] = dict(
+                            source="MODEL_ASSESSMENT", contract=fresh["registered_entry_contract"],
+                            intent_id=validated["action_id"], contract_id=payload["thesis_assessment"]["contract_id"],
+                            assessment=dict(payload["thesis_assessment"]))
+                        self.conn.execute("INSERT INTO llm_scenario_entry_failures VALUES(?,?)",
+                            (validated["scenario_id"], _json(state["active"]["entry_contract_model_failure"])))
                 state["active"]["revision"] = validated["revision"]
                 if validated["action"] in ("OPEN", "ADJUST"):
                     state["active"]["desired_hard_stop"] = validated["hard_stop"]

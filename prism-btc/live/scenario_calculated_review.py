@@ -15,6 +15,7 @@ from core.scenario_limit_prices import preview_execution_prices
 from engine.scenario_ma_context import build_ma_structure_context
 from live import scenario_llm
 from live.scenario_contract import _matches, _object, response_schema, validate_wire_proposal
+from live.scenario_entry_contract import strip_metadata
 from live.scenario_model_input import project_model_input
 from live.scenario_runtime import snapshot_input_time
 
@@ -308,7 +309,7 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
         normalized = validate_wire_proposal(raw, context)
         if normalized["action"] not in ("OPEN", "ADJUST", "EXIT"):
             raise ValueError("candidate_not_actionable")
-        core = {key: value for key, value in normalized.items()
+        core = {key: value for key, value in strip_metadata(normalized).items()
                 if key not in {"review", "recovery"}}
         if core["action"] == "EXIT":
             effective = preview_execution_prices(core,context,original_input_now=original_now)
@@ -475,7 +476,7 @@ def calculate_economic_candidate(raw, context, *, candidate_id, original_input_n
     if sum(fractions) > 1:
         raise ScenarioValidationError("allocation_fraction_sum")
     normalized = validate_wire_proposal(preflight, context)
-    core = {k: v for k, v in normalized.items() if k not in {"review", "recovery"}}
+    core = {k: v for k, v in strip_metadata(normalized).items() if k not in {"review", "recovery"}}
     receipt = dict(id=candidate_id, raw_allocation_proposal=deepcopy(raw),
         raw_allocation_sha256=receipt_hash(raw), context_sha256=receipt_hash(context),
         prevalidation_basis="UNROUNDED_RELATIVE_RISK_WEIGHTS_NOT_EXECUTABLE",
@@ -512,6 +513,12 @@ def _action_allocation_branches(context, actions=None):
         branch = deepcopy(base)
         props = branch["properties"]
         props["action"]["enum"] = [action]
+        if context.get("entry_contract_version") == 1:
+            if action == "OPEN":
+                from live.scenario_entry_contract import entry_contract_schema
+                props["entry_contract"] = entry_contract_schema()
+            else:
+                props["entry_contract"] = {"type": "null"}
         if action in {"WAIT", "EXIT"}:
             for field in ("side", "hard_stop", "chase"):
                 props[field] = {"type": "null"}
@@ -603,6 +610,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return now
 
     base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
+    if context.get("entry_contract_version") == 1:
+        base += scenario_llm.ENTRY_CONTRACT_PROMPT
     if context.get("scenario_id") is None:
         base += scenario_llm.FLAT_ENTRY_PROMPT
     allocation = research_mode != "legacy"
@@ -690,7 +699,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         now_context = dict(frozen_context, now=fresh())
         if raw["action"] == "WAIT":
             normalized = validate_wire_proposal(raw, now_context)
-            validate_scenario({k: v for k, v in normalized.items() if k not in {"review", "recovery"}}, now_context)
+            validate_scenario({k: v for k, v in strip_metadata(normalized).items() if k not in {"review", "recovery"}}, now_context)
             selected = dict(id="WAIT", raw_proposal=raw, input_sha256=original)
             selected["receipt_sha256"] = receipt_hash(selected)
         else:
@@ -733,6 +742,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             raise ValueError("research_selected_expired")
         return deepcopy(result)
     draft_prompt = DRAFT_PROMPT
+    if context.get("entry_contract_version") == 1:
+        draft_prompt += "\nEntry-contract exception: FAILED wait_proposal is a nonexecutable template, not a fallback. All draft assessments must match exactly; supply valid EXIT candidates only when FAILED.\n"
     if allocation:
         draft_prompt = draft_prompt.replace("SL, TP, quantities and fractions yourself", "SL, TP, confidence and entry allocation_fraction yourself") + ALLOCATION_SINGLE_PROMPT
         payload = _model_payload(frozen_snapshot, frozen_context, draft_schema)
@@ -742,9 +753,21 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         raise ValueError("research_missing_candidate_reason")
     now_context = dict(frozen_context, now=fresh())
     wait_wire = draft["wait_proposal"]
-    wait_normalized = validate_wire_proposal(wait_wire, now_context)
-    validate_scenario({k: v for k, v in wait_normalized.items() if k not in {"review", "recovery"}}, now_context)
+    failed_template = False
+    if context.get("entry_contract_version") == 1:
+        assessment = wait_wire.get("thesis_assessment")
+        if any(candidate.get("thesis_assessment") != assessment for candidate in draft["candidates"]):
+            raise ValueError("research_entry_assessment_conflict")
+        failed_template = isinstance(assessment, dict) and assessment.get("status") == "FAILED"
+        if failed_template and (not draft["candidates"] or any(c["action"] != "EXIT" for c in draft["candidates"])):
+            raise ValueError("research_failed_thesis_requires_exit")
+    wait_normalized = validate_wire_proposal(wait_wire, now_context,
+                                             _allow_failed_wait_template=failed_template)
+    validate_scenario({k: v for k, v in strip_metadata(wait_normalized).items() if k not in {"review", "recovery"}}, now_context)
     wait_receipt = dict(id="WAIT", raw_proposal=wait_wire, input_sha256=original)
+    if failed_template:
+        wait_receipt.update(eligible=False, executable=False, template_only=True,
+                            rejection="failed_thesis_requires_exit")
     wait_receipt["receipt_sha256"] = receipt_hash(wait_receipt)
     if action_contract:
         _bind_model_wrapper(wait_receipt, draft, wait_wire)
@@ -752,6 +775,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     receipts = [calculator(wire, now_context, candidate_id=f"c{index}",
                                    original_input_now=frozen_context["now"])
                 for index, wire in enumerate(draft["candidates"])]
+    if failed_template and not any(r["eligible"] for r in receipts):
+        raise ValueError("research_failed_thesis_no_valid_exit")
     for receipt in receipts:
         if action_contract:
             _bind_model_wrapper(receipt, draft, receipt["raw_allocation_proposal"])
@@ -768,7 +793,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return rejected_result(bundle)
     if receipts:
         choices = {f"{r['id']}:{r['receipt_sha256']}": r
-                   for r in [wait_receipt] + receipts if r["id"] == "WAIT" or r["eligible"]}
+                   for r in [wait_receipt] + receipts
+                   if (r["id"] == "WAIT" and not failed_template) or (r["id"] != "WAIT" and r["eligible"])}
         selection_schema = _object(dict(selection_token=dict(type="string", enum=list(choices)),
                                         rationale=dict(type="string")))
         # Re-project with the phase-specific contract so restoration hashes remain

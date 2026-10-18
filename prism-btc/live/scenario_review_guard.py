@@ -9,6 +9,7 @@ from live.scenario_calculated_review import (
     ECONOMIC_REJECT_MODES, _supplied_instrument_filters, receipt_hash, research_review,
 )
 from live.scenario_contract import validate_wire_proposal
+from live.scenario_entry_contract import strip_metadata, validate_metadata
 from live.scenario_runtime import snapshot_input_time
 
 
@@ -24,6 +25,7 @@ _OPTIONAL_STABLE = (
     "side", "scenario_risk_fraction", "seen_action_ids", "current_plan", "stop_policy",
     "execution_price_policy", "conditional_entry_version",
     "review_contract_version", "recovery_hard_blocked", "unknown_intents",
+    "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
 )
 
 
@@ -117,8 +119,12 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     # need not repeat it. Decode only against the original trusted contract;
     # fresh facts below still decide economic validity, never the model metadata.
     payload = validate_wire_proposal(selected["raw_proposal"], original)
+    if original.get("entry_contract_version") == 1:
+        # Samples may advance without replacing the original premise. A newly
+        # confirmed failure still invalidates any non-EXIT reviewed action.
+        validate_metadata(payload, fresh)
     payload["rationale"] = result["selection"]["rationale"]
-    core = {key: value for key, value in payload.items() if key not in {"review", "recovery"}}
+    core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
     if actionable:
         _supplied_instrument_filters(core, fresh)
     validated = validate_execution_prices(core, fresh)

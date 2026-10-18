@@ -53,6 +53,8 @@ _identity_scope_lock = threading.Lock()
 INPUT_PREPARATION_CODES = {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
                            "invalid_input", "input_size"}
 RUNTIME_EVENT_QUERIES = {
+    "llm_scenario_entry_contracts": "SELECT * FROM llm_scenario_entry_contracts ORDER BY rowid",
+    "llm_scenario_entry_failures": "SELECT * FROM llm_scenario_entry_failures ORDER BY rowid",
     "llm_scenario_audit_events": "SELECT * FROM llm_scenario_audit_events ORDER BY rowid",
     "llm_scenario_audit_manifests": "SELECT * FROM llm_scenario_audit_manifests ORDER BY rowid",
     "llm_scenario_broker_evidence": "SELECT * FROM llm_scenario_broker_evidence ORDER BY rowid",

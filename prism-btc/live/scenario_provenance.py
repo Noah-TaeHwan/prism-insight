@@ -36,7 +36,8 @@ def review_policy_binding(*, research_mode="legacy"):
     from backtest import scenario_tape
     from live import (scenario_calculated_review, scenario_review_adapter,
                       scenario_review_guard, scenario_llm, scenario_contract,
-                      scenario_model_input, scenario_preview, scenario_runtime)
+                      scenario_model_input, scenario_preview, scenario_runtime,
+                      scenario_entry_contract)
     from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
     from engine import scenario_ma_context
 
@@ -56,6 +57,7 @@ def review_policy_binding(*, research_mode="legacy"):
         'core/scenario_stop_policy.py': scenario_stop_policy,
         'engine/scenario_ma_context.py': scenario_ma_context,
         'live/scenario_runtime.py': scenario_runtime,
+        'live/scenario_entry_contract.py': scenario_entry_contract,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
     if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
@@ -177,6 +179,7 @@ def _manifest():
                     'live/scenario_runner_economics.py',
                     'live/scenario_fee_projection.py',
                     'live/scenario_entry_thesis.py',
+                    'live/scenario_entry_contract.py',
                     'live/scenario_model_input.py',
                     'live/scenario_preview.py', 'engine/scenario_snapshot.py',
                     'engine/scenario_ma_context.py',
@@ -200,7 +203,8 @@ def _manifest():
             execution_parity[name] = _loaded_parity(name, source)
         else:
             context_name = '_context' if 'runtime' in name else 'context'
-            execution_names = ({'_tick', '_reconcile', '_enabled', '_valid_open_entry', '_apply_review'} if 'runtime' in name else
+            execution_names = ({'_tick', '_reconcile', '_context', '_enabled', '_valid_open_entry', '_apply_review',
+                                '_entry_contract_exit', '_entry_contract_registered'} if 'runtime' in name else
                 {'_accounting', '_funding_schedule', 'capture_financial_evidence',
                  '_risk_accounting', '_daily', 'reconcile', 'capture_account'})
             selected_names = {context_name} | execution_names
@@ -215,6 +219,9 @@ def _manifest():
     # Recovery contains both judgment evidence and execution authorization.
     execution['live/scenario_recovery.py'] = policy['live/scenario_recovery.py']
     execution_parity['live/scenario_recovery.py'] = judgment_parity['live/scenario_recovery.py']
+    # The immutable premise also grants a narrowly scoped automatic EXIT.
+    execution['live/scenario_entry_contract.py'] = policy['live/scenario_entry_contract.py']
+    execution_parity['live/scenario_entry_contract.py'] = judgment_parity['live/scenario_entry_contract.py']
     try:
         # Fixed absolute executable and literal read-only arguments; no user input.
         revision = subprocess.run(  # nosec B603
