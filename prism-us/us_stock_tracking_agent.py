@@ -2483,6 +2483,15 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
 **Market regime**: Treat the "Current Market Regime (LIVE)" above as the authoritative market environment for step-0 분석 (강세장/약세장 판단). It is system-computed from S&P500/VIX this cycle; prefer it over the stored buy-time scenario. Only if it shows "unavailable", fall back to fetching ^GSPC/^VIX via yahoo_finance yourself.
 **Important**: If stop loss/target price adjustment is needed, return it via portfolio_adjustment JSON only. Do NOT directly UPDATE the DB.
 """
+            # System-computed facts (trailing line, stop-raise eligibility, tier-3 conditions, sessions held,
+            # micro-split average) from completed bars; skipped in the isolated runtime (no live fetch).
+            if getattr(self, "_no_order_effects", None) is None:
+                from prism_core.sell_facts import prompt_block_safe as sell_facts_block
+                prompt_message += await asyncio.to_thread(
+                    sell_facts_block, market="US", language=getattr(self, "language", "en"),
+                    stock_data={**stock_data, "current_price": current_price, "stop_loss": stop_loss},
+                    highest_price=highest_price, threshold_pct=trailing_stop_threshold_pct,
+                    regime=getattr(self, "_live_regime_cache", None), logger=logger)
             # Official SEC filings are the primary Core-0 evidence, read every check.
             from prism_core.corporate_filings import official_event_block_async
             prompt_message += await official_event_block_async(

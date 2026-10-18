@@ -41,6 +41,7 @@ os.environ.setdefault("US_SCREENING_KIS_SHORTLIST", "false")
 os.environ.setdefault("RUNNER_HOLD_ENABLED", "false")
 # Its relative-weakness exit also fetches index bars; tests/test_runner_hold.py opts in.
 os.environ.setdefault("RUNNER_REL_WEAK_ENABLED", "false")
+os.environ.setdefault("SELL_FACTS_ENABLED", "false")  # no daily-bar fetch in sell-review tests
 # Batch integration tests must not write the candidate ledger into the repo DB;
 # tests/test_candidate_ledger.py opts in with a temporary DB.
 os.environ.setdefault("CANDIDATE_LEDGER_ENABLED", "false")
