@@ -1486,7 +1486,8 @@ class USStockTrackingAgent:
                 journal_context = self.get_journal_context(
                     ticker=ticker,
                     sector=sector,
-                    trigger_type=trigger_type
+                    trigger_type=trigger_type,
+                    market_regime=self._journal_regime(),
                 )
                 if journal_context:
                     logger.info(f"[Journal] US injected context for {ticker} ({len(journal_context)} chars)")
@@ -2825,6 +2826,13 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                 "hard_findings": [finding],
                 "reason": finding["message"],
             }
+
+    def _journal_regime(self):
+        """Trigger-batch regime enum (as the scenario stamp), for recalling regime-specific memory."""
+        try:
+            return getattr(self, "_pipeline_market_regime", None) or self._buy_floor_regime()
+        except Exception:  # noqa: BLE001 - unknown regime only narrows recall
+            return None
 
     def _stamp_scenario_market_regime(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
         """Use the trigger-batch regime for gates and user-facing text."""
@@ -5503,7 +5511,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             )
         return {"error": "Compression manager not initialized"}
 
-    def get_journal_context(self, ticker: str, sector: str = None, trigger_type: str = None) -> str:
+    def get_journal_context(self, ticker: str, sector: str = None, trigger_type: str = None,
+                            market_regime: str = None) -> str:
         """
         Get trading journal context for buy decisions.
 
@@ -5520,7 +5529,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
         if self.enable_journal:
             from observability.recent_exit_context import append_recent_exit_context
             try:
-                context = self.journal_manager.get_context_for_ticker(ticker, sector, trigger_type=trigger_type)
+                context = self.journal_manager.get_context_for_ticker(
+                    ticker, sector, trigger_type=trigger_type, market_regime=market_regime)
             except Exception as error:  # noqa: BLE001 - optional lessons must not hide canonical facts
                 logger.warning("[JOURNAL][US] narrative unavailable: %s", type(error).__name__)
                 context = ""

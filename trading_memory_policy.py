@@ -1,6 +1,7 @@
 """Versioned applicability metadata for trading memory, independent of live decisions."""
 
 import json
+import re
 
 
 CONTRACT_VERSION = 1
@@ -78,6 +79,49 @@ def ensure_application_columns(conn):
     intuition_columns = {row[1] for row in conn.execute('PRAGMA table_info(trading_intuitions)')}
     if intuition_columns and 'application_context' not in intuition_columns:
         conn.execute('ALTER TABLE trading_intuitions ADD COLUMN application_context TEXT')
+    if intuition_columns and 'situation_tags' not in intuition_columns:
+        conn.execute('ALTER TABLE trading_intuitions ADD COLUMN situation_tags TEXT')
+    if intuition_columns and 'evidence_cases' not in intuition_columns:
+        conn.execute('ALTER TABLE trading_intuitions ADD COLUMN evidence_cases TEXT')
     principle_columns = {row[1] for row in conn.execute('PRAGMA table_info(trading_principles)')}
     if principle_columns and 'application_context' not in principle_columns:
         conn.execute('ALTER TABLE trading_principles ADD COLUMN application_context TEXT')
+
+
+REGIME_GROUPS = {'strong_bull': 'bull', 'moderate_bull': 'bull', 'sideways': 'sideways',
+                 'moderate_bear': 'bear', 'strong_bear': 'bear'}
+_REGIME_RE = re.compile('|'.join(REGIME_GROUPS))
+
+
+def parse_situation_tags(value, sectors=None):
+    """{'regimes': [...], 'sectors': [...]} or None; an empty list means the memory does not name that axis."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(value, dict):
+        return None
+    regimes, tagged_sectors = value.get('regimes'), value.get('sectors')
+    if not isinstance(regimes, list) or not isinstance(tagged_sectors, list):
+        return None
+    if any(item not in set(REGIME_GROUPS.values()) for item in regimes):
+        return None
+    if any(not isinstance(item, str) or not item.strip() or (sectors is not None and item not in sectors)
+           for item in tagged_sectors):
+        return None
+    return {'regimes': sorted(set(regimes)), 'sectors': sorted(set(tagged_sectors))}
+
+
+def matches_situation(value, market_regime, sector):
+    """True only when the memory names the current regime and/or sector and nothing it names conflicts.
+
+    Untagged, malformed or axis-free memory never matches; an unknown current value never satisfies an axis.
+    """
+    tags = parse_situation_tags(value)
+    if tags is None:
+        return False
+    found = _REGIME_RE.search(str(market_regime or '').lower())
+    current = {'regimes': REGIME_GROUPS[found.group()] if found else None, 'sectors': (sector or '').strip() or None}
+    named = [axis for axis in ('regimes', 'sectors') if tags[axis]]
+    return bool(named) and all(current[axis] in tags[axis] for axis in named)
