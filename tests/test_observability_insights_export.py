@@ -257,6 +257,34 @@ def test_snapshot_reports_journal_influence_capture_coverage() -> None:
     }
 
 
+def test_snapshot_tolerates_null_journal_reflection() -> None:
+    # 2026-08-31~09-02 production events carry "journal_reflection": null; the exporter
+    # crashed on them from 2026-09-19 and the dashboard panel stopped updating.
+    events = [
+        {
+            **_event(
+                "candidate-null-reflection",
+                "candidate.evaluated",
+                "2026-08-31T00:00:00Z",
+                market="US",
+                attributes={
+                    "policy_context": {
+                        "journal_influence_context": {"status": "OK", "deterministic_effect": None},
+                        "journal_reflection": None,
+                    }
+                },
+            ),
+            "decision_id": "decision-null",
+        },
+    ]
+
+    capture = build_snapshot(events)["markets"]["US"]["journal_influence_capture"]
+
+    assert capture["captured_count"] == 1
+    assert capture["llm_referenced_count"] == 0
+    assert capture["deterministic_adjustment_count"] == 0
+
+
 def test_snapshot_reports_micro_split_shadow_capture() -> None:
     events = [
         {
