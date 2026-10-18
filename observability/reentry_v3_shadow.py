@@ -598,6 +598,10 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
                 entry_context=lambda e: _entry_context(e, state, frames, completed, reports_root, market, db_path),
                 now=now_fn() if now_fn else None, emit=_emit_live, save_state=lambda: _atomic(p["state"], state),
                 db_path=db_path)
+            from prism_core.ops_alert import alert_order_errors
+            alert_order_errors("재진입", market, [(r["ticker"], r["reason"]) for r in live_results
+                                                if r["status"] == "ERROR"],
+                               f"logs/reentry_v3_shadow_{market.lower()}.log")
         status = {}
         attempts = {"open": 0, "closed": 0}
         for watch in state["watches"]:
