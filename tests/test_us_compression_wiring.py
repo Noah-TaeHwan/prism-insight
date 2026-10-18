@@ -24,7 +24,7 @@ from tracking.db_schema import TABLE_TRADING_INTUITIONS
 def _no_llm(monkeypatch):
     """These tests cover the deterministic pass; the LLM memory steps have their own tests."""
     from tracking.compression import CompressionManager
-    for name in ("refresh_intuitions", "review_memory_applicability", "tag_buy_situations"):
+    for name in ("refresh_intuitions", "review_memory_applicability", "rebuild_buy_intuitions"):
         monkeypatch.setattr(CompressionManager, name, AsyncMock(return_value={}))
 
 

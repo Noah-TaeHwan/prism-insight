@@ -81,6 +81,8 @@ def ensure_application_columns(conn):
         conn.execute('ALTER TABLE trading_intuitions ADD COLUMN application_context TEXT')
     if intuition_columns and 'situation_tags' not in intuition_columns:
         conn.execute('ALTER TABLE trading_intuitions ADD COLUMN situation_tags TEXT')
+    if intuition_columns and 'evidence_cases' not in intuition_columns:
+        conn.execute('ALTER TABLE trading_intuitions ADD COLUMN evidence_cases TEXT')
     principle_columns = {row[1] for row in conn.execute('PRAGMA table_info(trading_principles)')}
     if principle_columns and 'application_context' not in principle_columns:
         conn.execute('ALTER TABLE trading_principles ADD COLUMN application_context TEXT')
