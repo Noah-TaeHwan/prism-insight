@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ("prism-trading-change-review", "prism-btc-change-review", "prism-entry-quality-analysis")
+SKILLS = (
+    "prism-trading-change-review", "prism-btc-change-review", "prism-entry-quality-analysis", "prism-trade-review",
+)
 
 
 def _load(path, name):
@@ -93,6 +95,8 @@ def test_hook_configs_call_shared_script():
     ("매매 로직 바꿔줘", {"stock"}),
     ("live 대시보드 색 바꿔줘", set()),
     ("PR 머지하고 배포해줘", {"deploy"}),
+    ("LLY 왜 샀는지 복기해줘", {"review"}),
+    ("이 trace_id 경과 보여줘", {"review"}),
 ])
 def test_prompt_domains(text, expected):
     assert hook.prompt_domains(text) == expected
