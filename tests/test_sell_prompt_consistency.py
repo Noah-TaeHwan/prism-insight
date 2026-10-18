@@ -161,3 +161,11 @@ def test_no_opportunity_cost_time_sell(prompts):
     # contradicted "time is not a sell trigger"; US had already dropped it.
     for key, text in prompts.items():
         assert "기회비용 관점에서 전량 매도" not in text and "opportunity cost view" not in text, key
+
+
+def test_no_discretionary_sharp_decline_or_market_shock_sell(prompts):
+    # User decision 10/19 (audit F3-2): never the deciding reason in 62 replayed or 18 logged AI sells;
+    # sells fire only via the stop / trailing / trend-weakness tiers.
+    for key, text in prompts.items():
+        assert "-5% 이상" not in text and "(-5%+)" not in text, key
+        assert "방어적 전량 매도" not in text and "defensive full exit" not in text, key

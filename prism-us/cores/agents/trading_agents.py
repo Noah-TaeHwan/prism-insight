@@ -973,8 +973,6 @@ def create_us_sell_decision_agent(language: str = "ko"):
 **1순위: 리스크 관리 (손절)**
 - 손절가 도달: 원칙적 즉시 전량 매도
 - **절대 예외 없는 규칙**: 손실 -7% 이상 = 장중 하드스탑 자동 매도 (예외·유예 없음)
-- 급격한 하락(-5% 이상): 추세가 꺾였는지 확인 후 전량 손절 여부 결정
-- 시장 충격 상황 (VIX 급등): 방어적 전량 매도 고려
 
 **2순위: 수익 실현 (익절) - 시장 환경별 차별화 전략**
 
@@ -1210,8 +1208,6 @@ Run the self-check only when that regime is missing or could not be computed.
 **Priority 1: Risk Management (Stop Loss)**
 - Stop loss reached: Immediate full exit in principle
 - **Absolute NO EXCEPTION Rule**: Loss of 7% or more = AUTOMATIC SELL by the intraday hard stop (no exceptions, no grace period)
-- Sharp decline (-5%+): Check if trend broken, decide on full stop loss
-- Market shock (VIX surge): Consider defensive full exit
 
 **Priority 2: Profit Taking - Market-Adaptive Strategy**
 
