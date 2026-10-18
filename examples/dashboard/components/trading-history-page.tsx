@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { History, TrendingUp, TrendingDown, Award, Calendar, Target, Brain, Trophy, AlertCircle, Scale, Percent, Flame, Zap, BarChart3, Activity, LineChart, Gauge, HelpCircle } from "lucide-react"
+import { HelpCircle } from "lucide-react"
 import type { Trade, Summary, PrismPerformance, MarketCondition, Market } from "@/types/dashboard"
 import { useLanguage } from "@/components/language-provider"
 import { formatCurrency as formatCurrencyUtil } from "@/lib/currency"
@@ -308,421 +308,208 @@ export function TradingHistoryPage({ history, summary, prismPerformance = [], ma
 
   const { alpha, beta, sharpeRatio, informationRatio, startDate: riskStartDate, endDate: riskEndDate, dataPoints } = calculateRiskMetrics()
 
+  const signTone = (v: number) => (v >= 0 ? "text-success" : "text-destructive")
+  const AMBER = "text-amber-600 dark:text-amber-400"
+  // good / warning / bad thresholds keep their original meaning; only the palette changed
+  const tierTone = (good: boolean, ok: boolean) => (good ? "text-success" : ok ? AMBER : "text-destructive")
+
+  type HelpLine = [string, string]
+  const kpi = (label: string, value: string, valueClass: string, sub: string, help?: { text: string; lines: HelpLine[] }) => (
+    <Card className="gap-0 py-0 rounded-lg shadow-none">
+      <CardContent className="p-4 sm:p-5 space-y-2.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] text-muted-foreground">{label}</span>
+          {help && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" aria-label={label} className="text-muted-foreground/60 hover:text-muted-foreground cursor-help">
+                  <HelpCircle className="w-3.5 h-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs p-3">
+                <p className="font-medium mb-1">{label}</p>
+                <p className="text-xs mb-2">{help.text}</p>
+                <div className="text-xs space-y-1 border-t border-border/50 pt-2">
+                  {help.lines.map(([cls, text]) => (
+                    <p key={text} className={cls}>{text}</p>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+        <p className={`font-serif text-[1.75rem] sm:text-[2rem] leading-none tracking-tight tabular-nums ${valueClass}`}>{value}</p>
+        <p className="text-xs text-muted-foreground">{sub}</p>
+      </CardContent>
+    </Card>
+  )
+
+  const cardHeader = (title: string, meta?: string) => (
+    <CardHeader className="px-5 pt-4 pb-3">
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        {meta && <span className="text-xs text-muted-foreground font-mono tabular-nums">{meta}</span>}
+      </div>
+    </CardHeader>
+  )
+
+  const textBlock = (label: string, text: string) => (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground mb-1">{label}</p>
+      <p className="text-sm text-foreground leading-relaxed break-words">{text}</p>
+    </div>
+  )
+
+  const tradeExtreme = (title: string, trade: Trade) => (
+    <Card className="gap-0 py-0 rounded-lg shadow-none">
+      {cardHeader(title)}
+      <CardContent className="px-5 pb-4 space-y-3">
+        <div className="flex items-baseline gap-2">
+          <p className="font-medium text-foreground">{trade.company_name}</p>
+          <p className="text-xs text-muted-foreground font-mono">{trade.ticker}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">{t("trading.profitRate")}</p>
+            <p className={`font-serif text-2xl leading-none tracking-tight tabular-nums ${signTone(trade.profit_rate)}`}>{formatPercent(trade.profit_rate)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">{t("trading.holdingPeriod")}</p>
+            <p className="font-serif text-2xl leading-none tracking-tight tabular-nums text-foreground">{trade.holding_days}{t("common.days")}</p>
+          </div>
+        </div>
+        <p className="pt-2 border-t border-border text-xs text-muted-foreground tabular-nums">
+          {formatDate(trade.buy_date)} → {formatDate(trade.sell_date)}
+        </p>
+      </CardContent>
+    </Card>
+  )
+
+  const levelLabels: Array<[string, string]> = [
+    ["primary_support", t("modal.primarySupportShort")],
+    ["secondary_support", t("modal.secondarySupportShort")],
+    ["primary_resistance", t("modal.primaryResistanceShort")],
+    ["secondary_resistance", t("modal.secondaryResistanceShort")],
+  ]
+
   return (
     <div className="space-y-6">
       {/* 헤더 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-lg bg-gradient-to-br from-blue-500/20 to-indigo-500/20">
-            <History className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-foreground">{t("trading.title")}</h2>
-            <p className="text-sm text-muted-foreground">{t("trading.description")}</p>
-          </div>
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">{t("trading.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("trading.description")}</p>
         </div>
-        <Badge variant="outline" className="text-sm">
+        <span className="text-xs text-muted-foreground font-mono tabular-nums">
           {t("trading.totalTrades")} {total_trades || 0}{t("trading.tradeCount")}
-        </Badge>
+        </span>
       </div>
 
       {/* 통계 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <History className="w-5 h-5 text-primary" />
-              <span className="text-sm text-muted-foreground">{t("trading.totalTrades")}</span>
-            </div>
-            <p className="text-3xl font-bold text-foreground">{total_trades || 0}{t("trading.times")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.completedTrades")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <Award className="w-5 h-5 text-success" />
-              <span className="text-sm text-muted-foreground">{t("trading.winRate")}</span>
-            </div>
-            <p className="text-3xl font-bold text-success">{(win_rate || 0).toFixed(0)}%</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.winningTradeRatio")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <TrendingUp className="w-5 h-5 text-success" />
-              <span className="text-sm text-muted-foreground">{t("trading.avgWinRate")}</span>
-            </div>
-            <p className="text-3xl font-bold text-success">{formatPercent(avgWinRate)}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {winningTrades.length}{t("trading.winningTradesAvg")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <TrendingDown className="w-5 h-5 text-destructive" />
-              <span className="text-sm text-muted-foreground">{t("trading.avgLossRate")}</span>
-            </div>
-            <p className="text-3xl font-bold text-destructive">{formatPercent(avgLossRate)}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {losingTrades.length}{t("trading.losingTradesAvg")}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {kpi(t("trading.totalTrades"), `${total_trades || 0}${t("trading.times")}`, "text-foreground", t("trading.completedTrades"))}
+        {kpi(t("trading.winRate"), `${(win_rate || 0).toFixed(0)}%`, "text-foreground", t("trading.winningTradeRatio"))}
+        {kpi(t("trading.avgWinRate"), formatPercent(avgWinRate), "text-success", `${winningTrades.length}${t("trading.winningTradesAvg")}`)}
+        {kpi(t("trading.avgLossRate"), formatPercent(avgLossRate), "text-destructive", `${losingTrades.length}${t("trading.losingTradesAvg")}`)}
       </div>
 
       {/* 성과 지표 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-2 mb-2">
-              <Scale className="w-5 h-5 text-primary" />
-              <span className="text-sm text-muted-foreground">{t("trading.profitFactor")}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs p-3">
-                  <p className="font-semibold mb-1">{t("trading.profitFactor")}</p>
-                  <p className="text-xs mb-2">{t("trading.profitFactorTooltip")}</p>
-                  <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                    <p className="text-success">{t("trading.profitFactorGood")}</p>
-                    <p className="text-yellow-500">{t("trading.profitFactorNeutral")}</p>
-                    <p className="text-destructive">{t("trading.profitFactorBad")}</p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <p className={`text-3xl font-bold ${profitFactor >= 1.5 ? "text-success" : profitFactor >= 1 ? "text-yellow-500" : "text-destructive"}`}>
-              {profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.profitFactorDesc")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-2 mb-2">
-              <Percent className="w-5 h-5 text-chart-3" />
-              <span className="text-sm text-muted-foreground">{t("trading.riskRewardRatio")}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs p-3">
-                  <p className="font-semibold mb-1">{t("trading.riskRewardRatio")}</p>
-                  <p className="text-xs mb-2">{t("trading.riskRewardTooltip")}</p>
-                  <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                    <p className="text-success">{t("trading.riskRewardGood")}</p>
-                    <p className="text-yellow-500">{t("trading.riskRewardNeutral")}</p>
-                    <p className="text-destructive">{t("trading.riskRewardBad")}</p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <p className={`text-3xl font-bold ${riskRewardRatio >= 2 ? "text-success" : riskRewardRatio >= 1 ? "text-yellow-500" : "text-destructive"}`}>
-              {riskRewardRatio === Infinity ? "∞" : riskRewardRatio.toFixed(2)}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.riskRewardDesc")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-2 mb-2">
-              <BarChart3 className="w-5 h-5 text-orange-600" />
-              <span className="text-sm text-muted-foreground">{t("trading.mdd")}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs p-3">
-                  <p className="font-semibold mb-1">{t("trading.mdd")}</p>
-                  <p className="text-xs mb-2">{t("trading.mddTooltip")}</p>
-                  <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                    <p className="text-success">{t("trading.mddGood")}</p>
-                    <p className="text-yellow-500">{t("trading.mddNeutral")}</p>
-                    <p className="text-destructive">{t("trading.mddBad")}</p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <p className={`text-3xl font-bold ${prismMDD <= 10 ? "text-success" : prismMDD <= 20 ? "text-yellow-500" : "text-destructive"}`}>
-              {prismMDD > 0 ? `-${prismMDD.toFixed(2)}%` : "0%"}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.mddDesc")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <Flame className="w-5 h-5 text-orange-500" />
-              <span className="text-sm text-muted-foreground">{t("trading.maxWinStreak")}</span>
-            </div>
-            <p className="text-3xl font-bold text-orange-500">{maxConsecutiveWins}{t("trading.consecutive")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.maxWinStreakDesc")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <Calendar className="w-5 h-5 text-chart-4" />
-              <span className="text-sm text-muted-foreground">{t("trading.avgHoldingDays")}</span>
-            </div>
-            <p className="text-3xl font-bold text-chart-4">{(avg_holding_days || 0).toFixed(0)}{t("common.days")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("trading.daysFromBuyToSell")}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {kpi(
+          t("trading.profitFactor"),
+          profitFactor === Infinity ? "∞" : profitFactor.toFixed(2),
+          tierTone(profitFactor >= 1.5, profitFactor >= 1),
+          t("trading.profitFactorDesc"),
+          { text: t("trading.profitFactorTooltip"), lines: [["text-success", t("trading.profitFactorGood")], [AMBER, t("trading.profitFactorNeutral")], ["text-destructive", t("trading.profitFactorBad")]] },
+        )}
+        {kpi(
+          t("trading.riskRewardRatio"),
+          riskRewardRatio === Infinity ? "∞" : riskRewardRatio.toFixed(2),
+          tierTone(riskRewardRatio >= 2, riskRewardRatio >= 1),
+          t("trading.riskRewardDesc"),
+          { text: t("trading.riskRewardTooltip"), lines: [["text-success", t("trading.riskRewardGood")], [AMBER, t("trading.riskRewardNeutral")], ["text-destructive", t("trading.riskRewardBad")]] },
+        )}
+        {kpi(
+          t("trading.mdd"),
+          prismMDD > 0 ? `-${prismMDD.toFixed(2)}%` : "0%",
+          tierTone(prismMDD <= 10, prismMDD <= 20),
+          t("trading.mddDesc"),
+          { text: t("trading.mddTooltip"), lines: [["text-success", t("trading.mddGood")], [AMBER, t("trading.mddNeutral")], ["text-destructive", t("trading.mddBad")]] },
+        )}
+        {kpi(t("trading.maxWinStreak"), `${maxConsecutiveWins}${t("trading.consecutive")}`, "text-foreground", t("trading.maxWinStreakDesc"))}
+        {kpi(t("trading.avgHoldingDays"), `${(avg_holding_days || 0).toFixed(0)}${t("common.days")}`, "text-foreground", t("trading.daysFromBuyToSell"))}
       </div>
 
       {/* 위험조정 성과 지표 (알파, 베타, 샤프비율, 정보비율) */}
       {(prismPerformance.length > 0 && marketCondition.length > 0 && dataPoints > 0) && (
-        <>
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">{t("trading.riskAdjustedMetrics")}</h3>
-          {riskStartDate && riskEndDate && (
-            <span className="text-xs text-muted-foreground">
-              {t("trading.dataPeriod")}: {riskStartDate} ~ {riskEndDate} ({dataPoints}{t("common.days")})
-            </span>
-          )}
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="border-border/50 bg-gradient-to-br from-indigo-500/5 to-transparent">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-2 mb-2">
-                <Activity className="w-5 h-5 text-indigo-600" />
-                <span className="text-sm text-muted-foreground">{t("trading.alpha")}</span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs p-3">
-                    <p className="font-semibold mb-1">{t("trading.alpha")}</p>
-                    <p className="text-xs mb-2">{t("trading.alphaTooltip")}</p>
-                    <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                      <p className="text-success">{t("trading.alphaGood")}</p>
-                      <p className="text-destructive">{t("trading.alphaBad")}</p>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <p className={`text-3xl font-bold ${alpha >= 0 ? "text-success" : "text-destructive"}`}>
-                {alpha >= 0 ? "+" : ""}{alpha.toFixed(2)}%
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("trading.alphaDesc")}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 bg-gradient-to-br from-cyan-500/5 to-transparent">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-2 mb-2">
-                <LineChart className="w-5 h-5 text-cyan-600" />
-                <span className="text-sm text-muted-foreground">{t("trading.beta")}</span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs p-3">
-                    <p className="font-semibold mb-1">{t("trading.beta")}</p>
-                    <p className="text-xs mb-2">{t("trading.betaTooltip")}</p>
-                    <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                      <p className="text-cyan-600">{t("trading.betaLow")}</p>
-                      <p className="text-foreground">{t("trading.betaNeutral")}</p>
-                      <p className="text-orange-600">{t("trading.betaHigh")}</p>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <p className={`text-3xl font-bold ${beta <= 1 ? "text-cyan-600" : "text-orange-600"}`}>
-                {beta.toFixed(2)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("trading.betaDesc")}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 bg-gradient-to-br from-violet-500/5 to-transparent">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-2 mb-2">
-                <Gauge className="w-5 h-5 text-violet-600" />
-                <span className="text-sm text-muted-foreground">{t("trading.sharpeRatio")}</span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs p-3">
-                    <p className="font-semibold mb-1">{t("trading.sharpeRatio")}</p>
-                    <p className="text-xs mb-2">{t("trading.sharpeTooltip")}</p>
-                    <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                      <p className="text-success">{t("trading.sharpeGood")}</p>
-                      <p className="text-violet-600">{t("trading.sharpeNeutral")}</p>
-                      <p className="text-destructive">{t("trading.sharpeBad")}</p>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <p className={`text-3xl font-bold ${sharpeRatio >= 1 ? "text-success" : sharpeRatio >= 0 ? "text-violet-600" : "text-destructive"}`}>
-                {sharpeRatio.toFixed(2)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("trading.sharpeDesc")}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 bg-gradient-to-br from-teal-500/5 to-transparent">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-2 mb-2">
-                <Target className="w-5 h-5 text-teal-600" />
-                <span className="text-sm text-muted-foreground">{t("trading.informationRatio")}</span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground/50 cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs p-3">
-                    <p className="font-semibold mb-1">{t("trading.informationRatio")}</p>
-                    <p className="text-xs mb-2">{t("trading.irTooltip")}</p>
-                    <div className="text-xs space-y-1 border-t border-border/50 pt-2">
-                      <p className="text-success">{t("trading.irGood")}</p>
-                      <p className="text-teal-600">{t("trading.irNeutral")}</p>
-                      <p className="text-destructive">{t("trading.irBad")}</p>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <p className={`text-3xl font-bold ${informationRatio >= 0.5 ? "text-success" : informationRatio >= 0 ? "text-teal-600" : "text-destructive"}`}>
-                {informationRatio.toFixed(2)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("trading.informationRatioDesc")}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-        </>
+        <section className="space-y-2.5">
+          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+            <h3 className="text-sm font-medium text-foreground">{t("trading.riskAdjustedMetrics")}</h3>
+            {riskStartDate && riskEndDate && (
+              <span className="text-xs text-muted-foreground font-mono tabular-nums">
+                {t("trading.dataPeriod")}: {riskStartDate} ~ {riskEndDate} ({dataPoints}{t("common.days")})
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {kpi(
+              t("trading.alpha"),
+              `${alpha >= 0 ? "+" : ""}${alpha.toFixed(2)}%`,
+              signTone(alpha),
+              t("trading.alphaDesc"),
+              { text: t("trading.alphaTooltip"), lines: [["text-success", t("trading.alphaGood")], ["text-destructive", t("trading.alphaBad")]] },
+            )}
+            {kpi(
+              t("trading.beta"),
+              beta.toFixed(2),
+              "text-foreground",
+              t("trading.betaDesc"),
+              { text: t("trading.betaTooltip"), lines: [["", t("trading.betaLow")], ["", t("trading.betaNeutral")], ["", t("trading.betaHigh")]] },
+            )}
+            {kpi(
+              t("trading.sharpeRatio"),
+              sharpeRatio.toFixed(2),
+              sharpeRatio >= 1 ? "text-success" : sharpeRatio >= 0 ? "text-foreground" : "text-destructive",
+              t("trading.sharpeDesc"),
+              { text: t("trading.sharpeTooltip"), lines: [["text-success", t("trading.sharpeGood")], ["", t("trading.sharpeNeutral")], ["text-destructive", t("trading.sharpeBad")]] },
+            )}
+            {kpi(
+              t("trading.informationRatio"),
+              informationRatio.toFixed(2),
+              informationRatio >= 0.5 ? "text-success" : informationRatio >= 0 ? "text-foreground" : "text-destructive",
+              t("trading.informationRatioDesc"),
+              { text: t("trading.irTooltip"), lines: [["text-success", t("trading.irGood")], ["", t("trading.irNeutral")], ["text-destructive", t("trading.irBad")]] },
+            )}
+          </div>
+        </section>
       )}
 
       {/* 베스트/워스트 거래 */}
       {history.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card className="border-border/50 bg-gradient-to-br from-success/5 to-transparent">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-success" />
-                {t("trading.bestTrade")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-lg font-bold text-foreground">{bestTrade.company_name}</p>
-                  <p className="text-sm text-muted-foreground">{bestTrade.ticker}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">{t("trading.profitRate")}</p>
-                    <p className="text-xl font-bold text-success">{formatPercent(bestTrade.profit_rate)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">{t("trading.holdingPeriod")}</p>
-                    <p className="text-xl font-bold text-foreground">{bestTrade.holding_days}{t("common.days")}</p>
-                  </div>
-                </div>
-                <div className="pt-2 border-t border-border/30">
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(bestTrade.buy_date)} → {formatDate(bestTrade.sell_date)}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 bg-gradient-to-br from-destructive/5 to-transparent">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-destructive" />
-                {t("trading.worstTrade")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-lg font-bold text-foreground">{worstTrade.company_name}</p>
-                  <p className="text-sm text-muted-foreground">{worstTrade.ticker}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">{t("trading.profitRate")}</p>
-                    <p className="text-xl font-bold text-destructive">{formatPercent(worstTrade.profit_rate)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">{t("trading.holdingPeriod")}</p>
-                    <p className="text-xl font-bold text-foreground">{worstTrade.holding_days}{t("common.days")}</p>
-                  </div>
-                </div>
-                <div className="pt-2 border-t border-border/30">
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(worstTrade.buy_date)} → {formatDate(worstTrade.sell_date)}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {tradeExtreme(t("trading.bestTrade"), bestTrade as Trade)}
+          {tradeExtreme(t("trading.worstTrade"), worstTrade as Trade)}
         </div>
       )}
 
       {/* 섹터별 & 기간별 성과 */}
       {history.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sortedSectors.length > 0 && (
-            <Card className="border-border/50">
-              <CardHeader>
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-primary" />
-                  {t("trading.sectorPerformanceTop3")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
+            <Card className="gap-0 py-0 rounded-lg shadow-none">
+              {cardHeader(t("trading.sectorPerformanceTop3"))}
+              <CardContent className="px-0 pb-1">
+                <div className="divide-y divide-border border-t border-border">
                   {sortedSectors.map(([sector, data], index) => (
-                    <div key={sector} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/20 text-primary font-bold text-sm">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <p className="font-medium text-foreground">{sector}</p>
+                    <div key={sector} className="flex items-center justify-between gap-3 px-5 py-3">
+                      <div className="flex items-baseline gap-3 min-w-0">
+                        <span className="text-xs text-muted-foreground font-mono tabular-nums">{index + 1}</span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{sector}</p>
                           <p className="text-xs text-muted-foreground">{data.count}{t("trading.tradeCount")}</p>
                         </div>
                       </div>
-                      <p className={`text-lg font-bold ${data.avgProfit >= 0 ? "text-success" : "text-destructive"}`}>
-                        {formatPercent(data.avgProfit)}
-                      </p>
+                      <p className={`font-mono tabular-nums text-[13px] ${signTone(data.avgProfit)}`}>{formatPercent(data.avgProfit)}</p>
                     </div>
                   ))}
                 </div>
@@ -731,43 +518,30 @@ export function TradingHistoryPage({ history, summary, prismPerformance = [], ma
           )}
 
           {Object.keys(periodPerformance).length > 0 && (
-            <Card className="border-border/50">
-              <CardHeader>
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-chart-3" />
-                  {t("trading.periodPerformance")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
+            <Card className="gap-0 py-0 rounded-lg shadow-none">
+              {cardHeader(t("trading.periodPerformance"))}
+              <CardContent className="px-0 pb-1">
+                <div className="divide-y divide-border border-t border-border">
                   {Object.entries(periodPerformance).map(([period, data]) => (
-                    <div key={period} className="p-3 rounded-lg bg-muted/30">
-                      <div className="flex items-center justify-between mb-2">
+                    <div key={period} className="px-5 py-3 space-y-1.5">
+                      <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="font-medium text-foreground">{period}</p>
+                          <p className="text-sm font-medium text-foreground">{period}</p>
                           <p className="text-xs text-muted-foreground">{data.count}{t("trading.tradeCount")}</p>
                         </div>
-                        <p className={`text-lg font-bold ${data.avgProfit >= 0 ? "text-success" : "text-destructive"}`}>
-                          {formatPercent(data.avgProfit)}
-                        </p>
+                        <p className={`font-mono tabular-nums text-[13px] ${signTone(data.avgProfit)}`}>{formatPercent(data.avgProfit)}</p>
                       </div>
-                      <div className="flex gap-4 text-xs">
-                        <div className="flex items-center gap-1">
-                          <span className="text-success">▲</span>
-                          <span className="text-muted-foreground">{t("trading.avgWinShort")}:</span>
-                          <span className="font-medium text-success">
-                            {data.winCount > 0 ? formatPercent(data.avgWin) : "-"}
-                          </span>
-                          <span className="text-muted-foreground">({data.winCount}{t("trading.tradeCountShort")})</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-destructive">▼</span>
-                          <span className="text-muted-foreground">{t("trading.avgLossShort")}:</span>
-                          <span className="font-medium text-destructive">
-                            {data.lossCount > 0 ? formatPercent(data.avgLoss) : "-"}
-                          </span>
-                          <span className="text-muted-foreground">({data.lossCount}{t("trading.tradeCountShort")})</span>
-                        </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
+                        <span>
+                          {t("trading.avgWinShort")}{" "}
+                          <span className="font-mono text-success">{data.winCount > 0 ? formatPercent(data.avgWin) : "-"}</span>{" "}
+                          ({data.winCount}{t("trading.tradeCountShort")})
+                        </span>
+                        <span>
+                          {t("trading.avgLossShort")}{" "}
+                          <span className="font-mono text-destructive">{data.lossCount > 0 ? formatPercent(data.avgLoss) : "-"}</span>{" "}
+                          ({data.lossCount}{t("trading.tradeCountShort")})
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -779,213 +553,153 @@ export function TradingHistoryPage({ history, summary, prismPerformance = [], ma
       )}
 
       {/* 거래 상세 내역 */}
-      <Card className="border-border/50">
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold">{t("trading.detailedHistory")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
+      <Card className="gap-0 py-0 rounded-lg shadow-none">
+        {cardHeader(t("trading.detailedHistory"), `${history.length}${t("trading.tradeCount")}`)}
+        <CardContent className="px-0 pb-0">
+          <div className="divide-y divide-border border-t border-border">
             {history.map((trade) => (
-              <Card key={trade.id} className="border-border/30 bg-muted/20">
-                <CardContent className="p-6">
-                  <div className="space-y-4">
-                    {/* 종목 헤더 */}
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-bold text-foreground">{trade.company_name}</h3>
-                          <Badge variant="outline" className="text-xs">{trade.ticker}</Badge>
-                          {trade.scenario?.sector && (
-                            <Badge variant="secondary" className="text-xs">{trade.scenario.sector}</Badge>
-                          )}
-                          {trade.scenario?.investment_period && (
-                            <Badge variant="secondary" className="text-xs">{trade.scenario.investment_period}</Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          {formatDate(trade.buy_date)} → {formatDate(trade.sell_date)} ({trade.holding_days}{t("trading.daysHeld")})
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm text-muted-foreground mb-1">{t("trading.profitRate")}</p>
-                        <p className={`text-2xl font-bold ${trade.profit_rate >= 0 ? "text-success" : "text-destructive"}`}>
-                          {formatPercent(trade.profit_rate)}
-                        </p>
-                        {(trade.allocation ?? 1) < 1 || (trade.add_count || 0) > 0 ? (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {language === "ko"
-                              ? `${trade.allocation_label || `비중 ${Math.round((trade.allocation ?? 1) * 100)}%`} · 슬롯 기준 ${formatPercent(trade.slot_profit_rate ?? trade.profit_rate * (trade.allocation ?? 1))}`
-                              : `${(trade.allocation_label || `${Math.round((trade.allocation ?? 1) * 100)}%`).replace("비중", "Alloc")} · slot ${formatPercent(trade.slot_profit_rate ?? trade.profit_rate * (trade.allocation ?? 1))}`}
-                            {(trade.add_count || 0) > 0 ? (language === "ko" ? " · 매수가는 평균" : " · avg entry") : ""}
-                          </p>
-                        ) : null}
-                      </div>
+              <article key={trade.id} className="px-4 sm:px-5 py-4 space-y-3">
+                {/* 종목 헤더 */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <h3 className="font-medium text-foreground">{trade.company_name}</h3>
+                      <span className="text-xs text-muted-foreground font-mono">{trade.ticker}</span>
+                      {trade.scenario?.sector && (
+                        <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">{trade.scenario.sector}</Badge>
+                      )}
+                      {trade.scenario?.investment_period && (
+                        <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">{trade.scenario.investment_period}</Badge>
+                      )}
                     </div>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {formatDate(trade.buy_date)} → {formatDate(trade.sell_date)} ({trade.holding_days}{t("trading.daysHeld")})
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-muted-foreground">{t("trading.profitRate")}</p>
+                    <p className={`font-serif text-2xl leading-none tracking-tight tabular-nums mt-1 ${signTone(trade.profit_rate)}`}>
+                      {formatPercent(trade.profit_rate)}
+                    </p>
+                    {(trade.allocation ?? 1) < 1 || (trade.add_count || 0) > 0 ? (
+                      <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
+                        {language === "ko"
+                          ? `${trade.allocation_label || `비중 ${Math.round((trade.allocation ?? 1) * 100)}%`} · 슬롯 기준 ${formatPercent(trade.slot_profit_rate ?? trade.profit_rate * (trade.allocation ?? 1))}`
+                          : `${(trade.allocation_label || `${Math.round((trade.allocation ?? 1) * 100)}%`).replace("비중", "Alloc")} · slot ${formatPercent(trade.slot_profit_rate ?? trade.profit_rate * (trade.allocation ?? 1))}`}
+                        {(trade.add_count || 0) > 0 ? (language === "ko" ? " · 매수가는 평균" : " · avg entry") : ""}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
 
-                    {/* 거래 정보 */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-lg bg-background border border-border/50">
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">{t("trading.buyPrice")}</p>
-                        <p className="font-semibold text-foreground">{formatCurrency(trade.buy_price)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">{t("trading.sellPrice")}</p>
-                        <p className="font-semibold text-foreground">{formatCurrency(trade.sell_price)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">{t("trading.aiTargetPrice")}</p>
-                        <p className="font-semibold text-success">
-                          {trade.scenario?.target_price ? formatCurrency(trade.scenario.target_price) : "-"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">{t("trading.targetAchievementRate")}</p>
-                        <p className="font-semibold text-foreground">
-                          {trade.scenario?.target_price
-                            ? `${((trade.sell_price / trade.scenario.target_price) * 100).toFixed(0)}%`
-                            : "-"}
-                        </p>
-                      </div>
+                {/* 거래 정보 */}
+                <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 rounded-md border border-border p-3">
+                  <div>
+                    <dt className="text-xs text-muted-foreground mb-0.5">{t("trading.buyPrice")}</dt>
+                    <dd className="font-mono tabular-nums text-[13px] text-foreground">{formatCurrency(trade.buy_price)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground mb-0.5">{t("trading.sellPrice")}</dt>
+                    <dd className="font-mono tabular-nums text-[13px] text-foreground">{formatCurrency(trade.sell_price)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground mb-0.5">{t("trading.aiTargetPrice")}</dt>
+                    <dd className="font-mono tabular-nums text-[13px] text-success">
+                      {trade.scenario?.target_price ? formatCurrency(trade.scenario.target_price) : "-"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground mb-0.5">{t("trading.targetAchievementRate")}</dt>
+                    <dd className="font-mono tabular-nums text-[13px] text-foreground">
+                      {trade.scenario?.target_price
+                        ? `${((trade.sell_price / trade.scenario.target_price) * 100).toFixed(0)}%`
+                        : "-"}
+                    </dd>
+                  </div>
+                </dl>
+
+                {/* AI 시나리오 */}
+                {trade.scenario && (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">{t("trading.aiInvestmentRationale")}</p>
+                      {trade.scenario.rationale && (
+                        <p className="text-sm text-foreground leading-relaxed break-words">{trade.scenario.rationale}</p>
+                      )}
                     </div>
+                    {trade.scenario.portfolio_analysis && textBlock(t("modal.portfolioAnalysis"), trade.scenario.portfolio_analysis)}
+                    {trade.scenario.valuation_analysis && textBlock(t("modal.valuationAnalysis"), trade.scenario.valuation_analysis)}
+                    {trade.scenario.sector_outlook && textBlock(t("modal.sectorOutlook"), trade.scenario.sector_outlook)}
+                    {trade.scenario.market_condition && textBlock(t("trading.pastMarketCondition"), trade.scenario.market_condition)}
 
-                    {/* AI 시나리오 */}
-                    {trade.scenario && (
-                      <div className="space-y-3">
-                        {/* 투자 근거 */}
-                        <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-                          <div className="flex items-start gap-2">
-                            <Brain className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                            <div className="flex-1">
-                              <p className="text-sm font-semibold text-primary mb-2">{t("trading.aiInvestmentRationale")}</p>
-                              {trade.scenario.rationale && (
-                                <p className="text-sm text-foreground leading-relaxed">{trade.scenario.rationale}</p>
-                              )}
+                    {/* 매매 시나리오 상세 */}
+                    {trade.scenario.trading_scenarios && (
+                      <div className="rounded-md border border-border p-3 space-y-3">
+                        <p className="text-xs font-medium text-foreground">{t("trading.aiScenarioDetails")}</p>
+
+                        {trade.scenario.trading_scenarios.key_levels && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5">{t("modal.keyPriceLevels")}</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                              {levelLabels.map(([key, label]) => {
+                                const value = trade.scenario?.trading_scenarios?.key_levels?.[key]
+                                return value ? (
+                                  <div key={key} className="rounded bg-muted/50 px-2 py-1.5">
+                                    <span className="text-muted-foreground">{label}: </span>
+                                    <span className="text-foreground tabular-nums">{value}</span>
+                                  </div>
+                                ) : null
+                              })}
                             </div>
                           </div>
-                        </div>
+                        )}
 
-                        {/* 포트폴리오 분석 */}
-                        {trade.scenario.portfolio_analysis && (
-                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
-                            <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.portfolioAnalysis")}</p>
-                            <p className="text-sm text-foreground leading-relaxed">{trade.scenario.portfolio_analysis}</p>
+                        {trade.scenario.trading_scenarios.sell_triggers && trade.scenario.trading_scenarios.sell_triggers.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5">{t("modal.sellTriggers")}</p>
+                            <ul className="space-y-1">
+                              {trade.scenario.trading_scenarios.sell_triggers.map((trigger, idx) => (
+                                <li key={idx} className="text-xs text-foreground leading-relaxed break-words pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-destructive">
+                                  {trigger}
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
 
-                        {/* 밸류에이션 분석 */}
-                        {trade.scenario.valuation_analysis && (
-                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
-                            <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.valuationAnalysis")}</p>
-                            <p className="text-sm text-foreground leading-relaxed">{trade.scenario.valuation_analysis}</p>
+                        {trade.scenario.trading_scenarios.hold_conditions && trade.scenario.trading_scenarios.hold_conditions.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5">{t("modal.holdConditions")}</p>
+                            <ul className="space-y-1">
+                              {trade.scenario.trading_scenarios.hold_conditions.map((condition, idx) => (
+                                <li key={idx} className="text-xs text-foreground leading-relaxed break-words pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-success">
+                                  {condition}
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
 
-                        {/* 섹터 전망 */}
-                        {trade.scenario.sector_outlook && (
-                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
-                            <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.sectorOutlook")}</p>
-                            <p className="text-sm text-foreground leading-relaxed">{trade.scenario.sector_outlook}</p>
-                          </div>
-                        )}
-
-                        {/* 시장 상황 */}
-                        {trade.scenario.market_condition && (
-                          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
-                            <p className="text-xs font-semibold text-muted-foreground mb-2">{t("trading.pastMarketCondition")}</p>
-                            <p className="text-sm text-foreground leading-relaxed">{trade.scenario.market_condition}</p>
-                          </div>
-                        )}
-
-                        {/* 매매 시나리오 상세 */}
-                        {trade.scenario.trading_scenarios && (
-                          <div className="p-4 rounded-lg bg-chart-1/10 border border-chart-1/20">
-                            <p className="text-sm font-semibold text-chart-1 mb-3">{t("trading.aiScenarioDetails")}</p>
-
-                            {/* 주요 레벨 */}
-                            {trade.scenario.trading_scenarios.key_levels && (
-                              <div className="mb-4">
-                                <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.keyPriceLevels")}</p>
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                  {trade.scenario.trading_scenarios.key_levels.primary_support && (
-                                    <div className="p-2 rounded bg-background/50">
-                                      <span className="text-muted-foreground">{t("modal.primarySupportShort")}: </span>
-                                      <span className="font-medium text-foreground">{trade.scenario.trading_scenarios.key_levels.primary_support}</span>
-                                    </div>
-                                  )}
-                                  {trade.scenario.trading_scenarios.key_levels.secondary_support && (
-                                    <div className="p-2 rounded bg-background/50">
-                                      <span className="text-muted-foreground">{t("modal.secondarySupportShort")}: </span>
-                                      <span className="font-medium text-foreground">{trade.scenario.trading_scenarios.key_levels.secondary_support}</span>
-                                    </div>
-                                  )}
-                                  {trade.scenario.trading_scenarios.key_levels.primary_resistance && (
-                                    <div className="p-2 rounded bg-background/50">
-                                      <span className="text-muted-foreground">{t("modal.primaryResistanceShort")}: </span>
-                                      <span className="font-medium text-foreground">{trade.scenario.trading_scenarios.key_levels.primary_resistance}</span>
-                                    </div>
-                                  )}
-                                  {trade.scenario.trading_scenarios.key_levels.secondary_resistance && (
-                                    <div className="p-2 rounded bg-background/50">
-                                      <span className="text-muted-foreground">{t("modal.secondaryResistanceShort")}: </span>
-                                      <span className="font-medium text-foreground">{trade.scenario.trading_scenarios.key_levels.secondary_resistance}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* 매도 트리거 */}
-                            {trade.scenario.trading_scenarios.sell_triggers && trade.scenario.trading_scenarios.sell_triggers.length > 0 && (
-                              <div className="mb-4">
-                                <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.sellTriggers")}</p>
-                                <ul className="space-y-1.5">
-                                  {trade.scenario.trading_scenarios.sell_triggers.map((trigger, idx) => (
-                                    <li key={idx} className="text-xs text-foreground leading-relaxed pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-chart-1">
-                                      {trigger}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-
-                            {/* 보유 조건 */}
-                            {trade.scenario.trading_scenarios.hold_conditions && trade.scenario.trading_scenarios.hold_conditions.length > 0 && (
-                              <div className="mb-4">
-                                <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.holdConditions")}</p>
-                                <ul className="space-y-1.5">
-                                  {trade.scenario.trading_scenarios.hold_conditions.map((condition, idx) => (
-                                    <li key={idx} className="text-xs text-foreground leading-relaxed pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-success">
-                                      {condition}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-
-                            {/* 포트폴리오 맥락 */}
-                            {trade.scenario.trading_scenarios.portfolio_context && (
-                              <div>
-                                <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.portfolioContext")}</p>
-                                <p className="text-xs text-foreground leading-relaxed">{trade.scenario.trading_scenarios.portfolio_context}</p>
-                              </div>
-                            )}
+                        {trade.scenario.trading_scenarios.portfolio_context && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5">{t("modal.portfolioContext")}</p>
+                            <p className="text-xs text-foreground leading-relaxed break-words">{trade.scenario.trading_scenarios.portfolio_context}</p>
                           </div>
                         )}
                       </div>
                     )}
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </article>
             ))}
           </div>
         </CardContent>
       </Card>
 
       {history.length === 0 && (
-        <Card className="border-border/50">
-          <CardContent className="p-12 text-center">
-            <History className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-            <p className="text-muted-foreground">{t("trading.noData")}</p>
+        <Card className="gap-0 py-0 rounded-lg shadow-none">
+          <CardContent className="p-10 text-center">
+            <p className="text-sm text-muted-foreground">{t("trading.noData")}</p>
           </CardContent>
         </Card>
       )}
