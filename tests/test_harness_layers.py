@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ("prism-trading-change-review", "prism-btc-change-review", "prism-entry-quality-analysis")
+SKILLS = (
+    "prism-trading-change-review", "prism-btc-change-review", "prism-entry-quality-analysis", "prism-trade-review",
+)
 
 
 def _load(path, name):
@@ -31,8 +33,12 @@ def test_agents_md_carries_current_charter():
     assert sync.render(agents, core) == agents, "run tools/harness/sync_agents_core.py"
 
 
-def test_claude_md_imports_charter():
-    assert "\n@docs/HARNESS_CORE_ko.md\n" in (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+def test_claude_md_imports_shared_guide():
+    # With both files present Claude reads only CLAUDE.md, so AGENTS.md must be imported;
+    # AGENTS.md already carries the charter, so importing it again would load it twice.
+    claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert claude.startswith("@AGENTS.md\n")
+    assert "@docs/HARNESS_CORE_ko.md" not in claude
 
 
 def test_charter_links_resolve():
@@ -75,6 +81,8 @@ def test_hook_configs_call_shared_script():
         # exit 2 blocks the session in both hosts; a missing script must not
         assert all("|| true" in c for c in commands)
     assert "apply_patch" in codex["PreToolUse"][0]["matcher"]
+    reset = claude["SessionStart"][0]
+    assert reset["matcher"] == "compact" and "hook.py\" reset || true" in reset["hooks"][0]["command"]
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -86,6 +94,9 @@ def test_hook_configs_call_shared_script():
     ("BTCUSDT 펀딩 확인", {"btc"}),
     ("매매 로직 바꿔줘", {"stock"}),
     ("live 대시보드 색 바꿔줘", set()),
+    ("PR 머지하고 배포해줘", {"deploy"}),
+    ("LLY 왜 샀는지 복기해줘", {"review"}),
+    ("이 trace_id 경과 보여줘", {"review"}),
 ])
 def test_prompt_domains(text, expected):
     assert hook.prompt_domains(text) == expected
@@ -122,3 +133,12 @@ def test_hook_never_fails_on_bad_input(capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin", type("S", (), {"read": lambda self: "not json"})())
     assert hook.main(["hook.py", "prompt"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_reset_after_compaction_restores_full_reminder(tmp_path, monkeypatch):
+    monkeypatch.setattr(hook.tempfile, "gettempdir", lambda: str(tmp_path))
+    prompt = {"session_id": "s2", "prompt": "손절 바꿔줘"}
+    hook.run("prompt", prompt)
+    assert "(재알림)" in hook.run("prompt", prompt)["hookSpecificOutput"]["additionalContext"]
+    assert hook.run("reset", {"session_id": "s2", "source": "compact"}) is None
+    assert "(재알림)" not in hook.run("prompt", prompt)["hookSpecificOutput"]["additionalContext"]

@@ -107,7 +107,7 @@ def test_every_trading_prompt_reads_official_filings():
         "stock_tracking_agent.py": ['"KR", ticker, language=self.language, purpose="buy"'],
         "stock_tracking_enhanced_agent.py": ['"KR", ticker, buy_date=buy_date, language=self.language, purpose="sell"'],
         "prism-us/us_stock_tracking_agent.py": ['"US", ticker, language="en", purpose="buy"',
-                                                '"US", ticker, buy_date=buy_date, language="en", purpose="sell"'],
+                                                '"US", ticker, buy_date=buy_date, language=getattr(self, "language", "en"), purpose="sell"'],
     }.items():
         source = (root / name).read_text(encoding="utf-8")
         for needle in needles:

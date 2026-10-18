@@ -3,8 +3,9 @@
 
 Development-time only: it never blocks, never touches trading code, and exits 0 on any error.
 
-    hook.py prompt   UserPromptSubmit: trading/BTC/analysis words -> harness reminder
+    hook.py prompt   UserPromptSubmit: trading/BTC/review/analysis/deploy words -> harness reminder
     hook.py edit     PreToolUse: editing a trading/BTC file -> harness checklist
+    hook.py reset    SessionStart(compact): forget what was announced, so the full reminder returns
 
 Both hosts accept ``{"hookSpecificOutput": {"hookEventName", "additionalContext"}}``.
 Claude passes ``tool_input.file_path``; Codex passes the raw apply_patch text somewhere in
@@ -80,6 +81,11 @@ BTC_PATHS = (
 
 KEYWORDS = {
     "btc": ("btc", "비트코인", "bybit", "바이비트"),
+    "deploy": ("배포", "머지", "merge", "deploy", "롤백", "rollback", "장애", "hotfix", "핫픽스"),
+    "review": (
+        "복기", "왜 샀", "왜 팔았", "왜 안 샀", "왜 안 팔", "왜 매수", "왜 매도", "왜 손절", "왜 보유",
+        "trace_id", "추적번호", "추적 번호", "clickstack", "클릭스택", "clickhouse", "매매 기록", "매매 내역",
+    ),
     "analysis": ("매수품질", "진입품질", "리플레이", "replay", "재생", "승격", "evidence packet", "패킷"),
     "stock": (
         "매수", "매도", "손절", "익절", "재진입", "증액", "비중", "스크리닝", "트리거", "국면",
@@ -115,20 +121,35 @@ FULL = {
         "- 수익 주장은 docs/BTC_PROOF_GATES_20261010_ko.md와 profitability_gate로만. 테스트 통과·백테스트 수익은 입증이 아니다.",
         "- 로드맵 갱신 시 구현·테스트·CI·배포·관측·수익 입증을 구분한다.",
     ],
+    "deploy": [
+        "[PRISM 하네스] 머지·배포·장애 수리 요청입니다.",
+        "- docs/SERVER_GIT_OPERATIONS_ko.md의 변경 범위별 검증 게이트를 먼저 적용한다: 깨끗한 대상, 검증된 커밋, ff-only, 파괴적 reset/stash/clean 금지.",
+        "- 머지 전 PR 헤드·의존 순서·관련 테스트와 모든 상태 검사 SUCCESS(gh pr view N --json statusCheckRollup, license 잡 포함)를 확인한다.",
+        "- 배포 전 테스트, 배포 후 스모크, 첫 정기 실행 완료 여부를 따로 보고한다. 테스트 통과는 운영 검증이 아니다.",
+    ],
     "analysis": [
         "[PRISM 하네스] 데이터 분석·재생 요청입니다.",
         "- `prism-entry-quality-analysis` 스킬: 결정론적 Evidence Packet으로만 분석하고 임의 SQL로 대신하지 않는다.",
         "- MISSING은 모름. 운영에서 LLM이 승인하는 규칙은 LLM 재생으로 판정. 가상 표본은 (시장·종목·규칙·날짜) 중복 제거.",
         "- 승격 순서는 사전등록 → 재생 → SHADOW → 제한 LIVE. SHADOW·LIVE 자동 승격 금지, LIVE는 명시 승인.",
     ],
+    "review": [
+        "[PRISM 하네스] 매매 복기·판단 이유 확인 요청입니다.",
+        "- `prism-trade-review` 스킬: 먼저 `python tools/clickstack_query.py ticker <종목>` → `trace <trace_id>`로"
+        " ClickStack 원장을 조회한다. 서버 SQLite·로그 grep은 원장에 없는 부분을 메울 때만 쓴다.",
+        "- 원장에 없는 사건은 MISSING으로 둔다(매매 연결은 2026-10-08 이후 판단부터, 보관 180일). 기억·추측으로 메우지 않는다.",
+        "- 한 건의 사실 확인용이다. 여러 건을 묶은 성과 판정·규칙 변경 근거는 Evidence Packet과 매매 변경 절차로 간다.",
+    ],
 }
 SHORT = {
     "stock": "[PRISM 하네스] (재알림) 매매 변경 → prism-trading-change-review 절차·헌장 '넘지 않는 선' 적용.",
     "prompt": "[PRISM 하네스] (재알림) 프롬프트 변경 → 형제 프롬프트·코드 대조, 방향 갈리는 모순은 사용자와.",
     "btc": "[PRISM 하네스] (재알림) BTC → 로드맵 마일스톤 ID 확인, 안전 수정과 전략 실험 분리, 수익은 입증 계약으로만.",
+    "deploy": "[PRISM 하네스] (재알림) 머지·배포 → SERVER_GIT_OPERATIONS 게이트, 모든 상태 검사 SUCCESS, 배포·첫 정기 실행 따로 보고.",
+    "review": "[PRISM 하네스] (재알림) 복기 → tools/clickstack_query.py ticker·trace로 원장부터, 없으면 MISSING.",
     "analysis": "[PRISM 하네스] (재알림) 분석 → Evidence Packet·MISSING 보존·LLM 재생·중복 제거.",
 }
-ORDER = ("btc", "stock", "prompt", "analysis")
+ORDER = ("btc", "stock", "prompt", "review", "analysis", "deploy")
 PATCH_FILE = re.compile(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", re.M)
 
 
@@ -228,6 +249,10 @@ def build_message(domains: set[str], new: set[str]) -> str:
 
 
 def run(mode: str, payload: dict) -> dict | None:
+    if mode == "reset":  # compaction drops earlier reminders from context
+        if payload.get("session_id"):
+            _state_file(payload["session_id"]).unlink(missing_ok=True)
+        return None
     if mode == "prompt":
         domains = prompt_domains(str(payload.get("prompt") or ""))
         event = "UserPromptSubmit"

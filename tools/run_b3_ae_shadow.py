@@ -35,9 +35,11 @@ def live_add_provider(market):
 
     def live_add(campaign, decision, now):
         result = _live_add(campaign, decision, now)
-        if result.get("status") == "ERROR":
-            from prism_core.ops_alert import alert_order_errors
-            alert_order_errors("증액", market, [(campaign.get("symbol", "?"), result.get("error"))],
+        from prism_core.ops_alert import alert_order_errors, buy_rejection
+        failure = (result.get("error") if result.get("status") == "ERROR"
+                   else buy_rejection(result.get("broker")) if result.get("status") == "EXECUTED" else None)
+        if failure:
+            alert_order_errors("증액", market, [(campaign.get("symbol", "?"), failure)],
                                f"journalctl -u prism-b3-ae-shadow@{argv}")
         return result
 

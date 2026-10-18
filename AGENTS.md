@@ -1,11 +1,15 @@
-# AGENTS.md - Codex Guide for PRISM-INSIGHT
+# AGENTS.md — PRISM-INSIGHT (Codex · Claude Code 공통)
 
-This file governs the repository rooted here.
+This is the single shared guide for every coding agent in this repository. Codex reads it directly;
+Claude Code imports it from `CLAUDE.md` (`@AGENTS.md`). Put rules that both agents need **here**, and
+only host-specific notes in `CLAUDE.md`. Detailed procedures live in the linked docs and skills —
+keep this file to "what to always know" and "where to look first".
+
+- Skills: `skills/` (Codex sees `.agents/skills/`, Claude sees `.claude/skills/`; both are links)
+- Hooks: `.codex/hooks.json` (trust once with `/hooks`) and `.claude/settings.json`, both calling `tools/harness/hook.py`
+- `tests/test_harness_layers.py` checks that these layers still agree.
 
 ## Harness charter (read first)
-
-Shared with Claude Code. Repo skills are in `.agents/skills/` (linked to `skills/`), project hooks
-in `.codex/hooks.json` (trust them once with `/hooks`).
 
 <!-- HARNESS_CORE:BEGIN (generated from docs/HARNESS_CORE_ko.md; edit that file) -->
 # PRISM 하네스 헌장 (Claude·Codex 공통)
@@ -28,10 +32,15 @@ in `.codex/hooks.json` (trust them once with `/hooks`).
 
 - 방향이 갈리는 결정(가설 정의·대상 종목·시간축·성공 기준·적용 방식, 완화 vs 강화)은 실행 전에 사용자에게 묻는다.
 - "비교해봐"는 지금 몇 건으로 하는 일회성 비교다. 비교 요청을 SHADOW·운영 코드로 넓히려면 먼저 한 줄로 확인받는다.
-- 전략 실험은 `tasks/lessons.md`의 실험 설계 교훈을 따른다: 재현 도구가 실제 성과를 맞추는지 먼저 확인, 최소 검출 효과를
-  표본으로 사전 계산, 후보를 넓게 비교, 과거 재현 → 소액 실전 2단계로 판정. 성과는 고정 7·14·30일 종가가 아니라 최고·최저 수익률도 본다.
+- 전략 실험 전에 `docs/RESEARCH_LESSONS_ko.md`에서 같은 질문의 결론이 있는지 본다. 실험 설계: 재현 도구가 실제 성과를 맞추는지 먼저 확인,
+  최소 검출 효과를 표본으로 사전 계산, 후보를 넓게 비교, 과거 재현 → 소액 실전 2단계로 판정. 검증 모집단은 그 신호를 쓸 종목 집단으로 정하고,
+  운영 규칙의 입력 출처(손절 후·보류 후 등)를 표본이 모두 덮는지 확인하며, 가상 표본은 (시장·종목·규칙·날짜) 중복부터 없앤다.
+  성과는 고정 7·14·30일 종가가 아니라 최고·최저 수익률도 본다.
 - 매매 규칙은 KR·US를 같은 방향으로 바꾼다. 한쪽에서 정한 결정을 다른 쪽에서 다시 묻지 않는다.
 - 사용자 보고는 한국어, 쉬운 투자자 용어로 짧게(결론·핵심 숫자·다음 행동) 한다. 내부 약어는 풀어 쓴다.
+  사용자는 모바일로 보므로 결과 본문을 대화에 직접 붙이고, 파일 경로는 덧붙이는 용도로만 쓴다.
+- 매매 사실(왜 샀나·팔았나, 어떤 점수·국면·관문이었나, 체결됐나)은 ClickStack 원장을 먼저 조회해 답한다.
+  매매 한 건은 `trace_id` 하나로 스크리닝부터 매도까지 이어진다(`tools/clickstack_query.py`). 원장에 없으면 MISSING이다.
 
 ## 넘지 않는 선
 
@@ -55,194 +64,183 @@ in `.codex/hooks.json` (trust them once with `/hooks`).
 | 뉴스·테마 작업 | `docs/THEME_NEWS_ROADMAP_ko.md` | |
 | 배포·장애 수리 | `docs/SERVER_GIT_OPERATIONS_ko.md`의 변경 범위별 검증 게이트 | |
 | 2주 정기 점검 | `docs/TWO_WEEK_REVIEW_ko.md`, 하네스의 프롬프트 주기 점검 | `tools/two_week_review.py` |
+| 매매 복기, 특정 종목·포지션의 판단 경과 | `docs/PRISM_OBSERVABILITY.md`의 "Trace linkage" | `prism-trade-review`, `tools/clickstack_query.py` |
+| 새 가설·관측 등록, 지금 LIVE·SHADOW 상태 확인 | `docs/HYPOTHESIS_REGISTRY_ko.md`(등록일 기록, 2주 점검 때 재측정) | `tools/feature_status.py` |
 
 ## 이 헌장이 들어오는 길
 
-`CLAUDE.md`는 `@`로 가져오고 `AGENTS.md`는 사본을 둔다. 매매·BTC·분석 관련 질문이나 매매·BTC 파일 수정 때는
-훅이 요약을 다시 넣는다(`tools/harness/hook.py`, 막지 않음). 스킬은 `skills/`에 있고 `.claude/skills/`와
-`.agents/skills/`가 같은 폴더를 가리킨다. 규칙 내용은 원문 문서에서만 고치고, 이 헌장을 고치면
-`tools/harness/sync_agents_core.py`를 실행한다. 감지 단어·매매 파일 목록은 `hook.py`에서 조정한다.
+공용 지침은 `AGENTS.md` 하나다. Codex는 그대로 읽고, Claude는 `CLAUDE.md` 맨 위의 `@AGENTS.md`로 읽는다
+(둘 다 있으면 Claude는 `CLAUDE.md`만 읽으므로 이 가져오기가 없으면 `AGENTS.md`가 안 보인다). Codex는 가져오기를
+못 하므로 이 헌장은 `AGENTS.md`에 사본으로 들어가고, 고칠 때는 이 파일을 고친 뒤 `tools/harness/sync_agents_core.py`를
+실행한다. 매매·BTC·복기·분석·배포 관련 질문이나 매매·BTC 파일 수정 때는 훅이 요약을 다시 넣는다(`tools/harness/hook.py`,
+막지 않음, Claude는 대화 압축 뒤 전체 요약을 다시 보여 준다). 스킬은 `skills/`에 있고 `.claude/skills/`와
+`.agents/skills/`가 같은 폴더를 가리킨다. 규칙 내용은 원문 문서에서만 고치고, 감지 단어·매매 파일 목록은 `hook.py`에서 조정한다.
 <!-- HARNESS_CORE:END -->
 
-## Project Summary
+## Project
 
-PRISM-INSIGHT is an AI-powered Korean/US stock analysis and automated trading system built around:
+PRISM-INSIGHT is an AI stock analysis and automated trading system for Korea (KR) and the US,
+plus a separate BTC lane on Bybit demo (`prism-btc/`). Python 3.10+, mcp-agent, OpenAI models
+(defaults in `report_model_config.py`; trading/bot models at their call sites — read the call site,
+not docs, before changing a model), SQLite, Telegram, KIS broker API.
 
-- Python 3.10+
-- GPT-5 / Claude based analysis agents
-- SQLite storage
-- Telegram delivery
-- KIS trading APIs
-- KR and US market flows
-
-Primary source material for project context lives in `CLAUDE.md` and supporting docs under `docs/`.
-
-## Repository Map
-
-- `cores/`: main analysis engine, report generation, agent definitions, ChatGPT OAuth proxy
-- `cores/agents/`: specialized analysis, communication, and trading agents
-- `trading/`: Korean trading integration and account handling
-- `prism-us/`: US market mirror flows and trading support
-- `tracking/`: journal, memory, trading state helpers
-- `messaging/`: Redis and GCP Pub/Sub messaging
-- `tests/`: targeted regression tests
-- `docs/`: setup, troubleshooting, and agent references
-
-## Preferred Commands
-
-Use targeted, low-side-effect commands first.
-
-### Setup
-
-```bash
-pip install -r requirements.txt
-python3 -m playwright install chromium
+```
+trigger_batch.py / prism-us/us_trigger_batch.py      surge·momentum screening → candidates JSON
+  → stock_analysis_orchestrator.py (KR) / prism-us/us_stock_analysis_orchestrator.py (US)
+      data prefetch → 6 analysis agents in order (technical, trading flow, financial, industry,
+      news, market) → investment strategist → PDF report → Telegram summary (Korean)
+  → stock_tracking_agent.py / prism-us/us_stock_tracking_agent.py   BUY/SELL decision → KIS order
+      every account in trading/config/kis_devlp.yaml; Telegram report from the primary account only
+Trend-following tools around the core loop (north-star mechanisms):
+  micro-split entry/adds  tools/run_micro_split_add.py, prism_core/micro_split*.py, prism_core/add_plan*.py
+  re-entry signal (v3)    tools/run_reentry_v3_entry.py, prism_core/reentry*.py
+  runner hold             prism_core/runner_hold*.py
+  hard stop / trend exit  tools/hardstop_seller.py, tools/trend_exit_seller.py
 ```
 
-### Local analysis runs
+Which gates are LIVE/SHADOW/OFF on a server: `python tools/feature_status.py` (reads `.env` and
+crontab; `docs/FEATURE_FLAGS.md` is the intended-state registry and can lag). Agent roles and
+prompts: `docs/CLAUDE_AGENTS.md`. Release notes: `docs/RELEASE_NOTES_v*.md`.
+
+## Repository map
+
+- `cores/` analysis engine, report generation, `cores/agents/` agent prompts, `cores/chatgpt_proxy/` OAuth proxy
+- `prism_core/` shared trading policy modules (scoring, sizing, re-entry, runner hold, sector cap …)
+- `trading/` KR broker integration · `prism-us/` US mirror (own `cores/`, `trading/`, `tests/`)
+- `tracking/` journal, memory, trading state · `messaging/` Redis / GCP Pub/Sub signal publishing
+- `tools/` batch runners, sellers, research and review tools · `tests/` regression tests · `docs/` design and harness docs
+
+## Commands
 
 ```bash
-python stock_analysis_orchestrator.py --mode morning --no-telegram
-python prism-us/us_stock_analysis_orchestrator.py --mode morning
-python demo.py 005930
-python demo.py AAPL --market us
+pip install -r requirements.txt && python3 -m playwright install chromium   # setup
+python stock_analysis_orchestrator.py --mode morning --no-telegram          # KR run, no Telegram
+python prism-us/us_stock_analysis_orchestrator.py --mode morning            # US run
+python trigger_batch.py morning INFO / python prism-us/us_trigger_batch.py morning INFO   # screening only
+python demo.py 005930 / python demo.py AAPL --market us                     # single report
+python prism-us/us_pending_order_batch.py --dry-run                         # US queued orders
 python weekly_insight_report.py --dry-run
+python -m pytest tests/test_<area>.py -q                                    # focused tests
 ```
 
-### Focused tests
+- Run tests through `pytest` only: the root `conftest.py` blocks real signal publishing that importing
+  trading modules would otherwise trigger. Ad-hoc scripts that import trading agents must set
+  `PRISM_DISABLE_SIGNAL_PUBLISH=1`.
+- KR and US packages shadow each other's module names: run `prism-us/tests` in a separate pytest
+  process (as `.github/workflows/ci.yml` does).
+- Prefer `--no-telegram`, `--dry-run`, demo mode and isolated tests. Avoid production-like runs unless the task needs them.
 
-```bash
-pytest tests/test_trading_journal.py
-pytest tests/test_publish_guard.py
-pytest tests/test_publish_market_propagation.py
-pytest tests/test_multi_account_domestic.py
-```
+## Configuration
 
-Avoid broad production-like runs unless the task requires them.
+| File | Holds |
+|---|---|
+| `.env` | Telegram tokens/channels, Redis/GCP, feature gates, `PRISM_OPENAI_AUTH_MODE` (`api_key` or `chatgpt_oauth`) |
+| `mcp_agent.secrets.yaml` | API keys |
+| `mcp_agent.config.yaml` | MCP servers |
+| `trading/config/kis_devlp.yaml` | KIS credentials, `accounts:` list (first = primary) |
 
-## Change Rules
+Copy the `*.example` files to set up. Never change or commit real credentials, tokens or secrets, and
+never print them in logs or messages.
 
-- Default to safe paths: prefer `--no-telegram`, `--dry-run`, demo mode, or isolated tests.
-- Do not change or commit real credentials, tokens, or secrets in `.env`, `mcp_agent.secrets.yaml`, or `trading/config/kis_devlp.yaml`.
-- Treat generated logs, PDFs, JSON outputs, and SQLite databases as user data unless the task explicitly targets them.
-- Keep changes narrow and consistent with existing patterns; this repo has substantial behavior encoded in prompts and orchestration order.
+Troubleshooting (Playwright, fonts, KIS auth, OAuth proxy …): `docs/CLAUDE_TROUBLESHOOTING.md`.
 
-## Authorized PR merge and deployment workflow
+## Code conventions
 
-- User instruction (2026-09-06): for PRISM-INSIGHT task-scoped, validated changes,
-  proceed with merge and deployment without waiting for a separate approval review.
-- The main branch requires zero approving reviews by explicit user request.
-  Preserve the PR requirement, CI/status checks, and all other branch protections.
-- Check the exact PR head, dependency order, relevant tests, and CI before merging.
-- Any feature change, incident repair, or deployment request must first apply the
-  change-scope verification gates in docs/SERVER_GIT_OPERATIONS_ko.md. This is
-  mandatory task routing, not optional memory recall. Record pre-deploy tests,
-  post-deploy smoke, and whether the first scheduled run has actually completed.
-  Do not interpret the review waiver as permission to merge failing or unrelated work.
-- Follow docs/SERVER_GIT_OPERATIONS_ko.md: clean target, verified commit, ff-only
-  deployment, no destructive reset/stash/clean, and no credential/runtime-data edits.
-- BTC deployment remains Bybit demo unless the user separately approves real funds.
-  New risk-budget defaults, strategy promotion, and unrelated app-server deployments
-  are not authorized merely by this review-workflow preference.
+- **Async**: no blocking network calls (`requests.get`) inside async paths; use the repo's async clients
+  (`async with AsyncTradingContext(mode="demo") as trader: await trader.async_buy_stock(...)`).
+- **Sequential agents**: keep LLM report sections sequential; do not swap in `asyncio.gather(...)`
+  (rate limits and section order matter). Market analysis is cached — keep that when editing orchestration.
+- **KIS numbers**: the API may return `''`; use `_safe_float` / `_safe_int` helpers, not direct casts.
+- **Korean text**: every Korean report/message uses formal polite style (합쇼체: "~습니다"), enforced in
+  `cores/report_generation.py` and each agent instruction. Code comments and logs are English;
+  broadcast languages come from the translation agent.
+- Keep changes narrow and in the existing pattern — much behavior lives in prompts and orchestration order.
+  Preserve prompt/report structure unless the task asks for a redesign.
+- Treat logs, PDFs, JSON outputs and SQLite databases as user data unless the task targets them.
 
-## Engineering Rules
+## Trading and data safety
 
-### Async and I/O
+- Judge and report every trading change by the north star in the charter above.
+- Default to demo. Keep portfolio limits (`MAX_SLOTS = 10`, `MAX_SAME_SECTOR = 3` in the KR/US tracking
+  agents) and stop-loss logic (per-trigger `sl_max` in each `TRIGGER_CRITERIA`) unless the task changes trading rules.
+- Before changing screening, regime, entry, exit, sizing, adds, re-entry or runner hold, follow
+  `skills/prism-trading-change-review/SKILL.md` (source: `docs/TRADING_CHANGE_REVIEW_HARNESS.md`).
+  Natural-language proposals ("이 전략 접목해보자") count; no special command is required. The
+  compatibility review traces real screening code through report inputs, BUY/SELL prompts,
+  deterministic gates, execution and exit management — a concept or prompt-only review is not enough.
+- For every BUY/SELL/holding/re-entry prompt change, apply the harness's prompt framing and
+  logical-consistency review, including per-stock user prompts (f-strings) and scenario sell triggers.
+- Keep execution/data bug repair separate from strategy research, and do not delay a proven safety fix for it.
+- KR vs US: data KIS + kospi_kosdaq MCP vs yfinance + sec-edgar MCP; market-cap floor 5000억 KRW vs
+  $1B (`US_SCREENING_MIN_MARKET_CAP_USD`); tables `stock_holdings` vs `us_*` (`us_stock_holdings`,
+  `us_trading_history`, `us_watchlist_history`, `us_holding_decisions`, `us_pending_orders`).
+- US orders outside market hours are reserved orders: buys need `limit_price`; sells use `limit_price`
+  or `use_moo=True`. Orders before 10:00 KST are queued for `us_pending_order_batch.py` (10:05 KST).
 
-- In async flows, use non-blocking patterns.
-- Do not introduce blocking network calls such as `requests.get(...)` inside async execution paths; use the repo's async approach instead.
+### BTC
 
-### Agent execution
-
-- Preserve sequential execution of analysis agents unless there is clear existing infrastructure for safe parallelism.
-- Do not replace sequential report generation with `asyncio.gather(...)` for LLM-heavy sections; rate limits and prompt ordering matter here.
-- Market analysis may use cache-aware behavior; preserve that pattern when editing orchestration.
-
-### Trading and data safety
-
-- Judge and report every trading change by the north star in the harness charter above.
-- Default trading behavior should remain safe (`demo` unless explicitly required otherwise).
-- Preserve portfolio constraints and stop-loss logic unless the task explicitly changes trading rules.
-- When parsing KIS API numeric fields, prefer existing safe conversion helpers over direct casts.
-- Before changing screening, regime, entry, exit, or sizing behavior, follow
-  `docs/TRADING_CHANGE_REVIEW_HARNESS.md`. In particular, do not generalize a
-  trigger-local failure into a global hard gate without testing counterexamples.
-- When a request proposes introducing, combining, replacing, or retuning a
-  strategy, trigger, factor, regime switch, exit, or sizing rule (including an
-  LLM prompt that changes economic decisions), apply the Strategy adoption and
-  fit gate in that harness before implementation. Natural-language proposals
-  count; no special command is required. Compatibility review must trace actual
-  screening code through report inputs, BUY/SELL prompts, deterministic gates,
-  execution and exit management; conceptual strategy fit or prompt-only review
-  is insufficient. Record intended stage differences versus contradictions,
-  source locations and same-candidate tests before claiming compatibility.
-  Keep execution/data bug repair separate
-  and do not delay a proven safety fix under the guise of strategy research.
-- For every BUY/SELL/holding-review prompt change, apply the harness's prompt framing and
-  logical-consistency review: trace the assembled prompt like a program, list contradictions
-  with existing rules, and ask the user to decide any contradiction whose fix changes direction.
-
-### BTC roadmap governance
-
-- Before BTC strategy, execution, backtest, risk, observability, or deployment work, follow
+- Before BTC strategy, execution, backtest, risk, observability or deployment work, follow
   `skills/prism-btc-change-review/SKILL.md` (roadmap milestone ID, safety before optimization,
-  evidence gates, status updates only with verified evidence; development-time only).
+  evidence gates). BTC stays on Bybit demo unless the user separately approves real funds.
+- BTC trade notifications follow `docs/BTC_POSITION_MESSAGE_CONTRACT_20260915_ko.md`: verified broker
+  margin/leverage/equity with currency and capture time, never strategy capital in place of broker
+  figures, never another position's snapshot on an old exit, never delay protection or execution for
+  notification enrichment. Public notices stay compact and event-specific (no raw account snapshots or
+  repeated unknown fields on exits); keep full diagnostic data, group essential missing-data warnings,
+  and never hide unconfirmed settlement status. Missing data stays explicitly unknown.
 
-### News/theme roadmap governance
+### News/theme
 
-- Before work on KIS news headlines, the headline stores, theme maps, the signal-alert
-  theme brief, `/theme`·`/signal` evidence, or research that uses news/theme data (KR or US),
-  read `docs/THEME_NEWS_ROADMAP_ko.md`, identify the step ID (R*/U*) and its prerequisites,
-  and follow the listed order unless the user changes it.
-- Update its status table only with verified evidence (implementation, tests, deployment,
-  first scheduled run, and outcome proof are separate states).
+- Before work on KIS headlines, headline stores, theme maps, theme briefs, `/theme`·`/signal` evidence or
+  research using news/theme data, read `docs/THEME_NEWS_ROADMAP_ko.md`, name the step ID (R*/U*) and follow
+  its order. News/theme is reference material, never a buy/hold/sell rule.
+
+### Trade review (ClickStack ledger)
+
+- Route "왜 샀어/팔았어", "이 종목 복기", fill checks and any question about what the system decided through
+  `skills/prism-trade-review/SKILL.md`: query the ClickStack ledger first with `tools/clickstack_query.py`
+  (`ticker`, then `trace <trace_id>`; read-only, via db-server). Use server SQLite or log grep only for
+  gaps the ledger does not cover, and keep absent events `MISSING`. One trade is a fact check, not rule evidence.
 
 ### Entry-quality analysis
 
-- Route requests such as “매수품질 데이터 분석해줘”, entry-quality validation,
-  trigger comparison/replacement, replay, or entry-rule promotion review through
-  `skills/prism-entry-quality-analysis/SKILL.md`.
-- Read `docs/ENTRY_QUALITY_EVOLUTION_ko.md` and
-  `docs/ENTRY_QUALITY_DATA_ANALYSIS_HARNESS.md` before interpreting the data.
-- Generate a deterministic Evidence Packet with
-  `tools/build_entry_quality_evidence_packet.py`; do not substitute ad-hoc SQL,
-  fuzzy joins, or reconstructed fills.
-- Keep `MISSING` as unknown. Strategy-ledger entries/exits are independent of broker
-  funding and fills; do not exclude valid strategy outcomes because a broker order
-  was rejected. Broker-realized PnL requires separate confirmed entry/exit evidence.
-- Never promote a trigger or entry-quality rule to SHADOW or LIVE automatically.
-  LIVE requires the trading change harness and explicit user approval.
+- Route "매수품질 데이터 분석해줘", trigger comparison/replacement, replay and promotion review through
+  `skills/prism-entry-quality-analysis/SKILL.md`; build the deterministic Evidence Packet with
+  `tools/build_entry_quality_evidence_packet.py` instead of ad-hoc SQL, fuzzy joins or reconstructed fills.
+- Strategy-ledger outcomes are independent of broker funding; broker-realized PnL needs confirmed fills.
 
-### Report output
+### Status tables
 
-- BTC trade notifications must follow `docs/BTC_POSITION_MESSAGE_CONTRACT_20260915_ko.md`:
-  preserve detailed entry/add/reduction/exit/recovery context, verified margin mode,
-  exchange leverage, position margin and same-account equity ratio with currency
-  and capture time. Never substitute strategy capital/exposure for broker figures,
-  attach another position's snapshot to an old exit, or delay protection/execution
-  for optional notification enrichment. Missing data stays explicitly unknown.
-  Public notices must be compact and event-specific: do not append raw account
-  snapshots or repeated unknown fields to exits. Keep full diagnostic data, group
-  essential missing-data warnings, and never hide unconfirmed settlement status.
-- Korean report text must use formal polite style.
-- Preserve existing prompt and report structure unless the task explicitly requests prompt/report redesign.
+- Roadmap/registry status changes need verified evidence. Implementation, tests, CI, deployment,
+  first scheduled run and outcome proof are separate states. New hypotheses go to
+  `docs/HYPOTHESIS_REGISTRY_ko.md` with a registration date; research conclusions go to
+  `docs/RESEARCH_LESSONS_ko.md`.
 
-## File-Specific Notes
+## Git, PR, merge and deployment
 
-- `cores/report_generation.py`: common report tone and section formatting rules
-- `cores/analysis.py`: sequential orchestration and section integration
-- `cores/agents/*.py`: prompt logic and agent responsibilities
-- `stock_tracking_agent.py`: trading loop, sell decisions, optional journal flow
-- `telegram_ai_bot.py`: user consultation flows and conversation context
+- Code changes (`.py`, `.ts`, `.js` …) go through a feature branch from `origin/main` and a PR
+  (`feat/`, `fix/`, `refactor/`, `test/`, `docs/`). Docs-only `.md` changes may commit to main.
+  Commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`.
+- `git stash` is shared by all worktrees: use a WIP commit or `git worktree add --detach <tmp> <base>`
+  for base comparisons, never bare stash/pop.
+- User instruction (2026-09-06): task-scoped, validated changes may be merged and deployed without a
+  separate approval review. Main requires zero approving reviews; keep the PR requirement, CI and
+  all other protections. Before merging, check the exact PR head, dependency order, relevant tests and
+  that **every** status check is SUCCESS (`gh pr view N --json statusCheckRollup`, including the license job).
+- Any feature change, incident repair or deployment first applies the change-scope verification gates in
+  `docs/SERVER_GIT_OPERATIONS_ko.md`: clean target, verified commit, ff-only deploy, no destructive
+  reset/stash/clean, no credential or runtime-data edits. Record pre-deploy tests, post-deploy smoke,
+  and whether the first scheduled run has actually completed.
+- The review waiver does not cover failing or unrelated work, new risk-budget defaults, strategy
+  promotion, real BTC funds, or unrelated app-server deployments.
 
-## Before Finishing
+## Before finishing
 
-- Run the smallest relevant test or command that validates the change.
-- For screening/provider changes, unit tests or AST-extracted tests alone are insufficient:
-  run real-module KR consumer and US morning/afternoon batch-to-JSON integration
-  tests with realistic flat/MultiIndex/empty/ambiguous provider fixtures. Keep
-  network, broker orders and channel sends disabled in integration tests. After
-  deployment, verify the production Python and a bounded read-only provider
-  smoke before claiming operational recovery; do not rerun live orders as a test.
-- If you could not run validation, say so explicitly and explain why.
-- In summaries, reference the files changed and note any operational risk, especially around trading, messaging, or credential handling.
+- Run the smallest test or command that validates the change; for a pipeline component, run the
+  pipeline (e.g. the batch to its candidate count), not only the function.
+- Screening/provider changes also need real-module KR consumer and US morning/afternoon
+  batch-to-JSON integration tests with flat/MultiIndex/empty/ambiguous provider fixtures (network,
+  orders and channel sends disabled). After deployment, check the production Python and a bounded
+  read-only provider smoke before claiming recovery; never rerun live orders as a test.
+- If you could not validate, say so and why. Report changed files and any trading, messaging or
+  credential risk — in Korean, short, plain investor terms (see the charter).

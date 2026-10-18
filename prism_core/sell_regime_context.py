@@ -5,7 +5,7 @@ system regime every cycle. The AI sell decision must use the same regime and ban
 its stop-loss adjustment matches the rule that actually protects the position.
 """
 
-from cores.oneil_fallback import BULL_REGIMES, TRAIL_DROP_BULL, TRAIL_DROP_WEAK
+from cores.oneil_fallback import BULL_REGIMES, TRAIL_DROP_BULL, TRAIL_DROP_UNKNOWN, TRAIL_DROP_WEAK
 
 _KO_LABELS = {
     "parabolic": "폭주 강세장", "strong_bull": "강한 강세장", "moderate_bull": "보통 강세장",
@@ -20,7 +20,7 @@ def kr_live_regime_block(regime, context=None, language="ko"):
         return ("### 현재 시장 국면 (시스템 계산 불가)\n"
                 "시스템 국면을 계산하지 못했습니다. 0단계 기준으로 직접 판단하세요.\n" if ko else
                 "### Current Market Regime (system value unavailable)\n"
-                "The system regime could not be computed. Judge it yourself using Step 0.\n")
+                "The system regime could not be computed. Judge it yourself using Step 0.\n") + trailing_band_line(None, language)
     bull = regime in BULL_REGIMES
     drop = TRAIL_DROP_BULL if bull else TRAIL_DROP_WEAK
     summary = (context or {}).get("index_summary") or {}
@@ -45,3 +45,18 @@ def kr_live_regime_block(regime, context=None, language="ko"):
             f"Use this value for Step 0 and apply {mode}; it overrides the buy-time scenario.\n"
             f"Compute the trailing stop as highest price since entry × {drop:.2f}. This matches the automatic "
             f"exit rule, so do not set it tighter.\n")
+
+
+def trailing_band_line(regime, language="ko"):
+    """The trailing band the automatic exit uses for this regime (None = regime unavailable)."""
+    ko = language == "ko"
+    if not regime:
+        return (f"자동 청산은 이때 진입 후 최고가 × {TRAIL_DROP_UNKNOWN:.2f}로 넓게 잡습니다. 오늘은 손절선을 trailing 수준으로 "
+                "올리지 마세요.\n" if ko else
+                f"The automatic exit then trails wider at highest price since entry × {TRAIL_DROP_UNKNOWN:.2f}. Do not raise "
+                "stop_loss to a trailing level today.\n")
+    drop = TRAIL_DROP_BULL if regime in BULL_REGIMES else TRAIL_DROP_WEAK
+    return (f"트레일링 스탑은 진입 후 최고가 × {drop:.2f}로 계산하세요. 자동 청산 규칙과 같은 기준이므로 이보다 좁게 잡지 마세요.\n"
+            if ko else
+            f"Compute the trailing stop as highest price since entry × {drop:.2f}. This matches the automatic exit rule, so "
+            "do not set it tighter.\n")

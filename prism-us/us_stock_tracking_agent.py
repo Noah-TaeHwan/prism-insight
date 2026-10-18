@@ -2369,10 +2369,13 @@ class USStockTrackingAgent:
             except Exception:
                 pass
 
-            # Hard mechanical stop-loss check BEFORE AI — cannot be overridden
-            if stop_loss > 0 and current_price <= stop_loss:
+            # Hard mechanical stop BEFORE AI — the intraday hard stop's own rule (stop x 0.995 or -7%),
+            # so a touch inside the 0.5% wick buffer goes to the AI as the prompt says.
+            from cores.oneil_fallback import SellInputs, evaluate_tier1_hardstop
+            if evaluate_tier1_hardstop(SellInputs(buy_price=float(buy_price or 0), current_price=float(current_price or 0),
+                                                  stop_loss=float(stop_loss or 0)))[0]:
                 logger.info(f"{ticker} Mechanical stop-loss triggered (stop-loss: ${stop_loss:,.2f}) — skipping AI")
-                return True, f"Stop-loss condition reached (stop-loss: ${stop_loss:,.2f})"
+                return True, f"Stop-loss condition reached (stop-loss: ${stop_loss:,.2f}, 0.5% wick buffer, or -7% absolute)"
 
             # Collect current portfolio info from us_stock_holdings
             self.cursor.execute("""
@@ -2443,6 +2446,10 @@ class USStockTrackingAgent:
                 if live_regime_summary
                 else "unavailable — verify via yahoo_finance (^GSPC 20MA, ^VIX)"
             )
+            # Same trailing band as the automatic exit, which trails on _live_regime_cache
+            # (KR carries it in kr_live_regime_block).
+            from prism_core.sell_regime_context import trailing_band_line
+            live_regime_block += "\n" + trailing_band_line(getattr(self, "_live_regime_cache", None), "en").rstrip()
 
             prompt_message = f"""
 Please make a sell/hold decision for the following US stock holding.
@@ -2479,14 +2486,15 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             # Official SEC filings are the primary Core-0 evidence, read every check.
             from prism_core.corporate_filings import official_event_block_async
             prompt_message += await official_event_block_async(
-                "US", ticker, buy_date=buy_date, language="en", purpose="sell")
+                "US", ticker, buy_date=buy_date, language=getattr(self, "language", "en"), purpose="sell")
             # Micro-split holdings: next-session add plan request; '' unless micro-split LIVE is on.
             from prism_core.micro_split_live import review_prompt_block
-            prompt_message += review_prompt_block(scenario_str, market="US", language="en", stop_loss=stop_loss)
+            prompt_message += review_prompt_block(scenario_str, market="US", language=getattr(self, "language", "en"),
+                                                  stop_loss=stop_loss)
             # Protected runner: per-holding hold-rule appendix (after the micro-split block it
             # supersedes); '' for every other holding, so their prompts stay byte-identical.
             from prism_core.runner_hold_live import prompt_block as runner_prompt_block
-            prompt_message += runner_prompt_block(stock_data, market="US", language="en")
+            prompt_message += runner_prompt_block(stock_data, market="US", language=getattr(self, "language", "en"))
 
             response = None
             codex_sell_enabled = os.environ.get(
@@ -4901,6 +4909,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         logger.info(f"Actual purchase successful: {trade_result['message']}")
                     else:
                         logger.error(f"Actual purchase failed: {trade_result['message']}")
+                        from prism_core.ops_alert import alert_buy_rejected
+                        await alert_buy_rejected("US", ticker, trade_result, "US 매매 로그(Actual purchase failed)")
                 except OrderOutcomeUnknown as trade_err:
                     self._link_position_entry_intent(
                         legacy_holding_id=buy_result.legacy_holding_id,

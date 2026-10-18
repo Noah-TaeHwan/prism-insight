@@ -103,6 +103,10 @@ def test_sell_factory_matches_reviewed_volume_prompt():
     # exception and -7.1% wording removed. Trailing bands and discretionary-sell wording unchanged.
     # 2026-10-10 reviewed: "close" wording matches operations — the AI sell run is before the close
     # (14:46 KST) and the trailing stop is confirmed by the pre-close trend-exit check (15:10~15:25 KST).
+    # 2026-10-19 reviewed (prompt audit, tests/test_sell_prompt_consistency.py): trailing bands are the code values
+    # (x0.92 / x0.95, x0.90 without a live regime), en gets the ko ratchet/threshold (dynamic 1.5~5%), the stop is
+    # computed from the stored peak, the system 50-day exit is named, the example uses a confirmed close, and the
+    # "re-entry cost" premise and the KR long-hold opportunity-cost sell, "-5% sharp decline" and "market shock" discretionary sells are dropped (user decisions); the raised-stop rule stays intraday (user decision, F2 replay).
     source = SOURCE.read_text(encoding="utf-8")
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "create_sell_decision_agent")
-    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "00f948f9bf409f84cc07040705cf12a3f325f452076a757b1e8f158038a54bbf"
+    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "5729051b6742d42a66dc10c3e66d16826f7f9e8b4f738cd733398a15369d2ff2"

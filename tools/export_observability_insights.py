@@ -308,15 +308,16 @@ def _market_snapshot(
     journal_referenced_count = 0
     journal_adjustment_count = 0
     for event in captured_journal_events:
-        policy = event.get("attributes", {}).get("policy_context", {})
-        journal = policy.get("journal_influence_context", {})
-        reflection = policy.get("journal_reflection", {})
+        # captured contexts may hold explicit nulls (e.g. journal_reflection before 09-03)
+        policy = event.get("attributes", {}).get("policy_context") or {}
+        journal = policy.get("journal_influence_context") or {}
+        reflection = policy.get("journal_reflection") or {}
         status = str(journal.get("status") or "MISSING").upper()
         journal_statuses[status] += 1
         journal_enabled_count += bool(journal.get("enabled"))
         journal_input_present_count += bool(journal.get("input_hash"))
         journal_referenced_count += bool(reflection.get("referenced"))
-        effect = journal.get("deterministic_effect", {})
+        effect = journal.get("deterministic_effect") or {}
         journal_adjustment_count += bool(effect.get("applied_adjustment"))
         crossing = str(effect.get("threshold_crossing") or "").upper()
         if crossing:
