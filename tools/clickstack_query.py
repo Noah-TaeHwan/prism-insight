@@ -25,7 +25,7 @@ import argparse
 import json
 import os
 import shlex
-import subprocess
+import subprocess  # nosec B404 - fixed ssh/bash argv below, no shell, query via stdin
 import sys
 from typing import Any
 
@@ -72,7 +72,8 @@ def run_query(sql: str, params: dict[str, Any] | None = None, *, local: bool = F
         backend = f"set -a; . {READER_ENV}; set +a; python3 -"
         hop = ". /etc/prism-observability/tunnel.env; ssh -o BatchMode=yes root@$PRISM_BACKEND_HOST " + shlex.quote(backend)
         command = ["ssh", "-o", "BatchMode=yes", os.getenv("PRISM_DB_SSH", "prism-db"), hop]
-    result = subprocess.run(command, input=program, text=True, capture_output=True, timeout=180)
+    result = subprocess.run(  # nosec B603  # nosemgrep - fixed argv, SQL travels as a stdin literal
+        command, input=program, text=True, capture_output=True, timeout=180)
     if result.returncode:
         noise = ("post-quantum", "store now", "openssh.com/pq")
         err = "\n".join(l for l in result.stderr.splitlines() if not any(n in l for n in noise))

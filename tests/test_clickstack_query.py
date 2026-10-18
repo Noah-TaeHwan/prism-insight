@@ -1,4 +1,5 @@
 """tools/clickstack_query.py stays read-only and passes values as query parameters (2026-10-18)."""
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -14,14 +15,12 @@ spec.loader.exec_module(cq)
 def test_program_carries_values_as_parameters_not_sql():
     nasty = "x'); DROP TABLE otel_logs; --"
     program = cq.build_program("SELECT 1 WHERE TraceId = {trace:String}", {"trace": nasty})
-    captured = {}
-    namespace = {"__name__": "remote"}
-    exec(cq.REMOTE, namespace)
-    namespace["run"] = lambda payload: captured.update(payload)
-    exec(program.split(cq.REMOTE, 1)[1], namespace)
-    assert captured["sql"] == "SELECT 1 WHERE TraceId = {trace:String}"
-    assert captured["params"] == {"trace": nasty}
-    assert captured["limits"]["readonly"] == "1"
+    tail = program.split(cq.REMOTE, 1)[1].strip()
+    assert tail.startswith("run(json.loads(") and tail.endswith("))")
+    payload = json.loads(ast.literal_eval(tail[len("run(json.loads("):-2]))
+    assert payload["sql"] == "SELECT 1 WHERE TraceId = {trace:String}"
+    assert payload["params"] == {"trace": nasty}
+    assert payload["limits"]["readonly"] == "1"
 
 
 @pytest.mark.parametrize("query", ["DROP TABLE otel_logs", "INSERT INTO otel_logs VALUES (1)", "  alter table x", ""])
