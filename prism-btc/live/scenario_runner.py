@@ -45,14 +45,19 @@ _ERROR_TYPES = {"Exception", "ValueError", "RuntimeError", "PermissionError", "T
 
 
 def run_once(conn, broker, *, execute=False, protect_only=False,
-             snapshot=collect_snapshot, proposal=propose, calculated_review=False):
+             snapshot=collect_snapshot, proposal=propose, calculated_review=False, entry_contract_enabled=False):
     with run_capture(conn):
         return _run_once(conn, broker, execute=execute, protect_only=protect_only,
-                         snapshot=snapshot, proposal=proposal, calculated_review=calculated_review)
+                         snapshot=snapshot, proposal=proposal, calculated_review=calculated_review,
+                         entry_contract_enabled=entry_contract_enabled)
 
 
 def _run_once(conn, broker, *, execute=False, protect_only=False,
-              snapshot=collect_snapshot, proposal=propose, calculated_review=False):
+              snapshot=collect_snapshot, proposal=propose, calculated_review=False, entry_contract_enabled=False):
+    if type(entry_contract_enabled) is not bool:
+        raise ValueError("entry_contract_flag_must_be_bool")
+    if entry_contract_enabled and (not execute or protect_only):
+        return {"status":"blocked","reason":"entry_contract_requires_execute","model_called":False}
     if type(calculated_review) is not bool:
         raise ValueError("calculated_review_flag_must_be_bool")
     if calculated_review and (not execute or protect_only):
@@ -95,6 +100,7 @@ def _run_once(conn, broker, *, execute=False, protect_only=False,
         lambda snap,ctx:proposal(snap,ctx,response_contract(ctx)),snapshot,
         recovery_enabled=True,automatic_normalization_enabled=True,
         calculated_review_enabled=calculated_review,
+        entry_contract_enabled=entry_contract_enabled,
         calculated_review_propose=operational_calculated_propose if calculated_review else None,
         research_review_mode=CALCULATED_REVIEW_MODE if calculated_review else "legacy")
     return runtime.tick()
@@ -195,11 +201,15 @@ def main():
     modes.add_argument("--activate",action="store_true",help="verify both old accounts flat and activate approved demo handoff; no orders")
     parser.add_argument("--calculated-review", action="store_true",
                         help="opt in to two-pass, host-sized DEMO MAIN decisions; requires --execute")
+    parser.add_argument("--entry-contract", action="store_true",
+                        help="opt in to immutable entry premises and sampled failure EXIT; requires --execute")
     parser.add_argument("--root-db",type=Path,
                         default=Path(__file__).resolve().parents[2]/"stock_tracking_db.sqlite")
     args=parser.parse_args()
     if args.calculated_review and not args.execute:
         parser.error("--calculated-review requires --execute and cannot be used for activation/protection")
+    if args.entry_contract and not args.execute:
+        parser.error("--entry-contract requires --execute")
     started=time.monotonic()
     loop="protection" if args.protect_only else "decision"
     if not args.execute and not args.protect_only and not args.activate:
@@ -255,7 +265,7 @@ def main():
         failure_stage="run"
         result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
                         snapshot=snapshot,proposal=operational_propose,
-                        calculated_review=args.calculated_review)
+                        calculated_review=args.calculated_review, entry_contract_enabled=args.entry_contract)
         _record_health_best_effort(conn,result,snapshot=snapshots[-1] if snapshots else None,
                                    loop="protection" if args.protect_only else "decision")
         # Disabled adapters cannot produce trade notices. Delivery occurs only

@@ -690,6 +690,35 @@ def _current_primary_frame_facts(snapshot: dict) -> dict:
     return facts
 
 
+ENTRY_CONTRACT_PROMPT = """
+When entry_contract_version=1, include entry_contract and thesis_assessment exactly
+as required. Only OPEN supplies a new version-1 entry_contract: choose TREND,
+BREAKOUT or RANGE from the actual setup, not MA-band position alone. State the
+premise, expected_progress and failure_basis concisely (each 1..240 characters).
+Its explicit_failure is a MARK_PRICE ge/le threshold with minimum_observations
+2 or 3. SHORT uses ge above all entry prices and no farther than initial SL;
+LONG uses le below all entry prices and no farther than initial SL. This is
+distinct from entry activation and advisory review checkpoints. The host counts
+fresh separate consecutive five-minute observations after confirmed entry, not
+continuous price persistence. Native protection is never delayed for this rule.
+For a REGISTERED active contract, reference its exact contract_id and assess
+INTACT, WEAKENING, FAILED or UNKNOWN with a concise reason. The original contract
+is historical intent, not current market truth. Do not relabel the entry regime
+or replace its premise to excuse a failed trade. Separate normal retest or
+weakening from genuine failure; MA-band location alone is not failure.
+No new contract on ADJUST/WAIT/EXIT; entry_contract is null. Flat and unregistered
+legacy contexts use null thesis_assessment; never invent a retrospective contract.
+A valid FAILED assessment permits EXIT only, never WAIT or ADJUST. Malformed or
+missing evidence is UNKNOWN/error, not a partially inferred FAILED command.
+In two-pass calculated review, wait_proposal and every candidate must carry the
+exact same thesis_assessment. A FAILED wait_proposal is a NONEXECUTABLE TEMPLATE
+only: supply a valid EXIT candidate; WAIT is excluded from selection. Do not use
+INTACT in the WAIT template to contradict FAILED in an EXIT candidate. Single-pass
+FAILED likewise requires EXIT. The host enforces this action constraint, not the
+truth of a qualitative judgment; all lifecycle and risk guards still apply.
+"""
+
+
 def _unique_pairs(pairs):
     result = {}
     for key, value in pairs:
@@ -765,6 +794,8 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
         raise ScenarioModelError("input_size")
     started = clock()
     system_prompt = SYSTEM_PROMPT + MA_STRUCTURE_PROMPT
+    if context.get("entry_contract_version") == 1:
+        system_prompt += ENTRY_CONTRACT_PROMPT
     if flat_entry:
         system_prompt += FLAT_ENTRY_PROMPT
     from live.scenario_recovery import record_model_request, record_model_wire, record_model_error

@@ -81,6 +81,11 @@ def response_contract(context):
             contract["rules"].append("Only while OBSERVING: observation is not order permission. WAIT requires recovery.decision=OBSERVE; OPEN needs PROBE with true changed_evidence paths, reasons, counterevidence and invalidation. First observation is WAIT only. Host may authorize exactly one original OPEN batch, 0.005 of actual initial_equity including all costs/pending, zero chase, expires_at no later than recovery.entry_deadline. No later adds/retries or automatic normal resume.")
         else:
             contract["rules"].append("For a CONSUMED holding probe, recovery may be null. WAIT/ADJUST/EXIT response expires_at must remain fresh using current now, even after the original entry deadline. This never renews the original permit or authorizes additional entries. Preserve 0.005 scenario budget; protection/EXIT remain available.")
+    if context.get("entry_contract_version") == 1:
+        from live.scenario_entry_contract import assessment_schema, entry_contract_schema
+        contract["entry_contract"] = entry_contract_schema()
+        contract["thesis_assessment"] = assessment_schema(context)
+        contract["rules"].append("entry_contract is non-null only for OPEN; all other actions use null. Registered active scenarios require thesis_assessment with exact contract_id and INTACT/WEAKENING/FAILED/UNKNOWN. FAILED permits EXIT only. Flat/legacy assessment is null. Two-pass WAIT template and every candidate must share one exact assessment; FAILED WAIT template cannot be selected and requires a valid EXIT candidate.")
     return contract
 
 
