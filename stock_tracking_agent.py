@@ -4638,6 +4638,8 @@ class StockTrackingAgent:
                                 logger.error(
                                     f"Actual purchase failed: {trade_result['message']}"
                                 )
+                                from prism_core.ops_alert import alert_buy_rejected
+                                await alert_buy_rejected("KR", ticker, trade_result, "KR 매매 로그(Actual purchase failed)")
 
                             if trade_result.get("partial_success"):
                                 successful = trade_result.get(
@@ -4757,6 +4759,8 @@ class StockTrackingAgent:
                                 logger.info(f"Actual purchase successful: {trade_result['message']}")
                             else:
                                 logger.error(f"Actual purchase failed: {trade_result['message']}")
+                                from prism_core.ops_alert import alert_buy_rejected
+                                await alert_buy_rejected("KR", ticker, trade_result, "KR 매매 로그(Actual purchase failed)")
 
                             if trade_result.get("partial_success"):
                                 successful = trade_result.get("successful_accounts", [])

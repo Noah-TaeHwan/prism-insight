@@ -46,3 +46,39 @@ def test_add_runner_crash_alerts(monkeypatch):
     result = runner.live_add_provider("US")({"symbol": "AMD"}, {}, "now")
     assert result["status"] == "ERROR"
     assert len(sent) == 1 and "US 증액 1건" in sent[0] and "AMD: ImportError" in sent[0]
+
+
+def test_buy_rejection_keeps_broker_refusals_and_drops_intentional_skips():
+    # messages seen in production logs 10/05-10/18
+    assert ops_alert.buy_rejection({"success": False, "message": "Buy failed: Buy order failed: APBKN - 해당종목정보가 없습니다."})
+    for skipped in ({"success": False, "message": "Buy quantity is 0 (amount: $412.00)"},
+                    {"success": False, "message": "Micro-split budget below one share; strategy entry preserved"},
+                    {"success": False, "message": "Pilot broker budget unavailable"},
+                    {"success": False, "status": "blocked_budget", "reason_code": "micro_split_add_below_one_share"},
+                    {"success": True, "message": "Buy order accepted"}, None):
+        assert ops_alert.buy_rejection(skipped) is None
+
+
+def test_async_buy_rejection_alert(monkeypatch):
+    import asyncio
+    sent = _capture(monkeypatch)
+    assert asyncio.run(ops_alert.alert_buy_rejected("US", "APBKN", {"success": False, "message": "해당종목정보가 없습니다"}, "x"))
+    assert not asyncio.run(ops_alert.alert_buy_rejected("US", "TSM", {"success": False, "message": "Buy quantity is 0"}, "x"))
+    assert len(sent) == 1 and "US 매수(신규·재진입) 1건" in sent[0]
+
+
+def test_add_broker_refusal_alerts(monkeypatch):
+    sent = _capture(monkeypatch)
+    spec = importlib.util.spec_from_file_location("run_b3_ae_shadow", ROOT / "tools/run_b3_ae_shadow.py")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    from prism_core import micro_split_live
+    monkeypatch.setattr(micro_split_live, "live_enabled", lambda market: True)
+    monkeypatch.setattr(micro_split_live, "plan_adds_enabled", lambda market: True)
+    out = '{"status": "EXECUTED", "broker": {"success": false, "message": "주문가능금액 부족"}}'
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, out, ""))
+    assert runner.live_add_provider("KR")({"symbol": "005930"}, {}, "now")["status"] == "EXECUTED"
+    out = '{"status": "EXECUTED", "broker": {"success": false, "status": "blocked_budget"}}'
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, out, ""))
+    runner.live_add_provider("KR")({"symbol": "000660"}, {}, "now")
+    assert len(sent) == 1 and "005930: 주문가능금액 부족" in sent[0]
