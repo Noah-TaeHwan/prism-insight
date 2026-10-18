@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Bot, Check, Copy, ExternalLink, FolderCode, MessageSquareCode, ShieldCheck, Trophy, WandSparkles } from "lucide-react"
+import { Check, Copy, ExternalLink } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -60,30 +60,28 @@ export function StanceAgentConnectCard({ ko }: { ko: boolean }) {
   }
 
   return (
-    <Card className="overflow-hidden border-violet-500/40 bg-gradient-to-br from-violet-500/[0.08] via-background to-cyan-500/[0.06] shadow-sm">
-      <CardHeader className="pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-2">
+    <Card className="gap-0 py-0 rounded-lg shadow-none">
+      <CardHeader className="px-5 pt-4 pb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1.5 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border-0 bg-violet-600 text-white hover:bg-violet-600">
-                <WandSparkles className="mr-1 h-3 w-3" />
+              <CardTitle className="text-sm font-medium">
+                {ko ? "내 자동매매 전략도 기록 시작하기" : "Start tracking my automated strategy"}
+              </CardTitle>
+              <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
                 {ko ? "추천" : "Recommended"}
               </Badge>
-              <Badge variant="outline" className="border-violet-500/30 text-violet-700 dark:text-violet-300">
+              <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
                 {ko ? "바로 시작" : "Start now"}
               </Badge>
             </div>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Bot className="h-6 w-6 text-violet-600" />
-              {ko ? "내 자동매매 전략도 기록 시작하기" : "Start tracking my automated strategy"}
-            </CardTitle>
             <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
               {ko
                 ? "Codex CLI, Claude Code, Cursor처럼 프로젝트 파일을 다룰 수 있는 AI를 쓰고 있다면, 아래 지시문 하나로 연결할 수 있습니다."
                 : "Using Codex CLI, Claude Code, Cursor, or another AI that can work with project files? One instruction handles the connection."}
             </p>
           </div>
-          <Button onClick={copyPrompt} size="lg" className="min-w-48 bg-violet-600 text-white hover:bg-violet-700">
+          <Button onClick={copyPrompt} className="w-full shrink-0 sm:w-auto">
             {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
             {copied
               ? (ko ? "복사 완료" : "Copied")
@@ -92,54 +90,47 @@ export function StanceAgentConnectCard({ ko }: { ko: boolean }) {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <CardContent className="space-y-4 px-5 pb-5">
+        <ol className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2 lg:grid-cols-4">
           {[
-            [FolderCode, ko ? "1. 내 전략 폴더 열기" : "1. Open the strategy folder", ko ? "AI 코딩 도구에서 프로젝트를 엽니다" : "Open the project in your AI coding tool"],
-            [MessageSquareCode, ko ? "2. AI 채팅에 붙여넣기" : "2. Paste into its chat", ko ? "복사한 지시문을 그대로 보냅니다" : "Send the copied instruction as-is"],
-            [Bot, ko ? "3. AI가 찾은 내용 확인" : "3. Review what it found", ko ? "한국·미국 전략, 이름, 소개를 확인하고 승인" : "Approve the strategies, names, and profiles"],
-            [ShieldCheck, ko ? "4. 자동 연결 완료" : "4. Connection complete", ko ? "등록, 비밀키 보관, 코드 수정, 테스트까지" : "Registration, secret storage, code, and tests"],
-          ].map(([Icon, title, description]) => (
-            <div key={String(title)} className="rounded-xl border border-border/60 bg-background/70 p-4 backdrop-blur-sm">
-              <Icon className="mb-3 h-5 w-5 text-violet-600" />
-              <div className="text-sm font-semibold">{String(title)}</div>
-              <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{String(description)}</div>
-            </div>
+            [ko ? "1. 내 전략 폴더 열기" : "1. Open the strategy folder", ko ? "AI 코딩 도구에서 프로젝트를 엽니다" : "Open the project in your AI coding tool"],
+            [ko ? "2. AI 채팅에 붙여넣기" : "2. Paste into its chat", ko ? "복사한 지시문을 그대로 보냅니다" : "Send the copied instruction as-is"],
+            [ko ? "3. AI가 찾은 내용 확인" : "3. Review what it found", ko ? "한국·미국 전략, 이름, 소개를 확인하고 승인" : "Approve the strategies, names, and profiles"],
+            [ko ? "4. 자동 연결 완료" : "4. Connection complete", ko ? "등록, 비밀키 보관, 코드 수정, 테스트까지" : "Registration, secret storage, code, and tests"],
+          ].map(([title, description]) => (
+            <li key={title} className="bg-card p-4">
+              <div className="text-sm font-medium">{title}</div>
+              <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</div>
+            </li>
           ))}
-        </div>
+        </ol>
 
-        <div className="grid overflow-hidden rounded-xl border border-border/70 bg-background/70 sm:grid-cols-2">
-          <div className="flex gap-3 p-4 sm:border-r sm:border-border/70">
-            <Bot className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
-            <div>
-              <div className="text-sm font-semibold">
-                {ko ? "등록하면 바로" : "Right after registration"}
-              </div>
-              <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {ko ? "‘기록 쌓는 중’ 목록에 나타나고, 첫 판단부터 성과가 공개됩니다." : "It appears under Building a record, and performance is visible from the first decision."}
-              </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <div className="text-sm font-medium">
+              {ko ? "등록하면 바로" : "Right after registration"}
+            </div>
+            <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {ko ? "‘기록 쌓는 중’ 목록에 나타나고, 첫 판단부터 성과가 공개됩니다." : "It appears under Building a record, and performance is visible from the first decision."}
             </div>
           </div>
-          <div className="flex gap-3 border-t border-border/70 p-4 sm:border-t-0">
-            <Trophy className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-            <div>
-              <div className="text-sm font-semibold">
-                {ko ? "공식 순위에 들어가는 때" : "When official ranking begins"}
-              </div>
-              <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {ko ? "주식은 63거래일 동안 기록하고, 자산의 1% 이상을 넣었던 거래를 20번 마치면 들어갑니다. 그전 기록도 숨기지 않습니다." : "For stocks: record 63 trading days and close 20 positions that each used at least 1% of assets. Earlier records remain visible."}
-              </div>
+          <div>
+            <div className="text-sm font-medium">
+              {ko ? "공식 순위에 들어가는 때" : "When official ranking begins"}
+            </div>
+            <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {ko ? "주식은 63거래일 동안 기록하고, 자산의 1% 이상을 넣었던 거래를 20번 마치면 들어갑니다. 그전 기록도 숨기지 않습니다." : "For stocks: record 63 trading days and close 20 positions that each used at least 1% of assets. Earlier records remain visible."}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs text-muted-foreground">
           <span>{ko ? "연결한 날부터 새 기록 시작 · 과거 성과 끼워 넣기 없음" : "A fresh record starts on connection day · no historical backfill"}</span>
           <a
             href={DISCOVERY_PATH}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-violet-700 hover:underline dark:text-violet-300"
+            className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
           >
             {ko ? "개발자용 연결 규칙" : "Technical connection rules"}
             <ExternalLink className="h-3 w-3" />
