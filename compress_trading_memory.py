@@ -66,11 +66,18 @@ logger = logging.getLogger(__name__)
 async def _review_memory_application(manager, market):
     """Keep failed offline reviews unapproved without misreporting completed compression."""
     try:
+        # Rebuild first so the review below judges only the new big-mover lessons.
+        try:
+            rebuild = await manager.rebuild_buy_intuitions()
+        except Exception as exc:  # price/corpus failure keeps the current set; the review still runs
+            rebuild = {'errors': [str(exc)]}
+        logger.info('%s BUY intuitions rebuilt: %s', market, rebuild)
         result = await manager.review_memory_applicability(market=market)
         if market == 'KR' and not result.get('errors'):
             result['consolidated'] = await manager._reconcile_existing_intuitions()
             if result['consolidated']:
                 result['post_consolidation_review'] = await manager.review_memory_applicability(market=market)
+        result['rebuild'] = rebuild
         logger.info('%s memory applicability review: %s', market, result)
         return result
     except Exception as exc:
@@ -253,16 +260,6 @@ async def run_compression(
                     "layer2_to_layer3": layer2_count
                 }
             }
-
-        # 누적 코퍼스 기반 직관 재추출(#intuition-stall): 압축 skip 여부와 무관하게 항상 실행.
-        # (압축은 신규 항목이 없으면 skip 되지만, 직관은 최근 누적 저널에서 매 실행 갱신돼야 함)
-        try:
-            refresh = await agent.compression_manager.refresh_intuitions()
-            logger.info(f"💡 Intuitions Refreshed (corpus): generated={refresh.get('intuitions_generated', 0)} "
-                        f"consolidated={refresh.get('intuitions_consolidated', 0)} "
-                        f"corpus={refresh.get('corpus', 0)} extracted={refresh.get('extracted', 0)}")
-        except Exception as _re:
-            logger.warning(f"Intuition refresh skipped: {_re}")
 
         # Check minimum entries requirement
         effective_min = 1 if force else min_entries
@@ -477,7 +474,7 @@ async def run_us_compression(
         logger.info(f"  US Intuitions generated: {results['intuitions_generated']}")
 
         from tracking.compression import CompressionManager
-        application_manager = CompressionManager(cursor, conn, enable_journal=True)
+        application_manager = CompressionManager(cursor, conn, enable_journal=True, market='US')
         results['application_review'] = await _review_memory_application(application_manager, 'US')
 
         cleanup_results = {}

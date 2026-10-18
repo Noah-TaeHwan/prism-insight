@@ -3,6 +3,7 @@
 Never falls back to a public channel, never raises: an alert must not change
 the outcome of the work that triggered it.
 """
+import asyncio
 import logging
 import os
 from prism_core.log_redaction import install as _install_log_redaction  # noqa: E402
@@ -37,3 +38,24 @@ async def send_ops_alert(text: str) -> bool:
     except Exception as e:  # noqa: BLE001
         logger.warning('Ops alert failed: %s', type(e).__name__)
         return False
+
+
+def send_ops_alert_sync(text: str) -> bool:
+    """send_ops_alert for synchronous cron runners (no running event loop); never raises."""
+    try:
+        return asyncio.run(send_ops_alert(text))
+    except Exception as e:  # noqa: BLE001
+        logger.warning('Ops alert failed: %s', type(e).__name__)
+        return False
+
+
+def alert_order_errors(kind: str, market: str, failures, log_hint: str) -> bool:
+    """One maintenance-chat line per real-money order that ended in ERROR, so it is seen the same day."""
+    failures = list(failures)
+    if not failures:
+        return False
+    from prism_core.log_redaction import redact
+    lines = [f'[주문 오류] {market} {kind} {len(failures)}건 - 주문이 나가지 않았을 수 있습니다']
+    lines += [f'- {ticker}: {redact(str(reason))[:200]}' for ticker, reason in failures]
+    lines.append(f'로그: {log_hint}')
+    return send_ops_alert_sync('\n'.join(lines))

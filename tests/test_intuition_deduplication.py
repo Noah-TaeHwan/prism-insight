@@ -49,6 +49,19 @@ def rule(**overrides):
                 supporting_trades=2, success_rate=.5, **overrides)
 
 
+def test_success_rate_is_measured_from_cited_kr_trades_not_llm_guess():
+    mgr = manager()
+    mgr.conn.execute('CREATE TABLE trading_journal (id INTEGER PRIMARY KEY, profit_rate REAL, market TEXT)')
+    mgr.conn.executemany('INSERT INTO trading_journal VALUES (?, ?, ?)',
+                         [(1, 5.0, 'KR'), (2, -3.0, 'KR'), (3, -1.0, 'KR'), (4, 9.0, 'US')])
+    guessed = rule()
+    guessed['success_rate'] = 1.0
+    mgr._save_intuition(guessed, [1, 2])
+    assert mgr.conn.execute('SELECT success_rate FROM trading_intuitions').fetchone() == (.5,)
+    mgr._save_intuition(rule(), [3, 4])  # the US row never counts toward a KR lesson
+    assert mgr.conn.execute('SELECT success_rate FROM trading_intuitions').fetchone() == (.33,)
+
+
 def test_repeated_corpus_does_not_inflate_evidence_or_confidence():
     mgr = manager()
     assert mgr._save_intuition(rule(), [1, 2])
@@ -557,3 +570,95 @@ def test_material_source_qualifiers_cannot_be_silently_removed(missing):
     mgr._save_intuition(second, [2, 3])
     group = {'canonical_id': 1, 'duplicate_ids': [2], 'canonical_insight': first['insight'].replace(missing, '')}
     assert mgr._consolidate_intuitions([group]) == 0
+
+
+def _fake_llm_agent(monkeypatch, response):
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def attach_llm(self, _cls):
+            return SimpleNamespace(generate_str=AsyncMock(return_value=json.dumps(response)))
+
+    module = ModuleType('mcp_agent.agents.agent')
+    module.Agent = FakeAgent
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+
+def _case(key, regime='bull', sector='전기·전자', ticker=None):
+    return {'key': key, 'kind': 'winner' if key[0] == 'B' else 'flat_skip', 'ticker': ticker or key, 'name': key,
+            'date': '2026-09-01', 'regime': regime, 'sector': sector, 'trigger': '거래량급증', 'gain': 40.0,
+            'result': 10.0 if key[0] == 'B' else None, 'facts': '', 'note': ''}
+
+
+def _lesson(**overrides):
+    item = {'regimes': ['bull'], 'sectors': [], 'condition': '강세장 거래량 급증 돌파', 'insight': '공통점과 차이',
+            'big_mover_keys': ['B1', 'B2', 'B3'], 'contrast_keys': ['L1']}
+    item.update(overrides)
+    return item
+
+
+@pytest.mark.asyncio
+async def test_rebuild_replaces_market_memory_with_grounded_two_sided_lessons(monkeypatch):
+    mgr = manager()
+    mgr._save_intuition(rule(), [1, 2])
+    mgr.conn.execute("INSERT INTO trading_intuitions (category, condition, insight, created_at, market) "
+                     "VALUES ('pattern', 'us', 'us', 'now', 'US')")
+    cases = [_case('B1'), _case('B2'), _case('B3'), _case('B4', regime=None), _case('L1'), _case('L2', regime='bear')]
+    _fake_llm_agent(monkeypatch, {'intuitions': [
+        _lesson(),
+        _lesson(contrast_keys=[]),                          # one-sided
+        _lesson(regimes=['bear']),                          # cited winners were bull
+        _lesson(big_mover_keys=['B1', 'B2']),               # too few big movers
+        _lesson(big_mover_keys=['B1', 'B2', 'L2']),         # a lookalike cited as a winner
+        _lesson(regimes=[], sectors=[]),                    # names no situation
+    ]})
+    result = await mgr.rebuild_buy_intuitions(cases=cases)
+    assert (result['proposed'], result['inserted'], result['deactivated']) == (6, 1, 1)
+    rows = mgr.conn.execute('SELECT market, is_active, category, situation_tags, confidence, supporting_trades '
+                            'FROM trading_intuitions ORDER BY id').fetchall()
+    assert rows[0][:2] == ('KR', 0) and rows[1][:2] == ('US', 1)
+    assert rows[2][:3] == ('KR', 1, 'buy_situation')
+    assert json.loads(rows[2][3]) == {'regimes': ['bull'], 'sectors': []}
+    assert rows[2][4:] == (0.75, 3)   # 3 of the 4 known-bull cases moved big (B4's regime is MISSING)
+
+
+def test_rebuild_validation_rejects_universal_tags_and_strips_case_keys():
+    from tracking.buy_intuitions import validate
+    cases = [_case('B1'), _case('B2'), _case('B3'), _case('L1')]
+    sectors = ['전기·전자', '금융', '화학', '건설', '제약']
+    kept = validate([
+        _lesson(regimes=['bull', 'sideways', 'bear']),                       # every regime = no situation
+        _lesson(regimes=[], sectors=sectors),                                # most sectors = no situation
+        _lesson(insight='거래량과 수급이 함께 확인됐습니다(B1, B2, L1). B2B 매출 비중은 무관합니다.'),
+    ], cases, sectors)
+    assert len(kept) == 1
+    assert kept[0]['insight'] == '거래량과 수급이 함께 확인됐습니다. B2B 매출 비중은 무관합니다.'
+
+
+@pytest.mark.asyncio
+async def test_rebuild_failure_keeps_current_memory(monkeypatch):
+    mgr = manager()
+    mgr._save_intuition(rule(), [1, 2])
+    _fake_llm_agent(monkeypatch, 'not json')
+    cases = [_case('B1'), _case('B2'), _case('B3'), _case('L1')]
+    result = await mgr.rebuild_buy_intuitions(cases=cases)
+    assert result['errors'] and result['inserted'] == 0
+    assert mgr.conn.execute('SELECT is_active FROM trading_intuitions').fetchall() == [(1,)]
+
+
+def test_us_manager_saves_and_reads_only_us_memory():
+    conn = sqlite3.connect(':memory:')
+    conn.executescript(TABLE_TRADING_INTUITIONS)
+    conn.execute("ALTER TABLE trading_intuitions ADD COLUMN market TEXT DEFAULT 'KR'")
+    kr = CompressionManager(conn.cursor(), conn, enable_journal=True)
+    us = CompressionManager(conn.cursor(), conn, enable_journal=True, market='US')
+    assert us._save_intuition(rule(), [1, 2])
+    assert conn.execute('SELECT market FROM trading_intuitions').fetchall() == [('US',)]
+    assert kr._active_intuitions() == [] and len(us._active_intuitions()) == 1
