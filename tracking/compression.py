@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 from cores.openai_error_logging import log_openai_error
 from cores.utils import parse_llm_json
-from trading_memory_policy import (ensure_application_columns, is_current_buy_memory, memory_contract,
+from trading_memory_policy import (ensure_application_columns, memory_contract,
                                    normalize_application_context, parse_situation_tags)
 
 logger = logging.getLogger(__name__)
