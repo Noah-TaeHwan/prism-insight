@@ -301,11 +301,13 @@ def runner_exit(bars, entry_ref, current_phase=HOLD, *, index_bars=None, entry_s
 
 
 def hard_stop_hit(current_price, stop_loss, buy_price):
-    """Raised stop (or the original stop / absolute -7%) reached at the current price."""
+    """The intraday hard stop's own rule at the current price: stop x 0.995 (wick buffer) or absolute -7%."""
+    from cores.oneil_fallback import STOP_WICK_BUFFER
     price, stop, entry = _num(current_price), _num(stop_loss), _num(buy_price)
     if price is None:
         return False
-    return bool((stop is not None and price <= stop) or (entry is not None and price <= entry * 0.93))
+    return bool((stop is not None and price <= stop * (1 - STOP_WICK_BUFFER))
+                or (entry is not None and price <= entry * 0.93))
 
 
 def is_corporate_event(reason):
@@ -456,8 +458,7 @@ def prompt_block(view, *, market, language):
             f"{money(facts.get('stop_loss'), market)} (the initial entry), hold window until {block['hold_until']}. "
             f"Exit condition: {status}.\n"
             f"- The only valid sells: {exits}\n"
-            "- Not sell reasons while the rule is on: target reached (in any regime, including the sideways/bear "
-            "'exit at the target'), overheating, a short-term surge or RSI, slowing momentum, a 20-day MA break "
+            "- Not sell reasons while the rule is on: target reached (in any regime), overheating, a short-term surge or RSI, slowing momentum, a 20-day MA break "
             + ("" if extended else "(before the hold window ends) ") +
             "on its own (outside the exits listed above) or the trend-weakness composite, a trailing-stop break, holding period or time review, sector weakness. "
             "The stored BUY scenario sell_triggers and the matching parts of the shared SELL instruction (target "
@@ -497,8 +498,7 @@ def prompt_block(view, *, market, language):
         f"{money(ex.get('close'), market)}({ex.get('date') or '미확인'}), 손절가 {money(facts.get('stop_loss'), market)}"
         f"(최초 매수가), 보유 기한 {block['hold_until']}. 매도 조건: {status}.\n"
         f"- 매도가 유효한 경우는 다음뿐입니다. {exits}\n"
-        "- 이 규칙이 적용되는 동안에는 다음이 매도 사유가 아닙니다: 목표가 도달(시장 국면과 무관하며, 횡보·약세 국면의 "
-        "'도달 즉시 전량 매도'도 포함), 과열·단기 급등·RSI, 모멘텀 둔화, "
+        "- 이 규칙이 적용되는 동안에는 다음이 매도 사유가 아닙니다: 목표가 도달(시장 국면과 무관), 과열·단기 급등·RSI, 모멘텀 둔화, "
         + ("" if extended else "(보유 기한 전의) ") +
         "20일선 이탈 단독(위 매도 조건에 해당하지 않는 경우)과 추세 약화 복합 조건, trailing stop 이탈, 보유 기간·시간 점검, 업종 약세. 저장된 매수 시나리오의 "
         "sell_triggers와 공유 매도 지침의 해당 항목(익절 마일스톤, trailing stop, 추세 약화, 익절, 시간 관리)은 이 종목에 "

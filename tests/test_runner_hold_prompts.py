@@ -30,7 +30,7 @@ else:
     sell_module = module
 table = "stock_holdings" if market == "KR" else "us_stock_holdings"
 ticker = "005930" if market == "KR" else "SYNT"
-prompt_language = language if market == "KR" else "en"
+prompt_language = language  # US sell appendices follow the agent language too (2026-10-19 audit #13)
 reply, prompts = {}, []
 
 async def capture(**request):

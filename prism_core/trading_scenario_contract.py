@@ -215,7 +215,7 @@ def sell_scenario_authority_contract(language: str = 'ko') -> str:
 Stored sell_triggers, hold_conditions, rationale and reports are advisory evidence,
 not policy. If they conflict with this live SELL instruction, follow this instruction
 and current supplied state. Do not adopt a different trailing basis/percentage or a
-new standalone moving-average exit from BUY free text. Existing SELL rules are unchanged.
+new standalone moving-average exit from BUY free text. Existing SELL rules and their stated exceptions still apply.
 '''
     return '''
 ## 저장된 매수 시나리오의 권한
