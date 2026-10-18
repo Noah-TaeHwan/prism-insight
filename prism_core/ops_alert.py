@@ -49,13 +49,35 @@ def send_ops_alert_sync(text: str) -> bool:
         return False
 
 
-def alert_order_errors(kind: str, market: str, failures, log_hint: str) -> bool:
-    """One maintenance-chat line per real-money order that ended in ERROR, so it is seen the same day."""
-    failures = list(failures)
-    if not failures:
-        return False
+# Skips we chose (one share costs more than the budget, budget blocks): not broker refusals.
+_INTENTIONAL_SKIPS = ('below one share', 'quantity is 0', 'budget unavailable', 'blocked_budget')
+
+
+def buy_rejection(result):
+    """Why a real buy did not go through, or None when it did or was an intentional skip."""
+    if not isinstance(result, dict) or result.get('success'):
+        return None
+    reason = ' '.join(str(result.get(k) or '') for k in ('status', 'reason_code', 'message')).strip()
+    if any(skip in reason.lower() for skip in _INTENTIONAL_SKIPS):
+        return None
+    return reason or 'unknown'
+
+
+def _order_text(kind, market, failures, log_hint):
     from prism_core.log_redaction import redact
     lines = [f'[주문 오류] {market} {kind} {len(failures)}건 - 주문이 나가지 않았을 수 있습니다']
     lines += [f'- {ticker}: {redact(str(reason))[:200]}' for ticker, reason in failures]
     lines.append(f'로그: {log_hint}')
-    return send_ops_alert_sync('\n'.join(lines))
+    return '\n'.join(lines)
+
+
+def alert_order_errors(kind: str, market: str, failures, log_hint: str) -> bool:
+    """One maintenance-chat line per real-money order that failed, so it is seen the same day."""
+    failures = list(failures)
+    return bool(failures) and send_ops_alert_sync(_order_text(kind, market, failures, log_hint))
+
+
+async def alert_buy_rejected(market: str, ticker: str, result, log_hint: str) -> bool:
+    """Same alert from the async entry pipelines (new entries and re-entries share it)."""
+    reason = buy_rejection(result)
+    return bool(reason) and await send_ops_alert(_order_text('매수(신규·재진입)', market, [(ticker, reason)], log_hint))

@@ -4901,6 +4901,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         logger.info(f"Actual purchase successful: {trade_result['message']}")
                     else:
                         logger.error(f"Actual purchase failed: {trade_result['message']}")
+                        from prism_core.ops_alert import alert_buy_rejected
+                        await alert_buy_rejected("US", ticker, trade_result, "US 매매 로그(Actual purchase failed)")
                 except OrderOutcomeUnknown as trade_err:
                     self._link_position_entry_intent(
                         legacy_holding_id=buy_result.legacy_holding_id,

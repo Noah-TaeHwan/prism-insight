@@ -1069,6 +1069,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 logger.error(
                     f"Actual purchase failed: {trade_result['message']}"
                 )
+                from prism_core.ops_alert import alert_buy_rejected
+                await alert_buy_rejected("KR", ticker, trade_result, "KR 매매 로그(Actual purchase failed)")
 
             try:
                 from messaging.redis_signal_publisher import publish_buy_signal
@@ -1186,6 +1188,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 logger.info(f"Actual purchase successful: {trade_result['message']}")
             else:
                 logger.error(f"Actual purchase failed: {trade_result['message']}")
+                from prism_core.ops_alert import alert_buy_rejected
+                await alert_buy_rejected("KR", ticker, trade_result, "KR 매매 로그(Actual purchase failed)")
 
             # [Optional] Publish buy signal via Redis Streams
             # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
