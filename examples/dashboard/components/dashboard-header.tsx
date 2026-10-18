@@ -1,6 +1,6 @@
 "use client"
 
-import { Moon, Sun, TrendingUp, Github, Send, Languages } from "lucide-react"
+import { Moon, Sun, Github, Send, Languages } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useLanguage } from "@/components/language-provider"
 import { Button } from "@/components/ui/button"
@@ -81,12 +81,10 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
         <div className="flex h-14 items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-foreground text-background shrink-0">
-              <TrendingUp className="w-4 h-4" />
-            </div>
+            <img src="/prism-logo.png" alt="" className="h-6 sm:h-7 w-auto shrink-0" />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="text-[15px] font-semibold tracking-tight">PRISM-INSIGHT</h1>
+                <h1 className="text-[15px] font-semibold tracking-tight whitespace-nowrap">PRISM-INSIGHT</h1>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
