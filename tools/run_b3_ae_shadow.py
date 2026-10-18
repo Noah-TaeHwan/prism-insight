@@ -34,6 +34,14 @@ def live_add_provider(market):
     command = [sys.executable, str(ROOT / "tools/run_micro_split_add.py"), "--market", argv]
 
     def live_add(campaign, decision, now):
+        result = _live_add(campaign, decision, now)
+        if result.get("status") == "ERROR":
+            from prism_core.ops_alert import alert_order_errors
+            alert_order_errors("증액", market, [(campaign.get("symbol", "?"), result.get("error"))],
+                               f"journalctl -u prism-b3-ae-shadow@{argv}")
+        return result
+
+    def _live_add(campaign, decision, now):
         if not micro_split_live.live_enabled(market):
             return {"status": "LIVE_OFF"}
         if not micro_split_live.plan_adds_enabled(market):
