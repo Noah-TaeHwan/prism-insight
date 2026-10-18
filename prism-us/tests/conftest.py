@@ -38,6 +38,7 @@ os.environ[DISABLE_ENV_VAR] = "1"
 os.environ.setdefault("RUNNER_HOLD_ENABLED", "false")
 # Its relative-weakness exit also fetches index bars; tests/test_runner_hold.py opts in.
 os.environ.setdefault("RUNNER_REL_WEAK_ENABLED", "false")
+os.environ.setdefault("SELL_FACTS_ENABLED", "false")  # no daily-bar fetch in sell-review tests
 
 
 # =============================================================================
