@@ -54,7 +54,12 @@ db-server loads the value from `/etc/prism-observability/shipper.env`, which
 must remain mode `0600`.
 The same environment file holds the dedicated `prism_otel` ClickHouse password;
 only its SHA-256 hash is written to the mounted ClickHouse user configuration.
-The XML user is restricted to the `default` observability database.
+Since 2026-10-18 the XML users carry explicit grants on `default.*` only: `prism_otel`
+(collector writer) has SELECT, INSERT, SHOW, CREATE DATABASE/TABLE/VIEW and ALTER TTL,
+no DROP/TRUNCATE/SYSTEM; `prism_reader` (dashboard exporter, `tools/clickstack_query.py`)
+has SELECT and SHOW only, with its password in `/etc/prism-observability/reader.env` (0600).
+Write the XML in place (`cat > file`): it is a single-file bind mount, and ClickHouse
+reloads it without a restart.
 The mounted XML contains no plaintext password and must be readable by the
 ClickHouse process (mode `0644`).
 

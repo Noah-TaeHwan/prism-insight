@@ -11,8 +11,9 @@ screening -> candidate.evaluated -> entry -> fill -> every holding.evaluated -> 
 
 The query runs on prism-backend, where ClickHouse listens on 127.0.0.1:18123, reached from
 here through db-server (``PRISM_DB_SSH``, default ssh alias ``prism-db``) and the backend
-host in db-server's /etc/prism-observability/tunnel.env. Credentials stay in the backend's
-/etc/prism-observability/*.env and never leave it. Every request is ``readonly=1`` with
+host in db-server's /etc/prism-observability/tunnel.env. It logs in as the SELECT-only
+``prism_reader`` account from the backend's /etc/prism-observability/reader.env; credentials never
+leave the backend. Every request is ``readonly=1`` with
 time and row limits. ``--local`` queries ``CLICKHOUSE_HTTP_ENDPOINT`` directly (on backend).
 
 For cohort statistics or SHADOW/LIVE judgments use the Evidence Packet workflow
@@ -44,7 +45,7 @@ def run(payload):
         conn.request("POST", "/?" + urllib.parse.urlencode(query),
                      body=(payload["sql"] + "\nFORMAT JSONEachRow").encode("utf-8"),
                      headers={"Content-Type": "text/plain; charset=utf-8",
-                              "X-ClickHouse-User": os.getenv("CLICKHOUSE_USER", "prism_otel"),
+                              "X-ClickHouse-User": os.getenv("CLICKHOUSE_USER", "prism_reader"),
                               "X-ClickHouse-Key": os.getenv("CLICKHOUSE_PASSWORD", "")})
         response = conn.getresponse()
         body = response.read().decode("utf-8")
@@ -55,7 +56,7 @@ def run(payload):
     sys.stdout.write(body)
 '''
 
-ENV_FILES = "/etc/prism-observability/clickstack.env /etc/prism-observability/dashboard-export.env"
+READER_ENV = "/etc/prism-observability/reader.env"
 
 
 def build_program(sql: str, params: dict[str, Any]) -> str:
@@ -66,9 +67,9 @@ def build_program(sql: str, params: dict[str, Any]) -> str:
 def run_query(sql: str, params: dict[str, Any] | None = None, *, local: bool = False) -> list[dict]:
     program = build_program(sql, params or {})
     if local:
-        command = ["bash", "-c", f"set -a; for f in {ENV_FILES}; do [ -r $f ] && . $f; done; set +a; python3 -"]
+        command = ["bash", "-c", f"set -a; . {READER_ENV}; set +a; python3 -"]
     else:
-        backend = "set -a; . /etc/prism-observability/clickstack.env; . /etc/prism-observability/dashboard-export.env; set +a; python3 -"
+        backend = f"set -a; . {READER_ENV}; set +a; python3 -"
         hop = ". /etc/prism-observability/tunnel.env; ssh -o BatchMode=yes root@$PRISM_BACKEND_HOST " + shlex.quote(backend)
         command = ["ssh", "-o", "BatchMode=yes", os.getenv("PRISM_DB_SSH", "prism-db"), hop]
     result = subprocess.run(command, input=program, text=True, capture_output=True, timeout=180)
