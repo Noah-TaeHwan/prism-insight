@@ -42,3 +42,10 @@ def test_summarize_pulls_decision_and_fill_fields():
     assert "gate_reason" not in text and "triggers" not in text
     assert "가" * 50 + "…" in text
     assert json.dumps(cq.summarize({}, 50)) == '""'
+
+
+@pytest.mark.parametrize("target", ["-oProxyCommand=sh", "a b", ""])
+def test_rejects_ssh_option_injection(monkeypatch, target):
+    monkeypatch.setenv("PRISM_DB_SSH", target)
+    with pytest.raises(SystemExit, match="invalid PRISM_DB_SSH"):
+        cq.run_query("SELECT 1")
