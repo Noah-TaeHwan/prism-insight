@@ -1573,11 +1573,14 @@ class USStockTrackingAgent:
             prompt_message += _micro_split_buy_block("US", getattr(self, "language", "ko"))
             # Micro-split add scenarios (add_plan); '' unless micro-split LIVE is on for US.
             from prism_core.micro_split_live import add_plan_buy_block
-            prompt_message += add_plan_buy_block(self, market="US", ticker=ticker, language="en")
+            # 2026-10-19: appendices follow the agent language like KR (stock_tracking_agent.py), not a fixed "en".
+            prompt_message += add_plan_buy_block(self, market="US", ticker=ticker,
+                                                 language=getattr(self, "language", "ko"))
             prompt_message += neg_equity_block
             # Official SEC filings: do not enter a stock under a control tender offer or delisting.
             from prism_core.corporate_filings import official_event_block_async
-            prompt_message += await official_event_block_async("US", ticker, language="en", purpose="buy")
+            prompt_message += await official_event_block_async(
+                "US", ticker, language=getattr(self, "language", "ko"), purpose="buy")
             from prism_core.buy_report_depth_evidence import report_depth_evidence_active
             depth_on = report_depth_evidence_active(getattr(self.trading_agent, "instruction", ""))
             logger.info(f"[BUY_REPORT_DEPTH] enabled={str(depth_on).lower()} ticker={ticker_tag}")

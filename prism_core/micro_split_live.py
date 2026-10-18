@@ -771,17 +771,17 @@ def buy_prompt_block(market, language="ko"):
     if floor is None:
         return ""
     value = int(floor) if float(floor).is_integer() else floor
-    # Framing first, then the rule. The shared instruction was written for all-in/all-out
-    # entries (constraint 4) and frames weak markets as risk control and strong markets as
-    # opportunity cost; a micro-split pilot changes the error costs, so this block states
-    # which shared lines it supersedes instead of leaving the model to reconcile them.
+    # Framing first, then the rule. A micro-split pilot changes the error costs, so this block
+    # states which shared lines it supersedes instead of leaving the model to reconcile them.
+    # 2026-10-19: a missed entry is re-caught only by the re-entry rule (prism_core/reentry_v3_live.py,
+    # observability/reentry_shadow.py STOP_EXIT / LOCATION_SKIP / ENTER_BLOCKED), not "never again".
     if language == "ko":
         return (
             "\n\n### 초분할 진입 프레임 (이번 신규 진입에 우선 적용)\n"
             "이번 매수는 1슬롯의 30~80%만 먼저 사는 정찰병 진입입니다. 비중은 시스템이 변동성(ATR)으로 이미 줄여 두었고, "
             "맞으면 증액 시나리오(add_plan)로 키우며, 틀리면 최초 진입가 기준 손절로 작게 끝납니다(예: 비중 35% × 손절 6% = "
-            "슬롯의 약 2%). 그래서 이 판단의 오류 비용은 비대칭입니다. 틀린 진입은 작게 잘리지만, 놓친 진입은 되돌릴 수 "
-            "없습니다(이 트리거는 다시 오지 않습니다).\n"
+            "슬롯의 약 2%). 그래서 이 판단의 오류 비용은 비대칭입니다. 틀린 진입은 작게 잘리지만, 놓친 진입은 재진입 "
+            "규칙이 신호를 낼 때에만 다시 잡히고 그때는 대개 더 높은 가격입니다.\n"
             "- 불확실성은 미진입이 아니라 비중이 처리합니다. 아래 기준을 모두 통과했다면 '확신 부족'·'추가 확인 필요'·"
             "'돌파 확인 후'는 미진입 사유가 아닙니다. 확인되면 더 사는 일은 add_plan 시나리오(breakout·pullback_reclaim 등)의 "
             "몫이니 그 조건은 시나리오로 쓰십시오.\n"
@@ -790,9 +790,8 @@ def buy_prompt_block(market, language="ko"):
             "- 바뀌지 않는 것: 1단계 펀더멘털·1.5단계 추세·1.6단계 상습 손절 게이트, 미진입 단독·복합 사유(아래 사유 1 예외 "
             "제외), 손익비 floor, 최대 손절폭, 손절 규칙. 보유 종목이 7개 이상이면 '6점 이상만 진입' 규칙은 그대로 "
             "적용됩니다. 목표 산정만 아래 규칙을 따르며, 이 규칙은 모든 국면에 적용됩니다. 이 프레임은 기준 안의 재량 판단에만 적용됩니다.\n"
-            "- 시스템 제약 4(분할매매 불가·올인/올아웃)는 이번 매수에 적용되지 않습니다. 매수는 초분할(최초 비중 + 증액 "
-            "시나리오), 매도는 기존대로 전량입니다. 제약 2·3은 진입/미진입 결정 문장에만 적용되며 add_plan의 조건부 "
-            "시나리오를 막지 않습니다. 최초 비중은 결정론적으로 정해지므로 parabolic의 '사이징 축소 금지'와 충돌하지 않습니다.\n"
+            "- 이번 매수는 초분할(최초 비중 + 증액 시나리오)이고 매도는 기존대로 전량입니다(시스템 제약 4). 제약 2·3은 "
+            "진입/미진입 결정 문장에만 적용되며 add_plan의 조건부 시나리오를 막지 않습니다.\n"
             f"\n### 초분할 진입 기준 (결정론적)\n"
             f"진입 최소 점수는 시장 국면과 관계없이 {value}점입니다(매트릭스의 min_score 열과 JSON 예시값 대신, 보유 종목 "
             f"7개 이상일 때의 6점 규칙은 예외로 유지). min_score "
@@ -800,7 +799,8 @@ def buy_prompt_block(market, language="ko"):
             "단독·복합 사유 없음 AND 손익비 ≥ 현재 국면 floor AND |손절폭| ≤ 최대 손절폭 AND 모멘텀 신호·추가 확인 개수 "
             "충족 → 진입. min_score 외의 매트릭스 값, 점수 산정 기준, 스키마는 바뀌지 않습니다.\n"
             f"- 이번 진입에 초분할 계획(최초 비중·증액 시나리오)을 만들 수 없으면 시스템은 {value}점 대신 국면별 기존 하한을 "
-            "적용합니다(횡보·moderate_bear 8점, strong_bear 9점, 횡보이면서 시장 흐름 지표가 상승 추세(UPTREND)이면 7점). "
+            "적용합니다(횡보·moderate_bear 8점, strong_bear 9점, 횡보이면서 시장 흐름 지표가 상승 추세(UPTREND)이면 7점; "
+            "지시문의 분산일 강등·반등 시험매수 예외 포함). "
             f"min_score 필드에는 그대로 {value}점을 쓰십시오.\n"
             "- 미진입 단독 사유 1(지지선이 -10% 이하)은 이번 진입에 적용하지 않습니다. '손절가 설정' 규칙상 지지선이 멀면 "
             "매트릭스 최대 손절폭이 손절가가 되므로 사용 가능한 손절은 항상 있습니다.\n"
@@ -815,8 +815,8 @@ def buy_prompt_block(market, language="ko"):
         "This buy is a scout entry: only 30-80% of one slot is bought first. The system has already sized it down by "
         "volatility (ATR); if it works, the add scenarios (add_plan) build it up, and if it fails, the initial-entry "
         "stop ends it small (e.g. 35% allocation x 6% stop = about 2% of a slot). The error costs are therefore "
-        "asymmetric: a wrong entry is cut small, a missed entry cannot be recovered (this trigger will not fire "
-        "again).\n"
+        "asymmetric: a wrong entry is cut small, while a missed entry is re-caught only when the re-entry rule "
+        "fires, usually at a higher price.\n"
         "- Size, not abstention, absorbs uncertainty. When every criterion below passes, 'low conviction', 'needs "
         "more confirmation' or 'wait for the breakout' is not a no-entry reason; buying more on confirmation is the "
         "job of the add_plan scenarios (breakout, pullback_reclaim, ...), so write that condition as a scenario.\n"
@@ -826,10 +826,9 @@ def buy_prompt_block(market, language="ko"):
         "compound no-entry reasons (except reason 1 below), the R/R floor, the maximum stop width and the stop "
         "rules. With 7 or more holdings, the 'only buy_score >= 6' rule still applies. Only the target follows the "
         "rule below, and that rule applies in every regime. This frame only applies to discretionary judgment inside those criteria.\n"
-        "- System constraint 4 (no split trading, all-in/all-out) does not apply to this buy: buying is a "
-        "micro-split (initial allocation plus add scenarios) and selling stays a full exit. Constraints 2 and 3 "
-        "apply to the enter/no-entry decision only and do not forbid conditional add_plan scenarios. The initial "
-        "allocation is deterministic, so it does not conflict with the parabolic 'no size reduction' rule.\n"
+        "- This buy is a micro-split (initial allocation plus add scenarios) and selling stays a full exit "
+        "(system constraint 4). Constraints 2 and 3 apply to the enter/no-entry decision only and do not forbid "
+        "conditional add_plan scenarios.\n"
         "\n### Micro-split entry threshold (deterministic)\n"
         f"The minimum entry score is {value} in every market regime (instead of the matrix min_score column and the "
         f"JSON example values; the 6-point rule for 7 or more holdings stays as an exception). Write {value} in "
@@ -839,7 +838,8 @@ def buy_prompt_block(market, language="ko"):
         "other matrix value, the scoring rubric and the schema are unchanged.\n"
         "- If a micro-split plan (initial allocation plus add scenarios) cannot be built for this entry, the system "
         f"applies the regime's existing floor instead of {value} (sideways and moderate_bear 8, strong_bear 9, "
-        f"sideways with an UPTREND market pulse 7). Still write {value} in min_score.\n"
+        f"sideways with an UPTREND market pulse 7, with the instruction's distribution step-down and rebound-pilot "
+        f"exceptions). Still write {value} in min_score.\n"
         "- Standalone no-entry reason 1 (support at -10% or worse) does not apply to this entry: under the stop rules "
         "a distant support makes the matrix maximum stop the stop, so a usable stop always exists.\n"
         "- In every regime reaching the target switches to a trailing stop instead of selling (2026-10-07 sell "
