@@ -352,3 +352,59 @@ def test_failure_registered_during_model_call_overrides_late_wait(tmp_path):
     outcome = r.tick()
     assert outcome["reason"] == "entry_contract_failed_exit_unresolved"
     assert outcome["status"] == "blocked" and len(b.executed) == 1
+
+
+def test_calculated_final_wait_broker_latency_preserves_confirmation(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from live import scenario_review_guard
+    from live.scenario_review_adapter import make_calculated_review_proposer
+    from tests.test_scenario_review_runtime import Broker as ReviewBroker, wire
+
+    now, captured, calls, guard_counts = [1800000000.], {}, [], []
+    broker = ReviewBroker(now[0])
+    original_context = broker.context
+    def delayed_context():
+        now[0] += .75  # REST returns after the runtime's pre-capture commit_at.
+        broker.ctx["account_captured_at"] = now[0]
+        if broker.ctx["positions"]:
+            broker.ctx["entry_thesis"] = dict(status="VERIFIED", side="LONG", first_fill_at=first_fill,
+                observed_at=now[0], current_mark=broker.ctx["mark_price"])
+        return original_context()
+    broker.context = delayed_context
+    runtime = ScenarioRuntime(sqlite3.connect(tmp_path / "latency.db"), broker,
+        lambda s, c: dict(proposal(s, c), entry_contract=definition(), thesis_assessment=None),
+        lambda: dict(valid=True, as_of_ms=now[0]*1000), clock=lambda: now[0], entry_contract_enabled=True)
+    assert runtime.tick()["status"] == "intent_pending"
+    first_fill = now[0]+1
+    broker.ctx.update(positions=[dict(price=100, quantity=1)], mark_price=94)
+    broker.reconcile = lambda: dict(intents=[terminal()])
+    def generate(**request):
+        calls.append(request)
+        wait = dict(wire(captured, "WAIT"), entry_contract=None, thesis_assessment=dict(
+            contract_id=captured["registered_entry_contract"]["contract_id"], status="INTACT", reason="observe"))
+        return SimpleNamespace(text=json.dumps(dict(wait_proposal=wait, candidates=[], no_candidate_reason="observe")))
+    adapter = make_calculated_review_proposer(generate=generate, clock=lambda: now[0])
+    def propose_review(snapshot, ctx, *, record):
+        captured.update(copy.deepcopy(ctx))
+        return adapter(snapshot, ctx, record=record)
+    original_guard = scenario_review_guard.guard_review
+    def guard(*args, **kwargs):
+        fresh = args[4]
+        guard_counts.append(fresh["entry_contract_observation"]["count"])
+        return original_guard(*args, **kwargs)
+    monkeypatch.setattr(scenario_review_guard, "guard_review", guard)
+    runtime.calculated_review_enabled = True
+    runtime.calculated_review_propose = propose_review
+    runtime.conn.executescript("""
+        CREATE TABLE llm_scenario_review_events(slot INTEGER, sequence INTEGER, body TEXT, PRIMARY KEY(slot,sequence));
+        CREATE TABLE llm_scenario_review_tapes(slot INTEGER PRIMARY KEY, body TEXT);
+    """)
+    now[0] = 1800000300.
+    outcome = runtime.tick()
+    assert outcome["status"] == "wait", outcome
+    assert guard_counts == [1, 1]
+    assert runtime.state()["active"]["entry_contract_observation"]["count"] == 1
+    now[0] = 1800000600.
+    assert runtime.tick()["status"] == "intent_pending"
+    assert len(calls) == 1
+    assert broker.executed[-1]["action"] == "EXIT"

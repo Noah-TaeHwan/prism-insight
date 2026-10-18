@@ -413,10 +413,14 @@ class ScenarioRuntime:
         has_registered_contract = bool(active and self.conn.execute(
             "SELECT 1 FROM llm_scenario_entry_contracts WHERE scenario_id=?", (active["scenario_id"],)).fetchone())
         if self.entry_contract_enabled or has_registered_contract or (active and "entry_contract" in active):
-            observed_now = self.clock() if observed_at is None else observed_at
+            # Broker REST may finish after the caller's pre-capture timestamp.
+            # Judge freshness at the actual post-capture clock; never rewrite
+            # exchange/account timestamps or reset samples using the old time.
+            observed_now = self.clock()
             if active and (has_registered_contract or "entry_contract" in active) and not self._entry_contract_registered(active):
                 ctx.update(entry_contract_version=1, registered_entry_contract=None,
-                           entry_contract_status="CORRUPT", entry_contract_observation=None)
+                           entry_contract_status="CORRUPT", entry_contract_observation=None,
+                           entry_contract_failure_rule=None)
             else:
                 observe_contract(active, ctx, int(observed_now // 300), observed_now)
                 ctx.update(contract_context(active, True))

@@ -29,6 +29,17 @@ def test_host_failure_exit_is_part_of_runtime_execution_parity(monkeypatch):
     assert manifest['execution_loaded_code_checks']['live/scenario_runtime.py'] == 'MIXED'
 
 
+def test_contract_observation_context_is_execution_authority(monkeypatch):
+    def changed(*args, **kwargs):
+        return None
+    changed.__name__ = '_context'
+    changed.__qualname__ = 'ScenarioRuntime._context'
+    changed.__module__ = 'live.scenario_runtime'
+    monkeypatch.setattr(ScenarioRuntime, '_context', changed)
+    manifest = scenario_provenance._manifest()
+    assert manifest['execution_loaded_code_checks']['live/scenario_runtime.py'] == 'MIXED'
+
+
 def test_replaced_contract_observer_cannot_keep_verified_identity(monkeypatch):
     def changed(*args, **kwargs):
         return None
