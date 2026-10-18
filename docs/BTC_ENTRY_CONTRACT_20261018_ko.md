@@ -7,7 +7,8 @@
 
 - 최초 OPEN의 작은 entry_contract를 action/input/scenario ID에 묶어 active에 불변 보존한다.
 - regime은 TREND/BREAKOUT/RANGE. MA 사이 위치만으로 RANGE를 추정하지 않는다.
-- premise/expected_progress/failure_basis는 각각 최대 240자, 역사적 계획이며 현재 사실이 아니다.
+- premise/expected_progress는 각각 최대 240자로 최초 진입 전제를 보유 판단에 연결한다.
+  현재 시장의 사실이나 별도의 숫자 집행 조건으로 취급하지 않는다.
 - explicit_failure는 MARK_PRICE의 ge/le 가격과 minimum_observations 2 또는 3이다.
   모델이 실패 가격·확인 횟수를 정한다. SHORT는 진입보다 높은 ge, LONG은 낮은 le이며
   최초 SL보다 손실 쪽으로 멀어질 수 없다. 활성화 트리거와 별개다.
@@ -62,3 +63,12 @@ legacy 보호, 최초 OPEN과 원자적 계약 저장·정확 재생·입력 용
 최대 12회 OAuth 호출, 재시도·주문 없음. 양 단계 계약 보존, 응답 규격, 선택과 실패 평가의
 일치, 정확 재생을 검사한다. 실제 모델이 FAILED를 선택하지 않은 경우 해당 실제 판단
 사례가 없다는 점을 남기며, 결정론 모의 통합의 실패→EXIT 검증과 구분한다.
+
+1차 실제 진단은 8호출로 6건 모두 형식·재생을 통과했지만, 한 후보가 자유서술
+failure_basis에는 83600, explicit_failure에는 83800을 써 두 기준이 생겼다.
+배포 전에 별도의 failure_basis 필드를 제거하고 숫자 규칙을 단일화했다.
+호스트는 등록된 explicit_failure에서만 entry_contract_failure_rule을 생성한다.
+옛 중복 필드 입력은 거절한다. 일반 설명의 모든 의미 오류를 자동 검증한다는 뜻은 아니다.
+1차 전체 테스트는 소스 수정 전에 -15로 중단했으며 통과로 세지 않는다.
+교정된 같은 6개 프로토콜 입력에 최대 12회·재시도 없는 v2 진단을 별도로 등록한다.
+구체적 사례를 보고 바꾼 개발 교정이며 독립 검증이나 새 A/B 성과 비교가 아니다.

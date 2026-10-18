@@ -694,13 +694,19 @@ ENTRY_CONTRACT_PROMPT = """
 When entry_contract_version=1, include entry_contract and thesis_assessment exactly
 as required. Only OPEN supplies a new version-1 entry_contract: choose TREND,
 BREAKOUT or RANGE from the actual setup, not MA-band position alone. State the
-premise, expected_progress and failure_basis concisely (each 1..240 characters).
+premise and expected_progress concisely (each 1..240 characters). These are
+descriptive historical thesis context to reassess, not executable numeric failure predicates.
+Only explicit_failure defines the authoritative numeric failure rule; do not
+duplicate or alter its price in a separate prose rule. No failure_basis field exists.
 Its explicit_failure is a MARK_PRICE ge/le threshold with minimum_observations
 2 or 3. SHORT uses ge above all entry prices and no farther than initial SL;
 LONG uses le below all entry prices and no farther than initial SL. This is
 distinct from entry activation and advisory review checkpoints. The host counts
 fresh separate consecutive five-minute observations after confirmed entry, not
 continuous price persistence. Native protection is never delayed for this rule.
+For registered holdings, entry_contract_failure_rule is the host-rendered exact
+source/operator/price/observation count from the original explicit_failure. Use
+that rule without substituting a threshold from historical prose or current wishes.
 For a REGISTERED active contract, reference its exact contract_id and assess
 INTACT, WEAKENING, FAILED or UNKNOWN with a concise reason. The original contract
 is historical intent, not current market truth. Do not relabel the entry regime
@@ -710,6 +716,9 @@ No new contract on ADJUST/WAIT/EXIT; entry_contract is null. Flat and unregister
 legacy contexts use null thesis_assessment; never invent a retrospective contract.
 A valid FAILED assessment permits EXIT only, never WAIT or ADJUST. Malformed or
 missing evidence is UNKNOWN/error, not a partially inferred FAILED command.
+Qualitative FAILED is a separate model judgment, not proof that the host's numeric
+failure rule was met. Explain it as model-assessed invalidation; never claim the
+code verified that judgment or invent confirmed numeric failure observations.
 In two-pass calculated review, wait_proposal and every candidate must carry the
 exact same thesis_assessment. A FAILED wait_proposal is a NONEXECUTABLE TEMPLATE
 only: supply a valid EXIT candidate; WAIT is excluded from selection. Do not use

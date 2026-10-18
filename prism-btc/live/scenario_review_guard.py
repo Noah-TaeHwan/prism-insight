@@ -25,7 +25,7 @@ _OPTIONAL_STABLE = (
     "side", "scenario_risk_fraction", "seen_action_ids", "current_plan", "stop_policy",
     "execution_price_policy", "conditional_entry_version",
     "review_contract_version", "recovery_hard_blocked", "unknown_intents",
-    "entry_contract_version", "registered_entry_contract", "entry_contract_status",
+    "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
 )
 
 

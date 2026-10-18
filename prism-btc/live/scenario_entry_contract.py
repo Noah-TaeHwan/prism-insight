@@ -19,7 +19,7 @@ def _object(properties):
 def entry_contract_schema():
     text = dict(type="string", minLength=1, maxLength=240)
     return _object(dict(version=dict(type="integer", enum=[1]), regime=dict(type="string", enum=["TREND", "BREAKOUT", "RANGE"]),
-        premise=text, expected_progress=text, failure_basis=text,
+        premise=text, expected_progress=text,
         explicit_failure=_object(dict(source=dict(type="string", enum=["MARK_PRICE"]),
             operator=dict(type="string", enum=["ge", "le"]), price=dict(type="number", exclusiveMinimum=0),
             minimum_observations=dict(type="integer", enum=[2, 3])))))
@@ -32,7 +32,7 @@ def _definition(value):
     return (type(value.get("version")) is int and value["version"] == 1
         and value.get("regime") in ("TREND", "BREAKOUT", "RANGE")
         and all(isinstance(value.get(k), str) and 1 <= len(value[k].strip()) <= 240
-                for k in ("premise", "expected_progress", "failure_basis"))
+                for k in ("premise", "expected_progress"))
         and isinstance(failure, dict) and set(failure) == {"source", "operator", "price", "minimum_observations"}
         and failure["source"] == "MARK_PRICE" and failure["operator"] in ("ge", "le")
         and _number(failure["price"]) and type(failure["minimum_observations"]) is int
@@ -79,6 +79,8 @@ def contract_context(active, enabled):
     valid = bool(active and valid_record(record, active.get("scenario_id")))
     return dict(entry_contract_version=1, registered_entry_contract=copy.deepcopy(record) if valid else None,
         entry_contract_status="REGISTERED" if valid else "CORRUPT" if record is not None else "LEGACY_UNKNOWN",
+        entry_contract_failure_rule=dict(copy.deepcopy(record["definition"]["explicit_failure"]),
+            confirmation_scope="DISTINCT_CONSECUTIVE_FRESH_DECISION_SLOTS") if valid else None,
         entry_contract_observation=copy.deepcopy(active.get("entry_contract_observation")) if valid else None)
 
 

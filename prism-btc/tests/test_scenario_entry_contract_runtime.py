@@ -11,7 +11,7 @@ from tests.test_scenario_runtime import Broker, proposal, terminal, wait_proposa
 
 def definition(side="LONG"):
     return dict(version=1, regime="BREAKOUT", premise="breakout", expected_progress="continuation",
-        failure_basis="level reclaimed", explicit_failure=dict(source="MARK_PRICE",
+        explicit_failure=dict(source="MARK_PRICE",
         operator="le" if side == "LONG" else "ge", price=95 if side == "LONG" else 105, minimum_observations=2))
 
 
@@ -149,6 +149,35 @@ def test_record_tamper_and_metadata_rules():
     a["entry_contract"]["definition"]["premise"] = "replacement"
     assert not valid_record(a["entry_contract"], "s")
     assert contract_context(a, True)["entry_contract_status"] == "CORRUPT"
+
+
+@pytest.mark.parametrize("side,operator,price", [("LONG", "le", 95), ("SHORT", "ge", 105)])
+@pytest.mark.parametrize("minimum", [2, 3])
+def test_host_failure_rule_exact_authoritative_predicate(side, operator, price, minimum):
+    d = definition(side)
+    d["explicit_failure"]["minimum_observations"] = minimum
+    plan = dict(action="OPEN", scenario_id="s", action_id="a", input_id="i", side=side,
+                entries=[dict(price=100)], hard_stop=90 if side == "LONG" else 110)
+    a = dict(scenario_id="s", side=side, entry_contract=bind_contract(d, plan, 900))
+    assert contract_context(a, True)["entry_contract_failure_rule"] == dict(
+        source="MARK_PRICE", operator=operator, price=price, minimum_observations=minimum,
+        confirmation_scope="DISTINCT_CONSECUTIVE_FRESH_DECISION_SLOTS")
+
+
+@pytest.mark.parametrize("a", [None, {"scenario_id": "s"}, {"scenario_id": "s", "entry_contract": {}}])
+def test_unknown_contract_does_not_render_failure_rule(a):
+    assert contract_context(a, True)["entry_contract_failure_rule"] is None
+
+
+def test_old_narrative_failure_basis_is_rejected():
+    d = dict(definition(), failure_basis="another price")
+    plan = dict(action="OPEN", scenario_id="s", action_id="a", input_id="i", side="LONG",
+                entries=[dict(price=100)], hard_stop=90)
+    with pytest.raises(ValueError, match="invalid_registration"):
+        bind_contract(d, plan, 900)
+    with pytest.raises(ValueError, match="definition_invalid"):
+        validate_metadata(dict(plan, entry_contract=d, thesis_assessment=None),
+                          dict(entry_contract_version=1, scenario_id=None))
 
 
 @pytest.mark.parametrize("exit_error", [None, "cancel_pending", "timeout"])

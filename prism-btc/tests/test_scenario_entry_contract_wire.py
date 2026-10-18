@@ -20,7 +20,7 @@ from tests.test_scenario_review_guard import context as base_context
 
 def definition(side="LONG"):
     return dict(version=1, regime="BREAKOUT", premise="Original breakout", expected_progress="New extreme",
-        failure_basis="Supported return through structure", explicit_failure=dict(source="MARK_PRICE",
+        explicit_failure=dict(source="MARK_PRICE",
         operator="le" if side == "LONG" else "ge", price=83000 if side == "LONG" else 83800,
         minimum_observations=2))
 
@@ -62,6 +62,10 @@ def taped(ctx=None, *, mode="economic-reject-calculated-v1", status="FAILED", mu
         assert len(request["user_prompt"].encode()) <= 100000
         restored = restore_model_input(json.loads(request["user_prompt"]))
         assert restored["contract_context"]["registered_entry_contract"] == ctx["registered_entry_contract"]
+        assert restored["contract_context"]["entry_contract_failure_rule"] == ctx["entry_contract_failure_rule"]
+        assert ctx["entry_contract_failure_rule"] == dict(
+            ctx["registered_entry_contract"]["definition"]["explicit_failure"],
+            confirmation_scope="DISTINCT_CONSECUTIVE_FRESH_DECISION_SLOTS")
         if len(calls) == 1:
             raw = dict(wait_proposal=wire(ctx, "WAIT", status), candidates=[wire(ctx, "EXIT", status)], no_candidate_reason="")
         else:
@@ -146,7 +150,7 @@ def test_single_pass_never_uses_template_exception(action):
         assert propose(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx), **kwargs)["action"] == "EXIT"
 
 
-@pytest.mark.parametrize("key", ["registered_entry_contract", "entry_contract_status", "entry_contract_version"])
+@pytest.mark.parametrize("key", ["registered_entry_contract", "entry_contract_status", "entry_contract_version", "entry_contract_failure_rule"])
 def test_fresh_guard_rejects_contract_changes(key):
     args, _ = taped()
     fresh = dict(args[1], now=1001, account_captured_at=1001)
@@ -248,7 +252,7 @@ def test_optin_metadata_cannot_be_omitted(field):
         validate_wire_proposal(raw, ctx)
 
 
-@pytest.mark.parametrize("field", ["premise", "expected_progress", "failure_basis"])
+@pytest.mark.parametrize("field", ["premise", "expected_progress"])
 def test_open_text_limits_are_schema_enforced(field):
     ctx = base_context()
     ctx.update(contract_context(None, True))
@@ -308,3 +312,15 @@ def test_new_confirmed_host_failure_invalidates_reviewed_wait():
                  entry_contract_observation=active["entry_contract_observation"])
     with pytest.raises(ValueError, match="failed_requires_exit"):
         guard_review(*args, fresh, bindings={"test": "entry-contract"}, research_mode="economic-reject-calculated-v1")
+
+
+def test_old_duplicate_failure_basis_is_rejected_not_second_authority():
+    ctx = base_context()
+    ctx.update(contract_context(None, True))
+    raw = allocation_wire(ctx)
+    raw["entries"][0].pop("allocation_fraction")
+    raw["entries"][0]["quantity"] = .01
+    raw.update(entry_contract=definition(), thesis_assessment=None)
+    raw["entry_contract"]["failure_basis"] = "Different numeric failure at 83600"
+    with pytest.raises(ValueError, match="contract_mismatch"):
+        validate_wire_proposal(raw, ctx)
