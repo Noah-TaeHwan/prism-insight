@@ -731,6 +731,22 @@ class StockTrackingAgent:
         self.cursor.execute("SELECT scenario FROM stock_holdings WHERE account_key = ?", (self._account_scope()[0],))
         return [row[0] for row in self.cursor.fetchall()]
 
+    def _weighted_slots_if_capped(self, current_slots: int, slot_limit) -> float:
+        """Slot-weighted usage, read only when the row count already reaches the AI cap.
+
+        Each row weighs at most 1 slot (prism_core.slot_weight), so weighted usage never exceeds the
+        row count and a count below the cap needs no read. A failed read keeps the row count (the
+        previous, stricter comparison)."""
+        if current_slots < slot_limit:
+            return float(current_slots)
+        try:
+            from prism_core.micro_split_live import used_slots
+            return float(used_slots(self._holding_scenarios()))
+        except Exception as error:  # noqa: BLE001 - fall back to the row count
+            logger.warning("[PORTFOLIO_CAP] weighted usage read failed (%s); using row count",
+                           type(error).__name__)
+            return float(current_slots)
+
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector (delegates to tracking.helpers)"""
         account_key, _ = self._account_scope()
@@ -2724,11 +2740,10 @@ class StockTrackingAgent:
                 except (ValueError, TypeError):
                     max_portfolio_size = self.max_slots
             # 2026-10-19: the AI cap is compared with slot-weighted usage (legacy rows = 1), not row count.
-            from prism_core.micro_split_live import ai_cap_reached, used_slots
-            _holding_scenarios = self._holding_scenarios()
-            if ai_cap_reached(_holding_scenarios, max_portfolio_size):
+            _weighted = self._weighted_slots_if_capped(current_slots, max_portfolio_size)
+            if _weighted >= max_portfolio_size:
                 logger.warning(f"Reached market-based max portfolio size ({max_portfolio_size}). "
-                               f"Slot-weighted usage: {used_slots(_holding_scenarios):.2f} ({current_slots} holdings)")
+                               f"Slot-weighted usage: {_weighted:.2f} ({current_slots} holdings)")
                 return LegacyPositionWriteResult(False, None)
 
             # Current time

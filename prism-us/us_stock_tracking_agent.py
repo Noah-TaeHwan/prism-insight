@@ -1132,6 +1132,22 @@ class USStockTrackingAgent:
                             (self._account_scope()[0],))
         return [row[0] for row in self.cursor.fetchall()]
 
+    def _weighted_slots_if_capped(self, current_slots: int, slot_limit: int) -> float:
+        """Slot-weighted usage, read only when the row count already reaches the AI cap.
+
+        Each row weighs at most 1 slot (prism_core.slot_weight), so weighted usage never exceeds the
+        row count and a count below the cap needs no read. A failed read keeps the row count (the
+        previous, stricter comparison)."""
+        if current_slots < slot_limit:
+            return float(current_slots)
+        try:
+            from prism_core.micro_split_live import used_slots
+            return float(used_slots(self._holding_scenarios()))
+        except Exception as error:  # noqa: BLE001 - fall back to the row count
+            logger.warning("[PORTFOLIO_CAP] weighted usage read failed (%s); using row count",
+                           type(error).__name__)
+            return float(current_slots)
+
     def _get_db_lock(self) -> asyncio.Lock:
         """Serialize the shared sqlite cursor around bounded parallel pre-pass reads."""
         lock = getattr(self, "_db_lock", None)
@@ -1966,9 +1982,8 @@ class USStockTrackingAgent:
                 logger.warning(f"Holdings already at maximum ({self.max_slots})")
                 return LegacyPositionWriteResult(False, None)
             # 2026-10-19: the AI cap is compared with slot-weighted usage (legacy rows = 1), not row count.
-            from prism_core.micro_split_live import ai_cap_reached as _ai_cap_reached
             slot_limit = _scenario_slot_limit(scenario, hard_max=self.max_slots)
-            if _ai_cap_reached(self._holding_scenarios(), slot_limit):
+            if self._weighted_slots_if_capped(current_slots, slot_limit) >= slot_limit:
                 logger.warning(f"Holdings already at scenario maximum ({slot_limit}, slot-weighted)")
                 return LegacyPositionWriteResult(False, None)
 
@@ -4374,8 +4389,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         scenario, hard_max=self.max_slots
                     )
                     # 2026-10-19: hard row cap unchanged; the AI cap is compared with slot-weighted usage.
-                    from prism_core.micro_split_live import used_slots as _used_slots
-                    weighted_slots = _used_slots(self._holding_scenarios())
+                    weighted_slots = self._weighted_slots_if_capped(current_slots, scenario_slot_limit)
                     if current_slots >= self.max_slots or weighted_slots >= scenario_slot_limit:
                         # User-facing reason must NOT include the account label (leaks
                         # masked account number to broadcast channels). Keep detail in logs only.

@@ -44,7 +44,7 @@ def test_usage_line_shows_rows_and_weighted_slots(language, needle):
     ("stock_tracking_agent.py", ("if current_slots >= self.max_slots:",)),
     ("prism-us/us_stock_tracking_agent.py", ("if current_slots >= self.max_slots:",
                                              "if current_slots >= self.max_slots or weighted_slots >= scenario_slot_limit:",
-                                             "if _ai_cap_reached(self._holding_scenarios(), slot_limit):")),
+                                             "if self._weighted_slots_if_capped(current_slots, slot_limit) >= slot_limit:")),
 ])
 def test_call_sites_keep_the_hard_row_cap_and_use_weighted_ai_cap(path, hard_checks):
     src = (ROOT / path).read_text(encoding="utf-8")
@@ -74,3 +74,35 @@ def test_prompts_no_longer_cite_a_report_risk_level():
             assert "시장 리스크 레벨" not in text and "market risk level" not in text
             assert "6~10" in text and "Market Pulse" in text
             assert ("실제 사용 비중" in text) if language == "ko" else ("slot-weighted usage" in text)
+
+
+class _CapAgent:
+    """Minimal stand-in for the KR/US trackers' weighted-usage helper."""
+
+    def __init__(self, scenarios=None, broken=False):
+        self.scenarios, self.broken, self.reads = scenarios or [], broken, 0
+
+    def _holding_scenarios(self):
+        self.reads += 1
+        if self.broken:
+            raise RuntimeError("no such table")
+        return self.scenarios
+
+
+@pytest.mark.parametrize("path, cls", [("stock_tracking_agent.py", "StockTrackingAgent"),
+                                       ("prism-us/us_stock_tracking_agent.py", "USStockTrackingAgent")])
+def test_weighted_usage_is_read_only_at_the_cap_and_falls_back_to_rows(path, cls):
+    import ast
+    import logging
+    src = (ROOT / path).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    node = next(n for c in tree.body if isinstance(c, ast.ClassDef) and c.name == cls
+                for n in c.body if isinstance(n, ast.FunctionDef) and n.name == "_weighted_slots_if_capped")
+    ns = {"logger": logging.getLogger("cap-test")}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), path, "exec"), ns)
+    fn = ns["_weighted_slots_if_capped"]
+    below = _CapAgent([_micro(0.35)] * 5)
+    assert fn(below, 5, 6) == 5.0 and below.reads == 0          # weight <= rows: no read below the cap
+    at = _CapAgent([_micro(0.35)] * 6)
+    assert round(fn(at, 6, 6), 2) == 2.1 and at.reads == 1      # six 35% rows do not use up a cap of 6
+    assert fn(_CapAgent(broken=True), 6, 6) == 6.0              # failed read keeps the stricter row count
