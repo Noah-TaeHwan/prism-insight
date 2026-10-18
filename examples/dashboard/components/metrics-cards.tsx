@@ -92,8 +92,9 @@ export function MetricsCards({
       label: t("metrics.realTotalAssets"),
       value: formatCurrency(totalAssets),
       change: `${t("metrics.startAmount")} ${formatCurrency(seasonStartAmount)} (${formatPercent(totalAssetsReturn)})`,
-      changeValue: summary.real_trading.available_amount > 0
-        ? `${t("metrics.deposit")} ${formatCurrency(summary.real_trading.available_amount)} | ${summary.real_trading.total_stocks || 0}${t("metrics.stocks")}`
+      // KR balance API never fills available_amount (ord_psbl_cash), so use total cash
+      changeValue: totalCash > 0
+        ? `${t("metrics.deposit")} ${formatCurrency(totalCash)} | ${summary.real_trading.total_stocks || 0}${t("metrics.stocks")}`
         : `${t("metrics.fullyInvested")} | ${summary.real_trading.total_stocks || 0}${t("metrics.stocks")}`,
       description: t("metrics.assetsDesc"),
       tone: toneOf(totalAssetsReturn),
