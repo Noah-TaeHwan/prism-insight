@@ -4,33 +4,34 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.98 0.005 264);
-  --foreground: oklch(0.25 0.01 264);
+  /* Neutral base (Geist-style): color is reserved for gains, losses and the PRISM series */
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.205 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.25 0.01 264);
+  --card-foreground: oklch(0.205 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.25 0.01 264);
-  --primary: oklch(0.55 0.22 264);
-  --primary-foreground: oklch(0.98 0.005 264);
-  --secondary: oklch(0.95 0.01 264);
-  --secondary-foreground: oklch(0.25 0.01 264);
-  --muted: oklch(0.96 0.005 264);
-  --muted-foreground: oklch(0.5 0.01 264);
-  --accent: oklch(0.55 0.22 264);
-  --accent-foreground: oklch(0.98 0.005 264);
-  --success: oklch(0.65 0.18 145);
-  --success-foreground: oklch(0.98 0.005 264);
-  --destructive: oklch(0.6 0.22 25);
-  --destructive-foreground: oklch(0.98 0.005 264);
-  --border: oklch(0.9 0.005 264);
-  --input: oklch(0.9 0.005 264);
-  --ring: oklch(0.55 0.22 264);
-  --chart-1: oklch(0.55 0.22 264);
-  --chart-2: oklch(0.65 0.18 145);
-  --chart-3: oklch(0.7 0.15 200);
-  --chart-4: oklch(0.6 0.22 25);
-  --chart-5: oklch(0.75 0.12 60);
-  --radius: 0.75rem;
+  --popover-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.955 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --success: oklch(0.58 0.15 150);
+  --success-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.58 0.21 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.915 0 0);
+  --input: oklch(0.915 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.55 0.2 258);
+  --chart-2: oklch(0.58 0.15 150);
+  --chart-3: oklch(0.6 0 0);
+  --chart-4: oklch(0.58 0.21 27);
+  --chart-5: oklch(0.75 0 0);
+  --radius: 0.5rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -42,32 +43,32 @@
 }
 
 .dark {
-  --background: oklch(0.12 0.015 264);
-  --foreground: oklch(0.95 0.005 264);
-  --card: oklch(0.15 0.015 264);
-  --card-foreground: oklch(0.95 0.005 264);
-  --popover: oklch(0.15 0.015 264);
-  --popover-foreground: oklch(0.95 0.005 264);
-  --primary: oklch(0.65 0.24 264);
-  --primary-foreground: oklch(0.12 0.015 264);
-  --secondary: oklch(0.2 0.015 264);
-  --secondary-foreground: oklch(0.95 0.005 264);
-  --muted: oklch(0.2 0.015 264);
-  --muted-foreground: oklch(0.6 0.01 264);
-  --accent: oklch(0.65 0.24 264);
-  --accent-foreground: oklch(0.12 0.015 264);
-  --success: oklch(0.65 0.18 145);
-  --success-foreground: oklch(0.12 0.015 264);
-  --destructive: oklch(0.6 0.22 25);
-  --destructive-foreground: oklch(0.95 0.005 264);
-  --border: oklch(0.25 0.015 264);
-  --input: oklch(0.25 0.015 264);
-  --ring: oklch(0.65 0.24 264);
-  --chart-1: oklch(0.65 0.24 264);
-  --chart-2: oklch(0.65 0.18 145);
-  --chart-3: oklch(0.7 0.15 200);
-  --chart-4: oklch(0.6 0.22 25);
-  --chart-5: oklch(0.75 0.12 60);
+  --background: oklch(0.13 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.165 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.185 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.97 0 0);
+  --primary-foreground: oklch(0.165 0 0);
+  --secondary: oklch(0.22 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --accent: oklch(0.235 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --success: oklch(0.74 0.17 152);
+  --success-foreground: oklch(0.165 0 0);
+  --destructive: oklch(0.7 0.19 25);
+  --destructive-foreground: oklch(0.97 0 0);
+  --border: oklch(0.26 0 0);
+  --input: oklch(0.28 0 0);
+  --ring: oklch(0.55 0 0);
+  --chart-1: oklch(0.72 0.15 250);
+  --chart-2: oklch(0.74 0.17 152);
+  --chart-3: oklch(0.62 0 0);
+  --chart-4: oklch(0.7 0.19 25);
+  --chart-5: oklch(0.42 0 0);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -79,9 +80,10 @@
 }
 
 @theme inline {
-  /* optional: --font-sans, --font-serif, --font-mono if they are applied in the layout.tsx */
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  /* Hangul falls back to the platform font; Geist has no Korean glyphs */
+  --font-sans: var(--font-geist), "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+  --font-serif: var(--font-hedvig), Georgia, "Apple SD Gothic Neo", serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

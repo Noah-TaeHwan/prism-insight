@@ -37,29 +37,24 @@ export function TriggerReliabilityBadge({ data, onNavigateToInsights }: TriggerR
   return (
     <button
       onClick={onNavigateToInsights}
-      className={`
-        inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border
-        ${style.bg} ${style.border}
-        hover:opacity-80 transition-opacity cursor-pointer
-        text-sm
-      `}
+      className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-border bg-card hover:bg-accent transition-colors cursor-pointer text-xs"
     >
-      <Shield className={`w-3.5 h-3.5 ${style.text}`} />
+      <Shield className="w-3.5 h-3.5 text-muted-foreground" />
       <span className="text-muted-foreground">
         {t("insights.triggerReliability.miniBadge")}:
       </span>
-      <span className={`font-medium ${style.text}`}>
+      <span className="font-medium text-foreground">
         {data.best_trigger}
       </span>
-      <Badge variant="outline" className={`${style.text} ${style.border} text-xs px-1.5 py-0`}>
+      <Badge variant="outline" className={`${style.text} ${style.border} text-[10px] px-1.5 py-0`}>
         {grade}
       </Badge>
       {winRate != null && (
-        <span className="text-muted-foreground text-xs">
+        <span className="text-muted-foreground font-mono tabular-nums">
           ({(winRate * 100).toFixed(0)}%)
         </span>
       )}
-      <span className="text-muted-foreground/60 text-xs hidden sm:inline">
+      <span className="text-muted-foreground/70 hidden sm:inline">
         — {gradeLabel}
       </span>
     </button>

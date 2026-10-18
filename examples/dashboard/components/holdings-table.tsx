@@ -3,7 +3,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { TrendingUp, TrendingDown } from "lucide-react"
 import { useLanguage } from "@/components/language-provider"
 import { formatCurrency as formatCurrencyUtil, formatPercent as formatPercentUtil } from "@/lib/currency"
 import type { Holding, Market } from "@/types/dashboard"
@@ -36,69 +35,77 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
     return `${value.toFixed(2)}%`
   }
 
-  // Market-specific styling
-  const cardBorderClass = isRealTrading
-    ? (isUSMarket ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-50/50 to-transparent dark:from-emerald-950/20' : 'border-blue-500/30 bg-gradient-to-br from-blue-50/50 to-transparent dark:from-blue-950/20')
-    : ''
-  const badgeGradientClass = isUSMarket
-    ? "bg-gradient-to-r from-emerald-600 to-teal-600"
-    : "bg-gradient-to-r from-blue-600 to-indigo-600"
-  const badgeOutlineClass = isUSMarket
-    ? "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
-    : "border-blue-500/50 text-blue-600 dark:text-blue-400"
-  const simulatorBadgeClass = isUSMarket
-    ? "border-teal-500/50 text-teal-600 dark:text-teal-400"
-    : "border-purple-500/50 text-purple-600 dark:text-purple-400"
-
   return (
-    <Card className={`border-border/50 ${cardBorderClass}`}>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-lg font-semibold">{title}</CardTitle>
+    <Card className="gap-0 py-0 rounded-lg shadow-none">
+      <CardHeader className="px-5 pt-4 pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-sm font-medium">{title}</CardTitle>
             {isRealTrading ? (
-              <div className="flex items-center gap-2">
-                <Badge variant="default" className={badgeGradientClass}>
+              <>
+                <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
                   {isUSMarket ? (language === "ko" ? "미국 실전투자" : "US Real") : t("badge.realTrading")}
                 </Badge>
-                <Badge variant="outline" className={badgeOutlineClass}>
+                <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
                   {isUSMarket ? "Season 1" : t("badge.season2")}
                 </Badge>
-              </div>
+              </>
             ) : (
-              <Badge variant="outline" className={simulatorBadgeClass}>
+              <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
                 {isUSMarket ? (language === "ko" ? "미국 시뮬레이션" : "US Simulation") : t("badge.aiSimulation")}
               </Badge>
             )}
           </div>
+          <span className="text-xs text-muted-foreground font-mono tabular-nums">
+            {holdings.length}{isRealTrading ? "" : " / 10"}
+          </span>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-0 pb-1">
+        {holdings.length === 0 ? (
+          <div className="px-5 pb-5 space-y-3">
+            {!isRealTrading && (
+              <div className="grid grid-cols-10 gap-1" aria-hidden="true">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <div key={i} className="h-5 rounded border border-dashed border-border" />
+                ))}
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {language === "ko" ? "보유 종목 없음." : "No open positions."}
+              </span>{" "}
+              {language === "ko"
+                ? "전액 현금으로 매수 신호를 기다리는 중입니다."
+                : "Fully in cash, waiting for the next buy signal."}
+            </p>
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent border-border/50">
-                <TableHead className="font-semibold">{t("table.stockName")}</TableHead>
-                {!isRealTrading && <TableHead className="font-semibold">{t("table.sector")}</TableHead>}
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-xs font-normal text-muted-foreground first:pl-5">{t("table.stockName")}</TableHead>
+                {!isRealTrading && <TableHead className="text-xs font-normal text-muted-foreground first:pl-5">{t("table.sector")}</TableHead>}
                 {isRealTrading ? (
                   <>
-                    <TableHead className="text-right font-semibold">{t("table.quantity")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.avgPrice")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.currentPrice")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.totalValue")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.profitAmount")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.profitRate")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.weight")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.quantity")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.avgPrice")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.currentPrice")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.totalValue")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.profitAmount")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.profitRate")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.weight")}</TableHead>
                   </>
                 ) : (
                   <>
-                    <TableHead className="text-right font-semibold">{t("table.buyPrice")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.currentPrice")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.targetPrice")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.stopLoss")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.profitRate")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.holdingDays")}</TableHead>
-                    <TableHead className="text-right font-semibold">{t("table.period")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.buyPrice")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.currentPrice")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.targetPrice")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.stopLoss")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.profitRate")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.holdingDays")}</TableHead>
+                    <TableHead className="text-right text-xs font-normal text-muted-foreground last:pr-5">{t("table.period")}</TableHead>
                   </>
                 )}
               </TableRow>
@@ -111,10 +118,10 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
                 return (
                   <TableRow
                     key={holding.ticker}
-                    className="cursor-pointer hover:bg-muted/50 transition-colors border-border/30"
+                    className="cursor-pointer hover:bg-muted/50 transition-colors font-mono tabular-nums text-[13px]"
                     onClick={() => onStockClick(holding)}
                   >
-                    <TableCell>
+                    <TableCell className="pl-5 font-sans">
                       <div>
                         <p className="font-medium text-foreground">{stockName}</p>
                         <p className="text-xs text-muted-foreground">{holding.ticker}</p>
@@ -122,8 +129,8 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
                     </TableCell>
                     
                     {!isRealTrading && (
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
+                      <TableCell className="font-sans">
+                        <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
                           {holding.sector || holding.scenario?.sector || "-"}
                         </Badge>
                       </TableCell>
@@ -140,7 +147,7 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
                         <TableCell className="text-right font-medium">
                           {formatCurrency(holding.current_price)}
                         </TableCell>
-                        <TableCell className="text-right font-semibold">
+                        <TableCell className="text-right text-xs font-normal text-muted-foreground last:pr-5">
                           {formatCurrency(holding.value)}
                         </TableCell>
                         <TableCell className="text-right">
@@ -149,18 +156,11 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
                           </span>
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            {(holding.profit_rate || 0) >= 0 ? (
-                              <TrendingUp className="w-3 h-3 text-success" />
-                            ) : (
-                              <TrendingDown className="w-3 h-3 text-destructive" />
-                            )}
-                            <span className={`font-semibold ${(holding.profit_rate || 0) >= 0 ? "text-success" : "text-destructive"}`}>
-                              {formatPercent(holding.profit_rate)}
-                            </span>
-                          </div>
+                          <span className={`font-medium ${(holding.profit_rate || 0) >= 0 ? "text-success" : "text-destructive"}`}>
+                            {formatPercent(holding.profit_rate)}
+                          </span>
                         </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
+                        <TableCell className="text-right text-muted-foreground pr-5">
                           {formatWeight(holding.weight)}
                         </TableCell>
                       </>
@@ -193,16 +193,9 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
                           {formatCurrency(holding.stop_loss)}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            {(holding.profit_rate || 0) >= 0 ? (
-                              <TrendingUp className="w-3 h-3 text-success" />
-                            ) : (
-                              <TrendingDown className="w-3 h-3 text-destructive" />
-                            )}
-                            <span className={`font-semibold ${(holding.profit_rate || 0) >= 0 ? "text-success" : "text-destructive"}`}>
-                              {formatPercent(holding.profit_rate)}
-                            </span>
-                          </div>
+                          <span className={`font-medium ${(holding.profit_rate || 0) >= 0 ? "text-success" : "text-destructive"}`}>
+                            {formatPercent(holding.profit_rate)}
+                          </span>
                           {(holding.allocation ?? 1) < 1 && holding.slot_profit_rate !== undefined ? (
                             <div className="text-[10px] text-muted-foreground">
                               {language === "ko" ? "슬롯 기준 " : "Slot "}{formatPercent(holding.slot_profit_rate)}
@@ -212,8 +205,8 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
                         <TableCell className="text-right text-muted-foreground">
                           {holding.holding_days || 0}{t("common.days")}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant={holding.investment_period === "단기" ? "secondary" : "outline"} className="text-xs">
+                        <TableCell className="text-right pr-5 font-sans">
+                          <Badge variant={holding.investment_period === "단기" ? "secondary" : "outline"} className="text-xs font-normal">
                             {holding.investment_period || "-"}
                           </Badge>
                         </TableCell>
@@ -225,6 +218,7 @@ export function HoldingsTable({ holdings, onStockClick, title = "보유 종목",
             </TableBody>
           </Table>
         </div>
+        )}
       </CardContent>
     </Card>
   )

@@ -1,12 +1,14 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+import { Geist, Geist_Mono, Hedvig_Letters_Serif } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { LanguageProvider } from "@/components/language-provider"
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
+// Serif for headline figures only (KPI values), body stays Geist
+const hedvig = Hedvig_Letters_Serif({ subsets: ["latin"], variable: "--font-hedvig" })
 
 export const metadata: Metadata = {
   title: "Prism Insight Dashboard",
@@ -21,7 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" suppressHydrationWarning>
-      <body className={`font-sans antialiased`}>
+      <body className={`${geist.variable} ${geistMono.variable} ${hedvig.variable} font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <LanguageProvider>
             {children}

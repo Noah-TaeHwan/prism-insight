@@ -202,7 +202,7 @@ function DashboardContent() {
 
       <main className="container mx-auto px-4 py-6 max-w-[1600px]">
         {activeTab === "dashboard" && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* 운영 비용 카드 - 최상단 배치 */}
             <OperatingCostsCard costs={data.operating_costs} />
 
@@ -246,6 +246,15 @@ function DashboardContent() {
               market={market}
             />
 
+            {/* 수익률 비교 차트 - 지표 바로 아래 */}
+            <PerformanceChart
+              data={data.market_condition}
+              prismPerformance={data.prism_performance}
+              holdings={data.holdings}
+              summary={data.summary}
+              market={market}
+            />
+
             {/* 실전투자 포트폴리오 - 최우선 표시 */}
             {data.real_portfolio && data.real_portfolio.length > 0 && (
               <HoldingsTable
@@ -266,14 +275,6 @@ function DashboardContent() {
               market={market}
             />
 
-            {/* 시장 지수 차트 - 하단 배치 */}
-            <PerformanceChart
-              data={data.market_condition}
-              prismPerformance={data.prism_performance}
-              holdings={data.holdings}
-              summary={data.summary}
-              market={market}
-            />
           </div>
         )}
 

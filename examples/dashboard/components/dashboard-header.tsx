@@ -1,6 +1,6 @@
 "use client"
 
-import { Moon, Sun, TrendingUp, Github, Send, Languages, Sparkles } from "lucide-react"
+import { Moon, Sun, TrendingUp, Github, Send, Languages } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useLanguage } from "@/components/language-provider"
 import { Button } from "@/components/ui/button"
@@ -41,58 +41,56 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
     }
   }
 
+  type Tab = DashboardHeaderProps["activeTab"]
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "dashboard", label: t("header.dashboard") },
+    { id: "ai-decisions", label: t("header.aiDecisions") },
+    { id: "trading", label: t("header.trading") },
+    { id: "watchlist", label: t("header.watchlist") },
+    { id: "insights", label: t("header.insights") },
+    { id: "ops-report", label: t("header.opsReport") },
+    { id: "stance", label: "Stance" },
+  ]
+
+  const markets: { id: Market; label: string }[] = [
+    { id: "KR", label: language === "ko" ? "한국" : "Korea" },
+    { id: "US", label: language === "ko" ? "미국" : "US" },
+  ]
+
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      {/* Platinum Sponsor Bar - Premium separated placement */}
-      <div className="hidden sm:block border-b border-border/20 bg-gradient-to-r from-slate-50/50 via-blue-50/30 to-indigo-50/50 dark:from-slate-900/50 dark:via-blue-950/30 dark:to-indigo-950/50">
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      {/* Platinum Sponsor Bar */}
+      <div className="hidden sm:block border-b border-border">
         <div className="container mx-auto px-4 max-w-[1600px]">
-          <div className="flex items-center justify-center py-1.5 gap-3">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-3 h-3 text-amber-500" />
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-amber-600/90 dark:text-amber-400/90">
-                Platinum Sponsor
-              </span>
-            </div>
-            <div className="w-px h-3 bg-border/50" />
+          <div className="flex items-center justify-center py-1 gap-3 text-[11px] text-muted-foreground">
+            <span className="uppercase tracking-[0.14em]">Platinum Sponsor</span>
             <a
               href="https://wrks.ai/en"
               target="_blank"
               rel="noopener noreferrer"
-              className="group flex items-center gap-2 px-3 py-1 rounded-full bg-white/60 dark:bg-white/5 border border-blue-200/50 dark:border-blue-500/20 hover:border-blue-400/50 dark:hover:border-blue-400/40 hover:bg-white/80 dark:hover:bg-white/10 transition-all duration-200 shadow-sm hover:shadow-md"
+              className="flex items-center gap-1.5 text-foreground/80 hover:text-foreground transition-colors"
             >
-              <img
-                src="/wrks_ai_logo.png"
-                alt="WrksAI"
-                className="h-5 w-auto transition-transform duration-200 group-hover:scale-105"
-              />
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                WrksAI
-              </span>
-              <svg className="w-3 h-3 text-slate-400 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
+              <img src="/wrks_ai_logo.png" alt="WrksAI" className="h-4 w-auto" />
+              <span className="font-medium">WrksAI</span>
             </a>
           </div>
         </div>
       </div>
 
       <div className="container mx-auto px-4 max-w-[1600px]">
-        {/* Top Row: Logo + Market Tabs + Utils */}
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-14 items-center gap-4">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-primary via-purple-600 to-blue-600">
-              <TrendingUp className="w-6 h-6 text-white" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-foreground text-background shrink-0">
+              <TrendingUp className="w-4 h-4" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold bg-gradient-to-r from-primary via-purple-600 to-blue-600 bg-clip-text text-transparent">
-                  Prism Insight
-                </h1>
+                <h1 className="text-[15px] font-semibold tracking-tight">PRISM-INSIGHT</h1>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/10 text-green-500 cursor-help">
+                      <span className="hidden sm:inline px-1.5 py-px text-[10px] font-medium rounded border border-border text-muted-foreground cursor-help">
                         {t("header.openSource")}
                       </span>
                     </TooltipTrigger>
@@ -102,74 +100,41 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {t("header.updated")}: {formatLastUpdated()}
+              <p className="text-[11px] text-muted-foreground truncate">
+                {t("header.updated")} <span className="font-mono tabular-nums">{formatLastUpdated()}</span>
               </p>
             </div>
           </div>
 
-          {/* Market Selector - Big Prominent Tabs */}
+          {/* Market Selector */}
           {onMarketChange && (
-            <div className="hidden sm:flex items-center">
-              <div className="flex bg-muted/50 rounded-xl p-1.5 gap-1">
+            <div className="hidden sm:flex items-center rounded-lg border border-border p-0.5 gap-0.5">
+              {markets.map((m) => (
                 <button
-                  onClick={() => onMarketChange("KR")}
-                  className={`
-                    flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200
-                    ${market === "KR"
-                      ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    }
-                  `}
+                  key={m.id}
+                  onClick={() => onMarketChange(m.id)}
+                  aria-pressed={market === m.id}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-sm transition-colors ${
+                    market === m.id
+                      ? "bg-secondary text-foreground font-medium"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  <span className="text-lg">🇰🇷</span>
-                  <span>{language === "ko" ? "한국주식" : "Korea"}</span>
-                  {market === "KR" && (
-                    <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/20 rounded-full">
-                      Season 2
-                    </span>
-                  )}
+                  {m.label}
+                  {market === m.id && <span className="text-[10px] text-muted-foreground font-normal">S2</span>}
                 </button>
-                <button
-                  onClick={() => onMarketChange("US")}
-                  className={`
-                    flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200
-                    ${market === "US"
-                      ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/25"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    }
-                  `}
-                >
-                  <span className="text-lg">🇺🇸</span>
-                  <span>{language === "ko" ? "미국주식" : "US Stocks"}</span>
-                  {market === "US" && (
-                    <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/20 rounded-full">
-                      Season 2
-                    </span>
-                  )}
-                </button>
-              </div>
+              ))}
             </div>
           )}
 
           {/* Utility Buttons */}
-          <div className="flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-0.5">
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    asChild
-                    className="rounded-full"
-                  >
-                    <a
-                      href="https://github.com/dragon1086/prism-insight"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="GitHub Repository"
-                    >
-                      <Github className="h-5 w-5" />
+                  <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                    <a href="https://github.com/dragon1086/prism-insight" target="_blank" rel="noopener noreferrer" aria-label="GitHub Repository">
+                      <Github className="h-4 w-4" />
                     </a>
                   </Button>
                 </TooltipTrigger>
@@ -182,19 +147,9 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    asChild
-                    className="rounded-full"
-                  >
-                    <a
-                      href="https://t.me/stock_ai_agent"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="Telegram Channel"
-                    >
-                      <Send className="h-5 w-5" />
+                  <Button variant="ghost" size="icon" asChild className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                    <a href="https://t.me/stock_ai_agent" target="_blank" rel="noopener noreferrer" aria-label="Telegram Channel">
+                      <Send className="h-4 w-4" />
                     </a>
                   </Button>
                 </TooltipTrigger>
@@ -204,25 +159,25 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
               </Tooltip>
             </TooltipProvider>
 
-            {/* Language Toggle - Prominent Button */}
             <button
               onClick={() => setLanguage(language === "ko" ? "en" : "ko")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 hover:bg-muted transition-colors font-medium text-sm"
+              className="flex items-center gap-1 h-8 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              aria-label="Language"
             >
-              <Languages className="h-4 w-4" />
-              <span className={language === "ko" ? "text-muted-foreground" : "text-foreground font-semibold"}>EN</span>
-              <span className="text-muted-foreground/50">/</span>
-              <span className={language === "ko" ? "text-foreground font-semibold" : "text-muted-foreground"}>한</span>
+              <Languages className="h-3.5 w-3.5" />
+              <span className={language === "en" ? "text-foreground font-medium" : ""}>EN</span>
+              <span className="opacity-40">/</span>
+              <span className={language === "ko" ? "text-foreground font-medium" : ""}>한</span>
             </button>
 
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="rounded-full"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
             >
-              <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-              <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+              <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
               <span className="sr-only">{t("header.tooltip.theme")}</span>
             </Button>
           </div>
@@ -230,174 +185,49 @@ export function DashboardHeader({ activeTab, onTabChange, lastUpdated, market = 
 
         {/* Mobile Market Selector */}
         {onMarketChange && (
-          <div className="sm:hidden flex flex-col items-center gap-2 pb-3">
-            <div className="flex bg-muted/50 rounded-xl p-1 gap-1 w-full max-w-sm">
-              <button
-                onClick={() => onMarketChange("KR")}
-                className={`
-                  flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all
-                  ${market === "KR"
-                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md"
-                    : "text-muted-foreground"
-                  }
-                `}
-              >
-                <span>🇰🇷</span>
-                <span>{language === "ko" ? "한국주식" : "Korea"}</span>
-              </button>
-              <button
-                onClick={() => onMarketChange("US")}
-                className={`
-                  flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all
-                  ${market === "US"
-                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
-                    : "text-muted-foreground"
-                  }
-                `}
-              >
-                <span>🇺🇸</span>
-                <span>{language === "ko" ? "미국주식" : "US"}</span>
-              </button>
+          <div className="sm:hidden flex items-center gap-2 pb-2">
+            <div className="flex flex-1 rounded-lg border border-border p-0.5 gap-0.5">
+              {markets.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => onMarketChange(m.id)}
+                  aria-pressed={market === m.id}
+                  className={`flex-1 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                    market === m.id ? "bg-secondary text-foreground font-medium" : "text-muted-foreground"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
             </div>
-            {/* Mobile Sponsor Badge */}
             <a
               href="https://wrks.ai/en"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-slate-100/80 to-blue-50/80 dark:from-slate-800/80 dark:to-blue-950/80 border border-blue-200/40 dark:border-blue-700/30"
+              className="flex items-center gap-1.5 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground"
             >
-              <Sparkles className="w-3 h-3 text-amber-500" />
-              <span className="text-[9px] font-semibold uppercase tracking-wider text-amber-600/90 dark:text-amber-400/90">
-                Sponsor
-              </span>
-              <img
-                src="/wrks_ai_logo.png"
-                alt="WrksAI"
-                className="h-4 w-auto"
-              />
+              Sponsor
+              <img src="/wrks_ai_logo.png" alt="WrksAI" className="h-4 w-auto" />
             </a>
           </div>
         )}
 
         {/* Navigation Tabs */}
-        <nav className="hidden md:flex items-center gap-1 pb-3 border-t border-border/30 pt-2">
-          <Button
-            variant={activeTab === "dashboard" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("dashboard")}
-            className="font-medium"
-          >
-            {t("header.dashboard")}
-          </Button>
-          <Button
-            variant={activeTab === "ai-decisions" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("ai-decisions")}
-            className="font-medium"
-          >
-            {t("header.aiDecisions")}
-          </Button>
-          <Button
-            variant={activeTab === "trading" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("trading")}
-            className="font-medium"
-          >
-            {t("header.trading")}
-          </Button>
-          <Button
-            variant={activeTab === "watchlist" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("watchlist")}
-            className="font-medium"
-          >
-            {t("header.watchlist")}
-          </Button>
-          <Button
-            variant={activeTab === "insights" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("insights")}
-            className="font-medium"
-          >
-            💡 {t("header.insights")}
-          </Button>
-          <Button
-            variant={activeTab === "ops-report" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("ops-report")}
-            className="font-medium"
-          >
-            📊 {t("header.opsReport")}
-          </Button>
-          <Button
-            variant={activeTab === "stance" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("stance")}
-            className={`font-medium ${
-              activeTab === "stance"
-                ? "bg-gradient-to-r from-slate-800 to-slate-600 text-white hover:from-slate-900 hover:to-slate-700"
-                : "hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
-          >
-            📐 Stance
-          </Button>
-        </nav>
-
-        {/* Mobile Navigation */}
-        <nav className="md:hidden flex items-center gap-1 pb-3 overflow-x-auto">
-          <Button
-            variant={activeTab === "dashboard" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("dashboard")}
-            size="sm"
-            className="font-medium whitespace-nowrap"
-          >
-            {t("header.dashboard")}
-          </Button>
-          <Button
-            variant={activeTab === "ai-decisions" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("ai-decisions")}
-            size="sm"
-            className="font-medium whitespace-nowrap"
-          >
-            {t("header.aiDecisions")}
-          </Button>
-          <Button
-            variant={activeTab === "trading" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("trading")}
-            size="sm"
-            className="font-medium whitespace-nowrap"
-          >
-            {t("header.trading")}
-          </Button>
-          <Button
-            variant={activeTab === "watchlist" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("watchlist")}
-            size="sm"
-            className="font-medium whitespace-nowrap"
-          >
-            {t("header.watchlist")}
-          </Button>
-          <Button
-            variant={activeTab === "insights" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("insights")}
-            size="sm"
-            className="font-medium whitespace-nowrap"
-          >
-            💡 {t("header.insights")}
-          </Button>
-          <Button
-            variant={activeTab === "ops-report" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("ops-report")}
-            size="sm"
-            className="font-medium whitespace-nowrap"
-          >
-            📊 {t("header.opsReport")}
-          </Button>
-          <Button
-            variant={activeTab === "stance" ? "secondary" : "ghost"}
-            onClick={() => onTabChange("stance")}
-            size="sm"
-            className={`font-medium whitespace-nowrap ${
-              activeTab === "stance"
-                ? "bg-gradient-to-r from-slate-800 to-slate-600 text-white hover:from-slate-900 hover:to-slate-700"
-                : "hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
-          >
-            📐 Stance
-          </Button>
+        <nav className="-mb-px flex items-center gap-1 overflow-x-auto [scrollbar-width:none]" aria-label="Tabs">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              aria-current={activeTab === tab.id ? "page" : undefined}
+              className={`whitespace-nowrap px-3 py-2.5 text-sm border-b-2 transition-colors ${
+                activeTab === tab.id
+                  ? "border-foreground text-foreground font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </nav>
       </div>
     </header>
