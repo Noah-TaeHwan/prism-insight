@@ -269,7 +269,8 @@ def test_us_entry_risk_contract_helpers() -> None:
         "buy_score": 6.0,
         "macro_adjustment": -1.0,
         "journal_adjustment": 1.0,
-        "effective_score": 6.0,
+        # 2026-10-19 (user decision): like KR, the journal adjustment is recorded but not added.
+        "effective_score": 5.0,
     }
 
 class _FakeAsyncUSTradingContext:
