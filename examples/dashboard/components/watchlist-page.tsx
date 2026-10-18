@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Eye, AlertCircle, TrendingUp, Target, Brain, BarChart3, Filter, ChevronDown, ChevronUp, FileJson } from "lucide-react"
+import { ChevronDown, ChevronUp } from "lucide-react"
 import { useLanguage } from "@/components/language-provider"
 import { formatCurrency as formatCurrencyUtil } from "@/lib/currency"
 import type { WatchlistStock, Market } from "@/types/dashboard"
@@ -13,6 +13,20 @@ import type { WatchlistStock, Market } from "@/types/dashboard"
 interface WatchlistPageProps {
   watchlist: WatchlistStock[]
   market?: Market
+}
+
+const CARD = "gap-0 py-0 rounded-lg shadow-none"
+const META_BADGE = "text-[10px] font-normal text-muted-foreground"
+const NUM = "font-mono tabular-nums text-[13px]"
+
+// Labeled block of AI text: muted label, readable body capped near 70ch.
+function TextBlock({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="max-w-[70ch]">
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      <div className="text-[13px] text-foreground/90 leading-relaxed">{children}</div>
+    </div>
+  )
 }
 
 export function WatchlistPage({ watchlist, market = "KR" }: WatchlistPageProps) {
@@ -47,13 +61,13 @@ export function WatchlistPage({ watchlist, market = "KR" }: WatchlistPageProps) 
 
   // 통계 계산
   const totalStocks = watchlist.length
-  const highestScore = watchlist.length > 0 
-    ? Math.max(...watchlist.map(s => s.buy_score)) 
+  const highestScore = watchlist.length > 0
+    ? Math.max(...watchlist.map(s => s.buy_score))
     : 0
-  const avgScore = watchlist.length > 0 
-    ? watchlist.reduce((sum, s) => sum + s.buy_score, 0) / watchlist.length 
+  const avgScore = watchlist.length > 0
+    ? watchlist.reduce((sum, s) => sum + s.buy_score, 0) / watchlist.length
     : 0
-  
+
   // 최근 7일 종목 수
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
@@ -83,382 +97,288 @@ export function WatchlistPage({ watchlist, market = "KR" }: WatchlistPageProps) 
 
   const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a))
 
+  const kpis = [
+    { label: t("watchlist.totalStocks"), value: `${totalStocks}${t("watchlist.stocksCount")}`, sub: t("watchlist.lastMonthAnalysis") },
+    { label: t("watchlist.highestScore"), value: `${highestScore}${t("watchlist.scoreUnit")}`, sub: t("watchlist.mostPromising") },
+    { label: t("watchlist.avgScore"), value: `${avgScore.toFixed(1)}${t("watchlist.scoreUnit")}`, sub: t("watchlist.outOf10") },
+    { label: t("watchlist.recentWeek"), value: `${recentStocks}${t("watchlist.stocksCount")}`, sub: t("watchlist.recentlyAnalyzed") },
+  ]
+
   return (
     <div className="space-y-6">
       {/* 헤더 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20">
-            <Eye className="w-6 h-6 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-foreground">{t("watchlist.title")}</h2>
-            <p className="text-sm text-muted-foreground">{t("watchlist.description")}</p>
-          </div>
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">{t("watchlist.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("watchlist.description")}</p>
         </div>
-        <Badge variant="outline" className="text-sm">
+        <span className="text-xs text-muted-foreground font-mono tabular-nums">
           {t("watchlist.totalStocks")} {totalStocks}{t("watchlist.stocksUnit")}
-        </Badge>
+        </span>
       </div>
 
       {/* 통계 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <Eye className="w-5 h-5 text-primary" />
-              <span className="text-sm text-muted-foreground">{t("watchlist.totalStocks")}</span>
-            </div>
-            <p className="text-3xl font-bold text-foreground">{totalStocks}{t("watchlist.stocksCount")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("watchlist.lastMonthAnalysis")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <Target className="w-5 h-5 text-success" />
-              <span className="text-sm text-muted-foreground">{t("watchlist.highestScore")}</span>
-            </div>
-            <p className="text-3xl font-bold text-success">{highestScore}{t("watchlist.scoreUnit")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("watchlist.mostPromising")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <BarChart3 className="w-5 h-5 text-chart-3" />
-              <span className="text-sm text-muted-foreground">{t("watchlist.avgScore")}</span>
-            </div>
-            <p className="text-3xl font-bold text-chart-3">{avgScore.toFixed(1)}{t("watchlist.scoreUnit")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("watchlist.outOf10")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <TrendingUp className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-              <span className="text-sm text-muted-foreground">{t("watchlist.recentWeek")}</span>
-            </div>
-            <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{recentStocks}{t("watchlist.stocksCount")}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("watchlist.recentlyAnalyzed")}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {kpis.map((kpi) => (
+          <Card key={kpi.label} className={CARD}>
+            <CardContent className="p-4 sm:p-5 space-y-2.5 sm:space-y-3">
+              <span className="text-[13px] text-muted-foreground block">{kpi.label}</span>
+              <p className="font-serif text-[1.75rem] sm:text-[2rem] leading-none tracking-tight tabular-nums text-foreground">
+                {kpi.value}
+              </p>
+              <p className="text-xs text-muted-foreground">{kpi.sub}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* 분석 인사이트 */}
       {topSectors.length > 0 && (
-        <Card className="border-border/50">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-chart-3" />
-              {t("watchlist.sectorDistributionTop3")}
-            </CardTitle>
+        <Card className={CARD}>
+          <CardHeader className="px-5 pt-4 pb-3">
+            <CardTitle className="text-sm font-medium">{t("watchlist.sectorDistributionTop3")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
+          <CardContent className="px-5 pb-2">
+            <ol className="divide-y">
               {topSectors.map(([sector, count], index) => (
-                <div key={sector} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-chart-3/20 text-chart-3 font-bold text-sm">
-                      {index + 1}
-                    </div>
-                    <p className="font-medium text-foreground">{sector}</p>
+                <li key={sector} className="flex items-center justify-between gap-3 py-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`${NUM} w-4 text-muted-foreground`}>{index + 1}</span>
+                    <span className="text-sm text-foreground truncate">{sector}</span>
                   </div>
-                  <Badge variant="secondary">{count}{t("watchlist.stocksCount")}</Badge>
-                </div>
+                  <span className={`${NUM} text-muted-foreground`}>{count}{t("watchlist.stocksCount")}</span>
+                </li>
               ))}
-            </div>
+            </ol>
           </CardContent>
         </Card>
       )}
 
       {/* 일별 종목 리스트 */}
-      <div className="space-y-6">
+      <div className="space-y-4">
         {sortedDates.map(date => (
-          <Card key={date} className="border-border/50">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  {formatDate(date)}
-                </CardTitle>
-                <Badge variant="secondary">
+          <Card key={date} className={CARD}>
+            <CardHeader className="px-5 pt-4 pb-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <CardTitle className="text-sm font-medium">{formatDate(date)}</CardTitle>
+                <span className="text-xs text-muted-foreground font-mono tabular-nums">
                   {groupedByDate[date].length}{t("watchlist.analyses")}
-                </Badge>
+                </span>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <CardContent className="px-4 pb-4 sm:px-5 sm:pb-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {groupedByDate[date].map((stock) => {
                   const isExpanded = expandedStocks.has(stock.id)
+                  const isEntry = stock.decision === t("watchlist.entry")
+                  const passed = stock.buy_score >= stock.min_score
+                  const rr = stock.scenario?.risk_reward_ratio
+                  const ts = stock.scenario?.trading_scenarios || stock.trading_scenarios
                   return (
-                    <Card
+                    <div
                       key={stock.id}
-                      className="border-border/30 bg-muted/20 hover:bg-muted/30 transition-all duration-300"
+                      className="min-w-0 rounded-md border p-4 space-y-4 transition-colors hover:bg-muted/50"
                     >
-                      <CardContent className="p-6">
-                        <div className="space-y-4">
-                          {/* 종목 헤더 */}
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h3 className="text-lg font-bold text-foreground">{stock.company_name}</h3>
-                                <Badge variant="outline" className="text-xs">{stock.ticker}</Badge>
-                              </div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="secondary" className="text-xs">{stock.sector}</Badge>
-                                <Badge variant="secondary" className="text-xs">{stock.investment_period}</Badge>
-                                <Badge 
-                                  variant={stock.buy_score >= stock.min_score ? "default" : "outline"}
-                                  className={stock.buy_score >= stock.min_score ? "bg-success/20 text-success border-success/30" : ""}
-                                >
-                                  {stock.buy_score}/{stock.min_score}점
-                                </Badge>
-                              </div>
-                            </div>
-                          </div>
+                      {/* 종목 헤더 */}
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <h3 className="text-base font-semibold text-foreground">{stock.company_name}</h3>
+                          <Badge variant="outline" className={META_BADGE}>{stock.ticker}</Badge>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {stock.sector && <Badge variant="outline" className={META_BADGE}>{stock.sector}</Badge>}
+                          {stock.investment_period && <Badge variant="outline" className={META_BADGE}>{stock.investment_period}</Badge>}
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] font-normal font-mono tabular-nums ${passed ? "text-success" : "text-muted-foreground"}`}
+                          >
+                            {stock.buy_score}/{stock.min_score}점
+                          </Badge>
+                        </div>
+                      </div>
 
-                          {/* 가격 정보 */}
-                          <div className="grid grid-cols-3 gap-3">
-                            <div className="p-3 rounded-lg bg-background border border-border/50">
-                              <p className="text-xs text-muted-foreground mb-1">{t("watchlist.currentPrice")}</p>
-                              <p className="text-sm font-bold text-foreground">{formatCurrency(stock.current_price)}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-background border border-border/50">
-                              <p className="text-xs text-muted-foreground mb-1">{t("watchlist.targetPrice")}</p>
-                              <p className="text-sm font-bold text-success">{formatCurrency(stock.target_price)}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-background border border-border/50">
-                              <p className="text-xs text-muted-foreground mb-1">{t("watchlist.stopLoss")}</p>
-                              <p className="text-sm font-bold text-destructive">{formatCurrency(stock.stop_loss)}</p>
-                            </div>
-                          </div>
+                      {/* 가격 정보 */}
+                      <dl className="grid grid-cols-3 gap-3 rounded-md border px-3 py-2.5">
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("watchlist.currentPrice")}</dt>
+                          <dd className={`${NUM} mt-0.5 font-medium text-foreground`}>{formatCurrency(stock.current_price)}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("watchlist.targetPrice")}</dt>
+                          <dd className={`${NUM} mt-0.5 font-medium text-success`}>{formatCurrency(stock.target_price)}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{t("watchlist.stopLoss")}</dt>
+                          <dd className={`${NUM} mt-0.5 font-medium text-destructive`}>{formatCurrency(stock.stop_loss)}</dd>
+                        </div>
+                      </dl>
 
-                          {/* Risk/Reward Ratio */}
-                          {stock.scenario?.risk_reward_ratio && (
-                            <div className="p-3 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200/50 dark:border-blue-800/50">
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">{t("modal.riskRewardRatio")}</p>
-                                <Badge 
-                                  variant={stock.scenario.risk_reward_ratio >= 3 ? "default" : stock.scenario.risk_reward_ratio >= 2 ? "secondary" : "destructive"}
-                                  className="text-xs"
-                                >
-                                  {stock.scenario.risk_reward_ratio.toFixed(1)}
-                                </Badge>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2 mt-2">
-                                {stock.scenario.expected_return_pct && (
-                                  <div>
-                                    <p className="text-xs text-muted-foreground">{t("modal.expectedReturn")}</p>
-                                    <p className="text-xs font-semibold text-success">+{stock.scenario.expected_return_pct.toFixed(1)}%</p>
-                                  </div>
-                                )}
-                                {stock.scenario.expected_loss_pct && (
-                                  <div>
-                                    <p className="text-xs text-muted-foreground">{t("modal.expectedLoss")}</p>
-                                    <p className="text-xs font-semibold text-destructive">-{stock.scenario.expected_loss_pct.toFixed(1)}%</p>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                      {/* Risk/Reward Ratio */}
+                      {rr && (
+                        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+                          <span className="text-muted-foreground">
+                            {t("modal.riskRewardRatio")}{" "}
+                            <span className={`${NUM} font-medium ${rr >= 3 ? "text-success" : rr >= 2 ? "text-foreground" : "text-destructive"}`}>
+                              {rr.toFixed(1)}
+                            </span>
+                          </span>
+                          {stock.scenario?.expected_return_pct && (
+                            <span className="text-muted-foreground">
+                              {t("modal.expectedReturn")}{" "}
+                              <span className={`${NUM} text-success`}>+{stock.scenario.expected_return_pct.toFixed(1)}%</span>
+                            </span>
+                          )}
+                          {stock.scenario?.expected_loss_pct && (
+                            <span className="text-muted-foreground">
+                              {t("modal.expectedLoss")}{" "}
+                              <span className={`${NUM} text-destructive`}>-{stock.scenario.expected_loss_pct.toFixed(1)}%</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 결정 & 사유 */}
+                      <div className={`border-l-2 pl-3 ${isEntry ? "border-success/60" : "border-border"}`}>
+                        <p className="text-[13px] mb-1">
+                          <span className="text-muted-foreground">{t("watchlist.decision")}: </span>
+                          <span className={`font-medium ${isEntry ? "text-success" : "text-foreground"}`}>{stock.decision}</span>
+                          {stock.scenario?.entry_checklist_passed !== undefined && (
+                            <span className="ml-2 text-xs text-muted-foreground font-mono tabular-nums">
+                              ({t("watchlist.entryChecklist")}: {stock.scenario.entry_checklist_passed}/6)
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[13px] text-foreground/90 leading-relaxed max-w-[70ch]">{stock.skip_reason}</p>
+                        {stock.scenario?.rejection_reason && !isEntry && (
+                          <p className="text-xs text-muted-foreground mt-1.5 max-w-[70ch]">
+                            {t("watchlist.rejectionReason")}: {stock.scenario.rejection_reason}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* AI 분석 상세 (확장 가능) */}
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleExpand(stock.id)}
+                          aria-expanded={isExpanded}
+                          className="flex-1 justify-between text-muted-foreground hover:text-foreground"
+                        >
+                          {t("watchlist.aiAnalysisDetails")}
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </Button>
+
+                        {stock.full_json_data && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="font-mono text-xs"
+                            onClick={() => setSelectedScenario(stock.full_json_data)}
+                          >
+                            JSON
+                          </Button>
+                        )}
+                      </div>
+
+                      {isExpanded && (
+                        <div className="space-y-4 pt-3 border-t">
+                          {stock.rationale && (
+                            <TextBlock label={t("watchlist.tradingRationale")}>{stock.rationale}</TextBlock>
                           )}
 
-                          {/* 결정 & 사유 */}
-                          <div className={`p-4 rounded-lg border ${
-                            stock.decision === t("watchlist.entry")
-                              ? "bg-success/10 border-success/20"
-                              : "bg-amber-500/10 border-amber-500/20"
-                          }`}>
-                            <div className="flex items-start gap-2">
-                              <AlertCircle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-                                stock.decision === t("watchlist.entry") ? "text-success" : "text-amber-600 dark:text-amber-400"
-                              }`} />
-                              <div className="flex-1">
-                                <p className={`text-sm font-semibold mb-1 ${
-                                  stock.decision === t("watchlist.entry") ? "text-success" : "text-amber-600 dark:text-amber-400"
-                                }`}>
-                                  {t("watchlist.decision")}: {stock.decision}
-                                  {stock.scenario?.entry_checklist_passed !== undefined && (
-                                    <span className="ml-2 text-xs text-muted-foreground">
-                                      ({t("watchlist.entryChecklist")}: {stock.scenario.entry_checklist_passed}/6)
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-sm text-foreground leading-relaxed">{stock.skip_reason}</p>
-                                {stock.scenario?.rejection_reason && stock.decision !== t("watchlist.entry") && (
-                                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                                    {t("watchlist.rejectionReason")}: {stock.scenario.rejection_reason}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
+                          {(stock.scenario?.max_portfolio_size || stock.max_portfolio_size) && (
+                            <TextBlock label={t("modal.maxPortfolioSize")}>
+                              <span className={NUM}>
+                                {stock.scenario?.max_portfolio_size || stock.max_portfolio_size}{t("watchlist.stocksUnit")}
+                              </span>
+                            </TextBlock>
+                          )}
 
-                          {/* AI 분석 상세 (확장 가능) */}
-                          <div className="flex gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => toggleExpand(stock.id)}
-                              className="flex-1"
-                            >
-                              <Brain className="w-4 h-4 mr-2" />
-                              {t("watchlist.aiAnalysisDetails")}
-                              {isExpanded ? <ChevronUp className="w-4 h-4 ml-2" /> : <ChevronDown className="w-4 h-4 ml-2" />}
-                            </Button>
-                            
-                            {stock.full_json_data && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setSelectedScenario(stock.full_json_data)}
-                              >
-                                <FileJson className="w-4 h-4 mr-2" />
-                                JSON
-                              </Button>
-                            )}
-                          </div>
+                          {stock.portfolio_analysis && (
+                            <TextBlock label={t("modal.portfolioAnalysis")}>{stock.portfolio_analysis}</TextBlock>
+                          )}
 
-                          {isExpanded && (
-                            <div className="space-y-3 pt-2 border-t border-border/30">
-                                  {stock.rationale && (
-                                    <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-                                      <p className="text-xs font-semibold text-primary mb-2">{t("watchlist.tradingRationale")}</p>
-                                      <p className="text-sm text-foreground leading-relaxed">{stock.rationale}</p>
-                                    </div>
-                                  )}
+                          {stock.valuation_analysis && (
+                            <TextBlock label={t("modal.valuationAnalysis")}>{stock.valuation_analysis}</TextBlock>
+                          )}
 
-                                  {(stock.scenario?.max_portfolio_size || stock.max_portfolio_size) && (
-                                    <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
-                                      <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-2">{t("modal.maxPortfolioSize")}</p>
-                                      <p className="text-sm text-foreground leading-relaxed">
-                                        {stock.scenario?.max_portfolio_size || stock.max_portfolio_size}{t("watchlist.stocksUnit")}
-                                      </p>
-                                    </div>
-                                  )}
+                          {stock.sector_outlook && (
+                            <TextBlock label={t("modal.sectorOutlook")}>{stock.sector_outlook}</TextBlock>
+                          )}
 
-                                  {stock.portfolio_analysis && (
-                                    <div className="p-4 rounded-lg bg-muted/50 border border-border/30">
-                                      <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.portfolioAnalysis")}</p>
-                                      <p className="text-sm text-foreground leading-relaxed">{stock.portfolio_analysis}</p>
-                                    </div>
-                                  )}
+                          {stock.market_condition && (
+                            <TextBlock label={t("modal.marketCondition")}>{stock.market_condition}</TextBlock>
+                          )}
 
-                                  {stock.valuation_analysis && (
-                                    <div className="p-4 rounded-lg bg-muted/50 border border-border/30">
-                                      <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.valuationAnalysis")}</p>
-                                      <p className="text-sm text-foreground leading-relaxed">{stock.valuation_analysis}</p>
-                                    </div>
-                                  )}
+                          {ts && (
+                            <div className="space-y-3 rounded-md border p-3">
+                              <p className="text-xs font-medium text-foreground">{t("modal.tradingScenarios")}</p>
 
-                                  {stock.sector_outlook && (
-                                    <div className="p-4 rounded-lg bg-muted/50 border border-border/30">
-                                      <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.sectorOutlook")}</p>
-                                      <p className="text-sm text-foreground leading-relaxed">{stock.sector_outlook}</p>
-                                    </div>
-                                  )}
+                              {ts.key_levels && typeof ts.key_levels === 'object' && (
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1.5">{t("modal.keyPriceLevels")}</p>
+                                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                    {Object.entries(ts.key_levels).map(([key, value]) => {
+                                      const labelMap: Record<string, string> = {
+                                        'primary_support': t("modal.primarySupport"),
+                                        'secondary_support': t("modal.secondarySupport"),
+                                        'primary_resistance': t("modal.primaryResistance"),
+                                        'secondary_resistance': t("modal.secondaryResistance"),
+                                        'volume_baseline': t("modal.volumeBaseline")
+                                      }
+                                      const label = labelMap[key] || key
+                                      const text = String(value)
+                                      // Prose values (e.g. volume baseline notes) read better in sans across the full row.
+                                      const isProse = text.length > 24
 
-                                  {stock.market_condition && (
-                                    <div className="p-4 rounded-lg bg-muted/50 border border-border/30">
-                                      <p className="text-xs font-semibold text-muted-foreground mb-2">{t("modal.marketCondition")}</p>
-                                      <p className="text-sm text-foreground leading-relaxed">{stock.market_condition}</p>
-                                    </div>
-                                  )}
-
-                                  {(stock.scenario?.trading_scenarios || stock.trading_scenarios) && (
-                                    <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                                      <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-3">{t("modal.tradingScenarios")}</p>
-                                      <div className="space-y-3">
-                                        {(() => {
-                                          const ts = stock.scenario?.trading_scenarios || stock.trading_scenarios
-                                          if (!ts) return null
-
-                                          return (
-                                            <>
-                                              {ts.key_levels && typeof ts.key_levels === 'object' && (
-                                                <div>
-                                                  <p className="text-xs font-medium text-muted-foreground mb-2">{t("modal.keyPriceLevels")}</p>
-                                                  <div className="grid grid-cols-2 gap-2">
-                                                    {Object.entries(ts.key_levels).map(([key, value]) => {
-                                                      const labelMap: Record<string, string> = {
-                                                        'primary_support': t("modal.primarySupport"),
-                                                        'secondary_support': t("modal.secondarySupport"),
-                                                        'primary_resistance': t("modal.primaryResistance"),
-                                                        'secondary_resistance': t("modal.secondaryResistance"),
-                                                        'volume_baseline': t("modal.volumeBaseline")
-                                                      }
-                                                      const label = labelMap[key] || key
-                                                      
-                                                      return (
-                                                        <div key={key} className="p-2 rounded bg-background/50 border border-border/30">
-                                                          <p className="text-xs text-muted-foreground">{label}</p>
-                                                          <p className="text-sm font-semibold text-foreground">
-                                                            {String(value)}
-                                                          </p>
-                                                        </div>
-                                                      )
-                                                    })}
-                                                  </div>
-                                                </div>
-                                              )}
-                                              
-                                              {ts.sell_triggers && Array.isArray(ts.sell_triggers) && ts.sell_triggers.length > 0 && (
-                                                <div>
-                                                  <p className="text-xs font-medium text-muted-foreground mb-2">{t("modal.sellTriggers")}</p>
-                                                  <ul className="space-y-1">
-                                                    {ts.sell_triggers.map((trigger, idx) => (
-                                                      <li key={idx} className="text-sm text-foreground flex items-start gap-2">
-                                                        <span className="text-destructive mt-1">•</span>
-                                                        <span className="flex-1">{trigger}</span>
-                                                      </li>
-                                                    ))}
-                                                  </ul>
-                                                </div>
-                                              )}
-
-                                              {ts.hold_conditions && Array.isArray(ts.hold_conditions) && ts.hold_conditions.length > 0 && (
-                                                <div>
-                                                  <p className="text-xs font-medium text-muted-foreground mb-2">{t("modal.holdConditions")}</p>
-                                                  <ul className="space-y-1">
-                                                    {ts.hold_conditions.map((condition, idx) => (
-                                                      <li key={idx} className="text-sm text-foreground flex items-start gap-2">
-                                                        <span className="text-success mt-1">•</span>
-                                                        <span className="flex-1">{condition}</span>
-                                                      </li>
-                                                    ))}
-                                                  </ul>
-                                                </div>
-                                              )}
-
-                                              {ts.portfolio_context && (
-                                                <div>
-                                                  <p className="text-xs font-medium text-muted-foreground mb-2">{t("modal.portfolioContext")}</p>
-                                                  <p className="text-sm text-foreground leading-relaxed">
-                                                    {ts.portfolio_context}
-                                                  </p>
-                                                </div>
-                                              )}
-                                            </>
-                                          )
-                                        })()}
-                                      </div>
-                                    </div>
-                                  )}
+                                      return (
+                                        <div key={key} className={`min-w-0 ${isProse ? "col-span-2" : ""}`}>
+                                          <dt className="text-[11px] text-muted-foreground">{label}</dt>
+                                          <dd className={`text-[13px] text-foreground break-words ${isProse ? "leading-relaxed max-w-[70ch]" : "font-mono tabular-nums"}`}>{text}</dd>
+                                        </div>
+                                      )
+                                    })}
+                                  </dl>
                                 </div>
                               )}
+
+                              {ts.sell_triggers && Array.isArray(ts.sell_triggers) && ts.sell_triggers.length > 0 && (
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1.5">{t("modal.sellTriggers")}</p>
+                                  <ul className="space-y-1 max-w-[70ch]">
+                                    {ts.sell_triggers.map((trigger, idx) => (
+                                      <li key={idx} className="text-[13px] text-foreground/90 flex items-start gap-2">
+                                        <span className="text-destructive" aria-hidden="true">•</span>
+                                        <span className="flex-1">{trigger}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {ts.hold_conditions && Array.isArray(ts.hold_conditions) && ts.hold_conditions.length > 0 && (
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1.5">{t("modal.holdConditions")}</p>
+                                  <ul className="space-y-1 max-w-[70ch]">
+                                    {ts.hold_conditions.map((condition, idx) => (
+                                      <li key={idx} className="text-[13px] text-foreground/90 flex items-start gap-2">
+                                        <span className="text-success" aria-hidden="true">•</span>
+                                        <span className="flex-1">{condition}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {ts.portfolio_context && (
+                                <TextBlock label={t("modal.portfolioContext")}>{ts.portfolio_context}</TextBlock>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      </CardContent>
-                    </Card>
+                      )}
+                    </div>
                   )
                 })}
               </div>
@@ -468,10 +388,14 @@ export function WatchlistPage({ watchlist, market = "KR" }: WatchlistPageProps) 
       </div>
 
       {watchlist.length === 0 && (
-        <Card className="border-border/50">
-          <CardContent className="p-12 text-center">
-            <Eye className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-            <p className="text-muted-foreground">{t("watchlist.noData")}</p>
+        <Card className={CARD}>
+          <CardContent className="p-4 sm:p-5">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{t("watchlist.noData")}</span>{" "}
+              {language === "ko"
+                ? "AI가 분석했지만 진입하지 않은 종목이 여기에 표시됩니다."
+                : "Stocks the AI analyzed but did not enter will appear here."}
+            </p>
           </CardContent>
         </Card>
       )}
@@ -480,13 +404,10 @@ export function WatchlistPage({ watchlist, market = "KR" }: WatchlistPageProps) 
       <Dialog open={!!selectedScenario} onOpenChange={(open) => !open && setSelectedScenario(null)}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileJson className="w-5 h-5" />
-              Scenario JSON Data
-            </DialogTitle>
+            <DialogTitle className="text-sm font-medium">Scenario JSON Data</DialogTitle>
           </DialogHeader>
-          <div className="mt-4">
-            <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
+          <div className="mt-2">
+            <div className="p-4 rounded-md bg-muted/40 border">
               <pre className="text-xs font-mono overflow-x-auto">
                 {JSON.stringify(selectedScenario, null, 2)}
               </pre>
