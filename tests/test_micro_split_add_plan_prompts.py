@@ -127,7 +127,7 @@ async def main():
     flag("true")
     data = stock()
     await agent._analyze_sell_decision(data)
-    expected = micro_split_live.review_prompt_block(data["scenario"], market=market, language=prompt_language,
+    expected = micro_split_live.review_prompt_block(data["scenario"], market=market, language=language,
                                                     stop_loss=9300)
     assert expected.startswith("\n\n### ") and prompts[-1] == reviews[0] + expected
     stored = block()["add_plan"]

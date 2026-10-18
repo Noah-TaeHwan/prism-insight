@@ -167,8 +167,11 @@ def test_guard_allows_runner_exits_hard_stop_corporate_events_and_non_runners():
     common = dict(current_price=130, stop_loss=100, buy_price=100, reason="목표가 도달")
     assert R.sell_verdict(protected=True, exit_code="MA50_CLOSE", **common) == (True, "MA50_CLOSE")
     assert R.sell_verdict(protected=True, exit_code="BREAKEVEN_CLOSE", **common) == (True, "BREAKEVEN_CLOSE")
-    assert R.sell_verdict(protected=True, exit_code=None, current_price=99.9, stop_loss=100, buy_price=100,
+    assert R.sell_verdict(protected=True, exit_code=None, current_price=99.4, stop_loss=100, buy_price=100,
                           reason="x") == (True, "HARD_STOP")
+    # a touch inside the 0.5% wick buffer is not the hard stop (same rule as cores/oneil_fallback.py)
+    assert R.sell_verdict(protected=True, exit_code=None, current_price=99.9, stop_loss=100, buy_price=100,
+                          reason="x") == (False, "OTHER")
     for reason in ("TIER0_EVENT:KIS_STATUS:51(관리종목)", "[법인이벤트] 공개매수", "[CORP_EVENT] tender offer"):
         assert R.sell_verdict(protected=True, exit_code=None, current_price=130, stop_loss=100, buy_price=100,
                               reason=reason) == (True, "CORPORATE_EVENT")

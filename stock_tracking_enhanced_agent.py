@@ -1659,14 +1659,17 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             except:
                 pass
 
-            # Hard mechanical stop-loss check BEFORE AI — cannot be overridden
-            if stop_loss > 0 and current_price <= stop_loss:
+            # Hard mechanical stop BEFORE AI — the intraday hard stop's own rule (stop x 0.995 or -7%),
+            # so a touch inside the 0.5% wick buffer goes to the AI as the prompt says.
+            from cores.oneil_fallback import SellInputs, evaluate_tier1_hardstop
+            if evaluate_tier1_hardstop(SellInputs(buy_price=float(buy_price or 0), current_price=float(current_price or 0),
+                                                  stop_loss=float(stop_loss or 0)))[0]:
                 loss_pct = ((current_price - buy_price) / buy_price * 100) if buy_price > 0 else 0
                 logger.info(f"{ticker} 기계적 손절 조건 도달 (손절가: {stop_loss:,.0f}원) — AI 판단 생략")
                 return True, (
-                    f"사전 설정 손절가({stop_loss:,.0f}원) 도달로 기계적 손절 실행.\n"
+                    f"사전 설정 손절가({stop_loss:,.0f}원, 장중 0.5% 여유 포함) 또는 -7% 절대 손절 도달로 기계적 손절 실행.\n"
                     f"현재가 {current_price:,.0f}원 / 매수가 {buy_price:,.0f}원 / 손실률 {loss_pct:.1f}%.\n"
-                    f"손절가 이하 하락 시 AI 판단 없이 즉시 매도하는 규칙에 따라 처리되었습니다."
+                    f"손절선 이탈 시 AI 판단 없이 즉시 매도하는 규칙에 따라 처리되었습니다."
                 )
 
             # Collect current portfolio information
@@ -1800,6 +1803,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 - Target Price: {target_price:,.0f} KRW (initial scenario: {initial_target_price:,.0f} KRW)
                 - Stop Loss: {stop_loss:,.0f} KRW (initial scenario: {initial_stop_loss:,.0f} KRW)
                 - Highest Price Since Entry: {highest_price:,.0f} KRW{' (⚠️ First tracking - verify the peak from the session after entry via get_stock_ohlcv. Leave out the entry-day high, which may predate the buy; if bought today, use this value as is)' if highest_price_initialized else ''}
+                - Trailing Stop Adjustment Threshold: {trailing_stop_threshold_pct:.1f}% (adjust the stop only if the new value is at least this much higher)
                 - Return: {profit_rate:.2f}%
                 - Holding Period: {days_passed} days
                 - Investment Period: {period}
@@ -2000,7 +2004,21 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                                       await self._fallback_sell_decision(stock_data))
 
     async def _fallback_sell_decision(self, stock_data):
-        """Legacy algorithm-based sell decision (fallback)"""
+        """Rule-based sell decision when the AI reply is empty, unparsable or errored.
+
+        Same O'Neil rules as the base tracker (cores/oneil_fallback.py with the live regime):
+        stop / -7% / trailing only. The legacy rules below (target, +10%, 15/30/60/90-day holds)
+        contradict the SELL prompt and run only if the O'Neil module fails.
+        """
+        try:
+            from cores.oneil_fallback import evaluate_oneil_sell, from_stock_data
+            should_sell, reason = evaluate_oneil_sell(
+                from_stock_data(stock_data, live_regime=getattr(self, "_live_regime_cache", None)))
+            logger.info(f"{stock_data.get('ticker', '')} O'Neil rule-based sell (AI fallback): "
+                        f"{'Sell' if should_sell else 'Hold'} | {reason}")
+            return should_sell, reason
+        except Exception as e:
+            logger.error(f"O'Neil fallback error, using legacy rules: {e}")
         try:
             ticker = stock_data.get('ticker', '')
             buy_price = stock_data.get('buy_price', 0)
