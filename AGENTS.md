@@ -39,6 +39,8 @@ keep this file to "what to always know" and "where to look first".
 - 매매 규칙은 KR·US를 같은 방향으로 바꾼다. 한쪽에서 정한 결정을 다른 쪽에서 다시 묻지 않는다.
 - 사용자 보고는 한국어, 쉬운 투자자 용어로 짧게(결론·핵심 숫자·다음 행동) 한다. 내부 약어는 풀어 쓴다.
   사용자는 모바일로 보므로 결과 본문을 대화에 직접 붙이고, 파일 경로는 덧붙이는 용도로만 쓴다.
+- 매매 사실(왜 샀나·팔았나, 어떤 점수·국면·관문이었나, 체결됐나)은 ClickStack 원장을 먼저 조회해 답한다.
+  매매 한 건은 `trace_id` 하나로 스크리닝부터 매도까지 이어진다(`tools/clickstack_query.py`). 원장에 없으면 MISSING이다.
 
 ## 넘지 않는 선
 
@@ -62,6 +64,7 @@ keep this file to "what to always know" and "where to look first".
 | 뉴스·테마 작업 | `docs/THEME_NEWS_ROADMAP_ko.md` | |
 | 배포·장애 수리 | `docs/SERVER_GIT_OPERATIONS_ko.md`의 변경 범위별 검증 게이트 | |
 | 2주 정기 점검 | `docs/TWO_WEEK_REVIEW_ko.md`, 하네스의 프롬프트 주기 점검 | `tools/two_week_review.py` |
+| 매매 복기, 특정 종목·포지션의 판단 경과 | `docs/PRISM_OBSERVABILITY.md`의 "Trace linkage" | `prism-trade-review`, `tools/clickstack_query.py` |
 | 새 가설·관측 등록, 지금 LIVE·SHADOW 상태 확인 | `docs/HYPOTHESIS_REGISTRY_ko.md`(등록일 기록, 2주 점검 때 재측정) | `tools/feature_status.py` |
 
 ## 이 헌장이 들어오는 길
@@ -69,7 +72,7 @@ keep this file to "what to always know" and "where to look first".
 공용 지침은 `AGENTS.md` 하나다. Codex는 그대로 읽고, Claude는 `CLAUDE.md` 맨 위의 `@AGENTS.md`로 읽는다
 (둘 다 있으면 Claude는 `CLAUDE.md`만 읽으므로 이 가져오기가 없으면 `AGENTS.md`가 안 보인다). Codex는 가져오기를
 못 하므로 이 헌장은 `AGENTS.md`에 사본으로 들어가고, 고칠 때는 이 파일을 고친 뒤 `tools/harness/sync_agents_core.py`를
-실행한다. 매매·BTC·분석·배포 관련 질문이나 매매·BTC 파일 수정 때는 훅이 요약을 다시 넣는다(`tools/harness/hook.py`,
+실행한다. 매매·BTC·복기·분석·배포 관련 질문이나 매매·BTC 파일 수정 때는 훅이 요약을 다시 넣는다(`tools/harness/hook.py`,
 막지 않음, Claude는 대화 압축 뒤 전체 요약을 다시 보여 준다). 스킬은 `skills/`에 있고 `.claude/skills/`와
 `.agents/skills/`가 같은 폴더를 가리킨다. 규칙 내용은 원문 문서에서만 고치고, 감지 단어·매매 파일 목록은 `hook.py`에서 조정한다.
 <!-- HARNESS_CORE:END -->
@@ -191,6 +194,13 @@ Troubleshooting (Playwright, fonts, KIS auth, OAuth proxy …): `docs/CLAUDE_TRO
 - Before work on KIS headlines, headline stores, theme maps, theme briefs, `/theme`·`/signal` evidence or
   research using news/theme data, read `docs/THEME_NEWS_ROADMAP_ko.md`, name the step ID (R*/U*) and follow
   its order. News/theme is reference material, never a buy/hold/sell rule.
+
+### Trade review (ClickStack ledger)
+
+- Route "왜 샀어/팔았어", "이 종목 복기", fill checks and any question about what the system decided through
+  `skills/prism-trade-review/SKILL.md`: query the ClickStack ledger first with `tools/clickstack_query.py`
+  (`ticker`, then `trace <trace_id>`; read-only, via db-server). Use server SQLite or log grep only for
+  gaps the ledger does not cover, and keep absent events `MISSING`. One trade is a fact check, not rule evidence.
 
 ### Entry-quality analysis
 

@@ -125,7 +125,9 @@ deduplicates and compares these cohorts without claiming fills or account PnL.
 
 ## Trace linkage
 
-One `trace_id` reads a decision end to end. The id is
+One `trace_id` reads a decision end to end. Read it with `tools/clickstack_query.py`
+(`ticker <TICKER>`, `trace <trace_id>`; read-only, through db-server); review steps are in
+`skills/prism-trade-review/SKILL.md`. The id is
 `sha256("trade-trace|<MARKET>|<decision_id>")[:32]` (`observability.trading_context`).
 
 - **Screening → position**: when `candidate.evaluated` is emitted for a `report:<pdf>`
