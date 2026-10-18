@@ -345,7 +345,7 @@ risk_reward_ratio  = expected_return_pct / expected_loss_pct
   확인하십시오. 보고서 입력은 텍스트이므로 차트 이미지를 직접 보았다고 하거나 보이지 않는 차트의 수치를
   추정하지 마십시오.
 - `perplexity-ask`: 위 확인 후에도 판단에 중요한 동종업계 P/E 비교가 없을 때만, 남은 항목을 묶어 통합 질의
-  최대 1회로 보완하십시오(예: "[Stock name] P/E P/B vs [Sector] industry average and major peer competitors").
+  최대 1회로 보완하십시오(예: "[Stock name] P/E P/B vs [Sector] industry average and major peer competitors valuation comparison").
   이미 있는 근거를 재검색하거나 같은 질문을 반복하거나 실패·타임아웃된 보완 조회를 재시도하지 마십시오.
   기존 실행 제한 시간을 지키고 시간이 부족하면 조회 대신 NOT_REQUESTED로 남기십시오.
   질문에 현재 날짜를 포함하고, 답변의 날짜를 항상 검증하십시오.
@@ -752,7 +752,7 @@ If the resulting R/R is below the matrix floor for the current regime → No Ent
   to inspect chart images or infer an unseen chart's values.
 - `perplexity-ask`: only if a decision-material sector/peer PE comparison remains missing after that
   inspection, use at most ONE consolidated query for the remaining gaps (e.g. "[Stock name] P/E P/B vs
-  [Sector] industry average and major peer competitors"). Do not research evidence already present, repeat
+  [Sector] industry average and major peer competitors valuation comparison"). Do not research evidence already present, repeat
   equivalent queries, or retry an unavailable/timed-out supplemental lookup. Stay within the existing
   execution deadline; if no time remains, record NOT_REQUESTED instead of researching.
   Include the current date in the query and verify the date returned in the response.

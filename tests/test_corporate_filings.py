@@ -106,7 +106,8 @@ def test_every_trading_prompt_reads_official_filings():
     for name, needles in {
         "stock_tracking_agent.py": ['"KR", ticker, language=self.language, purpose="buy"'],
         "stock_tracking_enhanced_agent.py": ['"KR", ticker, buy_date=buy_date, language=self.language, purpose="sell"'],
-        "prism-us/us_stock_tracking_agent.py": ['"US", ticker, language="en", purpose="buy"',
+        # 2026-10-19: the US BUY filing block follows the agent language like KR (was fixed "en").
+        "prism-us/us_stock_tracking_agent.py": ['"US", ticker, language=getattr(self, "language", "ko"), purpose="buy"',
                                                 '"US", ticker, buy_date=buy_date, language=getattr(self, "language", "en"), purpose="sell"'],
     }.items():
         source = (root / name).read_text(encoding="utf-8")
