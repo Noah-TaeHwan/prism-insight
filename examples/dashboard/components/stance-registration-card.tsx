@@ -85,19 +85,19 @@ export function StanceRegistrationCard({ ko }: { ko: boolean }) {
 
   if (registration) {
     return (
-      <Card className="border-emerald-500/40 overflow-hidden">
-        <CardHeader className="bg-emerald-500/10">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <KeyRound className="h-5 w-5 text-emerald-600" />
+      <Card className="gap-0 py-0 rounded-lg shadow-none">
+        <CardHeader className="px-5 pt-4 pb-3 border-b">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium">
+            <KeyRound className="h-4 w-4 text-success" aria-hidden="true" />
             {ko ? "전략 등록 완료" : "Strategy registered"}
-            <Badge variant="outline" className="ml-auto font-mono">{registration.strategy}</Badge>
+            <Badge variant="outline" className="ml-auto font-mono text-[11px] font-normal text-muted-foreground">{registration.strategy}</Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-6 space-y-5">
+        <CardContent className="p-4 sm:p-5 space-y-5">
           <div>
             <Label>{ko ? "연결용 비밀키 · 지금 한 번만 표시" : "Secret connection key · shown once"}</Label>
             <div className="mt-2 flex gap-2">
-              <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-slate-950 px-3 py-2.5 text-sm text-emerald-300">
+              <code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted px-3 py-2.5 font-mono text-[13px] text-foreground">
                 {registration.api_key}
               </code>
               <Button type="button" variant="outline" onClick={copyKey} aria-label={ko ? "API 키 복사" : "Copy API key"}>
@@ -113,10 +113,10 @@ export function StanceRegistrationCard({ ko }: { ko: boolean }) {
 
           <div>
             <Label>{ko ? "전략이 기록을 보낼 주소" : "Where the strategy sends records"}</Label>
-            <code className="mt-2 block overflow-x-auto rounded-md bg-muted px-3 py-2.5 text-sm">{publicApiBase}</code>
+            <code className="mt-2 block overflow-x-auto rounded-md border bg-muted px-3 py-2.5 font-mono text-[13px]">{publicApiBase}</code>
           </div>
 
-          <pre className="overflow-x-auto rounded-lg bg-slate-950 p-4 text-[11px] leading-relaxed text-slate-100">
+          <pre className="overflow-x-auto rounded-md border bg-muted p-4 font-mono text-[11px] leading-relaxed text-foreground">
 {`curl -X POST ${publicApiBase}/stances \\
   -H "Authorization: Bearer ${registration.api_key}" \\
   -H "Content-Type: application/json" \\
@@ -129,16 +129,16 @@ export function StanceRegistrationCard({ ko }: { ko: boolean }) {
 
   return (
     <Collapsible open={manualOpen} onOpenChange={setManualOpen}>
-      <Card className="border-border/60">
+      <Card className="gap-0 py-0 rounded-lg shadow-none">
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex w-full items-center justify-between gap-4 rounded-xl px-6 py-4 text-left transition-colors hover:bg-muted/40"
+            className="flex w-full items-center justify-between gap-4 rounded-lg px-5 py-4 text-left transition-colors hover:bg-muted/40"
           >
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+              <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
                 {ko ? "AI 없이 직접 등록하기" : "Register without an AI"}
-                <Badge variant="secondary">{ko ? "선택" : "Optional"}</Badge>
+                <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">{ko ? "선택" : "Optional"}</Badge>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {ko
@@ -147,13 +147,13 @@ export function StanceRegistrationCard({ ko }: { ko: boolean }) {
               </p>
             </div>
             <ChevronDown
-              className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${manualOpen ? "rotate-180" : ""}`}
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${manualOpen ? "rotate-180" : ""}`}
               aria-hidden="true"
             />
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="border-t border-border/60 pt-6">
+          <CardContent className="border-t p-4 sm:p-5">
         <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="stance-strategy">{ko ? "전략 주소용 ID (영문)" : "Strategy ID for URLs"}</Label>
@@ -215,11 +215,11 @@ export function StanceRegistrationCard({ ko }: { ko: boolean }) {
             </div>
           </div>
 
-          <details className="sm:col-span-2 rounded-lg border border-border/60 bg-muted/20">
+          <details className="sm:col-span-2 rounded-md border">
             <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
               {ko ? "선택사항 · 전략을 소개하고 링크 알리기" : "Optional · Introduce and link your strategy"}
             </summary>
-            <div className="grid gap-4 border-t border-border/60 p-4 sm:grid-cols-2">
+            <div className="grid gap-4 border-t p-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="stance-owner">{ko ? "운영자·팀 이름" : "Operator or team"}</Label>
                 <Input id="stance-owner" value={ownerName} onChange={(event) => setOwnerName(event.target.value)} maxLength={100} />
