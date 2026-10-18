@@ -23,6 +23,12 @@ def _bootstrap_path(market):
     root, us = str(ROOT), str(ROOT / "prism-us")
     for path in ((root, str(ROOT / "prism-us" / "trading"), us) if market == "US" else (us, root)):
         sys.path.insert(0, path)
+    if market == "US":
+        # Pin the US packages before us_stock_tracking_agent prepends the shared root: otherwise
+        # `cores` resolves to the KR package and the import fails (US re-entry orders, 10/14·10/17).
+        import cores  # noqa: F401
+        import tracking  # noqa: F401
+        import trading  # noqa: F401
 
 
 async def open_agent(market):
