@@ -86,9 +86,11 @@ def test_decision_rules_and_json_schema_are_byte_preserved(prompt):
     # 2a target is an R/R reference that never sells, parabolic copied from the system regime only, distribution
     # days from the Market Pulse line with the bull step-down and rebound-pilot cases, opening-hour exceptions,
     # ko MA-citation guard, en journal section, sell_triggers example = exit-code bands and SELL Tier 3.
+    # 2026-10-19 reviewed: rules hash only — max_portfolio_size is decided from the system regime and the Market
+    # Pulse line and is compared with slot-weighted usage (PR-C). JSON unchanged.
     expected = {
-        "ko": ("2a2cafc8fbf9c6ade07314f4f9a84ac36be0bd9f9579558a7c4242a86aa2d728", "e8a523079136e32d6438a38c2c2b5829cb4cac4779ed115f44e493f34c34a186"),
-        "en": ("b6c987a767ac0069d5cf155c8b23bfb902f76788f61e2c67622d89c97aed4aca", "7113ec5349731572675710f4feb317ea287a65400fa165cce5b9580b394d4639"),
+        "ko": ("094d9bad43593ccacf210f9708a62a9161d8c0f74dd33bfb51193a7a22527319", "e8a523079136e32d6438a38c2c2b5829cb4cac4779ed115f44e493f34c34a186"),
+        "en": ("e815a07e3dfe65093067e946949271d95e0a72cd7037cc82c917676657731baf", "7113ec5349731572675710f4feb317ea287a65400fa165cce5b9580b394d4639"),
     }
     assert hashlib.sha256(text.split(heading)[0].encode()).hexdigest() == expected[language][0]
     assert hashlib.sha256(text[text.index(json_heading):].encode()).hexdigest() == expected[language][1]

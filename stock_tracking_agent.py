@@ -726,6 +726,11 @@ class StockTrackingAgent:
         account_key, _ = self._account_scope()
         return get_current_slots_count(self.cursor, account_key=account_key)
 
+    def _holding_scenarios(self) -> list:
+        """Stored scenarios of the current account's holdings (for slot-weighted usage)."""
+        self.cursor.execute("SELECT scenario FROM stock_holdings WHERE account_key = ?", (self._account_scope()[0],))
+        return [row[0] for row in self.cursor.fetchall()]
+
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector (delegates to tracking.helpers)"""
         account_key, _ = self._account_scope()
@@ -1175,9 +1180,12 @@ class StockTrackingAgent:
                 except:
                     pass
 
-            # Portfolio info string
+            # Portfolio info string (2026-10-19: slot-weighted usage is what max_portfolio_size is compared with)
+            from prism_core.micro_split_live import usage_line
+            _usage = usage_line(current_slots, [h.get("scenario") for h in holdings], self.max_slots, self.language)
             portfolio_info = f"""
             Current holdings: {current_slots}/{self.max_slots}
+            {_usage}
             Sector distribution: {json.dumps(sector_distribution, ensure_ascii=False)}
             Investment period distribution: {json.dumps(investment_periods, ensure_ascii=False)}
             """
@@ -2715,8 +2723,12 @@ class StockTrackingAgent:
                     max_portfolio_size = int(max_portfolio_size)
                 except (ValueError, TypeError):
                     max_portfolio_size = self.max_slots
-            if current_slots >= max_portfolio_size:
-                logger.warning(f"Reached market-based max portfolio size ({max_portfolio_size}). Current holdings: {current_slots}")
+            # 2026-10-19: the AI cap is compared with slot-weighted usage (legacy rows = 1), not row count.
+            from prism_core.micro_split_live import ai_cap_reached, used_slots
+            _holding_scenarios = self._holding_scenarios()
+            if ai_cap_reached(_holding_scenarios, max_portfolio_size):
+                logger.warning(f"Reached market-based max portfolio size ({max_portfolio_size}). "
+                               f"Slot-weighted usage: {used_slots(_holding_scenarios):.2f} ({current_slots} holdings)")
                 return LegacyPositionWriteResult(False, None)
 
             # Current time

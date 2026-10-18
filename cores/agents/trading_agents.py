@@ -235,7 +235,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
 
         - 7+ holdings → only consider buy_score ≥ 6 regardless of regime
         - 2+ holdings in the same sector → must justify additional sector concentration in rationale
-        - max_portfolio_size: derive from the report's market risk level (range 6~10)
+        - max_portfolio_size: decide it (range 6~10) from the system market regime (market_regime) and the Market Pulse distribution-day line in the input. The system compares it with the slot-weighted usage, not the number of holdings (non-micro-split holdings count as 1 slot; see the 'slot-weighted usage' line in the portfolio status), and blocks new buys when usage reaches it.
         - Multi-account (v2.9.0+): query stock_holdings filtered by `account_id = 'primary'` (or no filter
           if column absent). max_portfolio_size refers to the primary account slot count.
 
@@ -637,7 +637,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
 
         - 보유 종목 7개 이상 → 시장 체제와 무관하게 buy_score 6점 이상만 고려
         - 동일 산업군 2개 이상 보유 → rationale에 sector concentration 사유 명시 필수
-        - max_portfolio_size: 보고서의 시장 리스크 레벨에 따라 6~10 사이로 결정
+        - max_portfolio_size: 입력에 주어진 시스템 시장 국면(market_regime)과 개별 추세 팩트의 Market Pulse 분산일 줄을 근거로 6~10 사이로 정하십시오. 시스템은 이 값을 보유 종목 수가 아니라 실제 사용 비중(슬롯 가중 합, 초분할이 아닌 종목은 1슬롯)과 비교해 신규 매수를 막습니다(보유 현황의 '실제 사용 비중' 줄).
         - 다중 계좌 환경(v2.9.0+): stock_holdings를 `account_id = 'primary'` 필터로 조회 (해당 컬럼이 없으면 필터 생략). max_portfolio_size는 primary 계좌 슬롯 수 기준입니다.
 
         ## 미진입 사유
