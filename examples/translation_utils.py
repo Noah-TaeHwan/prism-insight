@@ -10,7 +10,9 @@ from typing import Dict, Any, List
 
 from mcp_agent.agents.agent import Agent
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+# Responses API: Chat Completions sends max_tokens, which gpt-6 models reject (400),
+# and every dashboard translation fell back to Korean from 2026-10-01.
+from cores.llm.openai_responses_llm import OpenAIResponsesLLM
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,7 @@ Return ONLY the translated text without explanations or comments.
             return self.translation_cache[cache_key]
         
         try:
-            llm = await self.translation_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = await self.translation_agent.attach_llm(OpenAIResponsesLLM)
             translated = await llm.generate_str(
                 message=f"Translate the following Korean text to English:\n\n{text}",
                 request_params=RequestParams(
@@ -86,6 +88,9 @@ Return ONLY the translated text without explanations or comments.
             )
             
             translated = translated.strip()
+            if not translated:
+                logger.warning(f"Empty translation, keeping original: {text[:30]}...")
+                return text
 
             # Save to cache
             self.translation_cache[cache_key] = translated
@@ -131,7 +136,7 @@ Return ONLY the translated text without explanations or comments.
 
             batch_text = "\n\n".join(batch_input)
             
-            llm = await self.translation_agent.attach_llm(OpenAIAugmentedLLM)
+            llm = await self.translation_agent.attach_llm(OpenAIResponsesLLM)
             translated_batch = await llm.generate_str(
                 message=f"""Translate the following numbered Korean texts to English.
 Maintain the numbering format [1], [2], etc. in your response.
