@@ -169,3 +169,9 @@ def test_no_discretionary_sharp_decline_or_market_shock_sell(prompts):
     for key, text in prompts.items():
         assert "-5% 이상" not in text and "(-5%+)" not in text, key
         assert "방어적 전량 매도" not in text and "defensive full exit" not in text, key
+
+
+def test_prompts_defer_to_the_system_computed_facts(prompts):
+    # prism_core/sell_facts.py states the trailing line, raise eligibility and tier-3 conditions (2026-10-19).
+    for key, text in prompts.items():
+        assert ("'시스템 계산 사실' 블록" in text) or ("'System-computed facts' block" in text), key

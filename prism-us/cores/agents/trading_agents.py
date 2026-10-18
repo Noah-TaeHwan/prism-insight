@@ -967,6 +967,7 @@ def create_us_sell_decision_agent(language: str = "ko"):
 - 시스템 자동(AI 판단 아님): 손실 중(현재가 < 매수가)인 종목이 50일선×0.995 이하이면 장 마감 직전 자동 점검 또는 여러 날 연속 이탈 확인으로 전량 매도합니다.
 - 3단계: 추세 약화 점검(AI 판단) — 3거래일 연속 종가 하락 + 20일 평균 이상 거래량 + 20일선 종가 이탈, 3개 모두 충족
 - 시간 조건은 매도 트리거가 아닙니다. 추세 점검 시점일 뿐이며, 매도 결정은 위 1~3단계에서만 발동합니다.
+- 사용자 메시지에 '시스템 계산 사실' 블록이 있으면 트레일링 라인·손절선 상향 자격·3단계 조건·보유 거래일은 그 값을 그대로 쓰십시오.
 
 ### 매도 결정 우선순위 (손실은 짧게, 수익은 길게!)
 
@@ -1202,6 +1203,7 @@ Run the self-check only when that regime is missing or could not be computed.
 - System-run (not your decision): a position in loss (price below entry) at or below its 50-day MA × 0.995 is sold in full by the pre-close automatic check or after a breach over several consecutive days.
 - Tier 3: Trend-weakness check (your judgement): 3 consecutive daily-closing declines + volume above its 20-day average + close below 20d MA — ALL three required.
 - Time-based conditions are NOT sell triggers; they are trend-review checkpoints only. Sell decisions fire only via Tiers 1~3.
+- When the user message has the 'System-computed facts' block, use its trailing line, stop-raise eligibility, tier-3 conditions and sessions held as given.
 
 ### Sell Decision Priority (Cut Losses Short, Let Profits Run!)
 
