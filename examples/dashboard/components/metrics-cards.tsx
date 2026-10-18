@@ -1,10 +1,21 @@
 "use client"
 
-import { TrendingUp, TrendingDown, Wallet, DollarSign, PiggyBank, Zap, Clock } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { useLanguage } from "@/components/language-provider"
 import { formatCurrency as formatCurrencyUtil, getSeasonInfo, getDaysElapsed } from "@/lib/currency"
 import type { Summary, Market } from "@/types/dashboard"
+
+type Tone = "gain" | "loss" | "neutral"
+const TONE_CLASS: Record<Tone, string> = { gain: "text-success", loss: "text-destructive", neutral: "text-foreground" }
+
+interface Metric {
+  label: string
+  value: string
+  change: string
+  changeValue?: string
+  description?: string
+  tone: Tone
+}
 
 interface MetricsCardsProps {
   summary: Summary
@@ -57,19 +68,26 @@ export function MetricsCards({
   const seasonStartAmount = seasonInfo.startAmount
   const totalAssetsReturn = totalAssets > 0 ? ((totalAssets - seasonStartAmount) / seasonStartAmount) * 100 : 0
 
-  // Market-specific colors
   const isUSMarket = market === "US"
-  const primaryGradient = isUSMarket ? "from-emerald-500/20 to-emerald-500/5" : "from-blue-500/20 to-blue-500/5"
-  const secondaryGradient = isUSMarket ? "from-teal-500/20 to-teal-500/5" : "from-indigo-500/20 to-indigo-500/5"
-  const sectionGradient = isUSMarket ? "from-emerald-500 to-teal-500" : "from-blue-500 to-indigo-500"
-  const sectionTextColor = isUSMarket ? "text-emerald-600 dark:text-emerald-400" : "text-blue-600 dark:text-blue-400"
+  const toneOf = (v: number): Tone => (v > 0 ? "gain" : v < 0 ? "loss" : "neutral")
 
   // 현금 비율 계산 (total_cash 사용: D+2 포함 총 현금, fallback으로 deposit)
   const totalCash = summary.real_trading.total_cash || summary.real_trading.deposit || 0
   const cashRatio = totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0
   const investmentRatio = 100 - cashRatio
 
-  const realMetrics = [
+  const rt = summary.real_trading
+  const accountMissing = !(rt.total_eval_amount || rt.available_amount || rt.total_cash || rt.deposit || rt.total_stocks)
+  const missingNote = language === "ko" ? "계좌 조회값 없음 · 다음 갱신 때 표시" : "No account snapshot yet · shown after next refresh"
+
+  const realMetrics: Metric[] = accountMissing ? [
+    { label: t("metrics.realTotalAssets"), description: t("metrics.assetsDesc"), value: "—",
+      change: `${t("metrics.startAmount")} ${formatCurrency(seasonStartAmount)}`, changeValue: missingNote, tone: "neutral" },
+    { label: t("metrics.realHoldingsProfit"), description: t("metrics.excludeRealized"), value: "—",
+      change: t("metrics.holdingsProfitDesc"), changeValue: missingNote, tone: "neutral" },
+    { label: t("metrics.cashAndStability"), description: t("metrics.cashStabilityDesc"), value: "—",
+      change: missingNote, tone: "neutral" },
+  ] : [
     {
       label: t("metrics.realTotalAssets"),
       value: formatCurrency(totalAssets),
@@ -78,9 +96,7 @@ export function MetricsCards({
         ? `${t("metrics.deposit")} ${formatCurrency(summary.real_trading.available_amount)} | ${summary.real_trading.total_stocks || 0}${t("metrics.stocks")}`
         : `${t("metrics.fullyInvested")} | ${summary.real_trading.total_stocks || 0}${t("metrics.stocks")}`,
       description: t("metrics.assetsDesc"),
-      isPositive: true,
-      icon: Wallet,
-      gradient: primaryGradient,
+      tone: toneOf(totalAssetsReturn),
     },
     {
       label: t("metrics.realHoldingsProfit"),
@@ -88,12 +104,7 @@ export function MetricsCards({
       change: formatPercent(summary.real_trading.total_profit_rate || 0),
       changeValue: t("metrics.holdingsProfitDesc"),
       description: t("metrics.excludeRealized"),
-      isPositive: (summary.real_trading.total_profit_amount || 0) >= 0,
-      icon: (summary.real_trading.total_profit_amount || 0) >= 0 ? TrendingUp : TrendingDown,
-      gradient:
-        (summary.real_trading.total_profit_amount || 0) >= 0
-          ? "from-success/20 to-success/5"
-          : "from-destructive/20 to-destructive/5",
+      tone: toneOf(summary.real_trading.total_profit_amount || 0),
     },
     {
       label: t("metrics.cashAndStability"),
@@ -101,17 +112,11 @@ export function MetricsCards({
       change: `${t("metrics.cashRatio")} ${cashRatio.toFixed(1)}%`,
       changeValue: `${t("metrics.investmentRatio")} ${investmentRatio.toFixed(1)}% | ${summary.real_trading.total_stocks || 0}${t("metrics.stocks")}`,
       description: t("metrics.cashStabilityDesc"),
-      isPositive: cashRatio >= 10,
-      icon: PiggyBank,
-      gradient: cashRatio >= 20
-        ? "from-emerald-500/20 to-emerald-500/5"
-        : cashRatio >= 10
-          ? "from-yellow-500/20 to-yellow-500/5"
-          : "from-orange-500/20 to-orange-500/5",
+      tone: "neutral" as Tone,
     },
   ]
 
-  const simulatorMetrics = [
+  const simulatorMetrics: Metric[] = [
     {
       label: t("metrics.simSoldProfit"),
       value: tradingHistoryCount > 0 ? formatPercent(tradingHistoryTotalProfit) : t("metrics.waitingSell"),
@@ -122,9 +127,7 @@ export function MetricsCards({
         ? `${tradingHistoryWinCount}${t("metrics.wins")} ${tradingHistoryLossCount}${t("metrics.losses")} (${t("metrics.avgProfit")} ${formatPercent(tradingHistoryAvgProfit)})`
         : t("metrics.updateOnSell"),
       description: t("metrics.soldProfitDesc"),
-      isPositive: tradingHistoryCount === 0 || tradingHistoryTotalProfit >= 0,
-      icon: DollarSign,
-      gradient: "from-purple-500/20 to-purple-500/5",
+      tone: tradingHistoryCount === 0 ? ("neutral" as Tone) : toneOf(tradingHistoryTotalProfit),
     },
     {
       label: t("metrics.simAvgHoldingDays"),
@@ -136,9 +139,7 @@ export function MetricsCards({
         ? `${t("metrics.winRate")} ${tradingHistoryWinRate.toFixed(0)}%`
         : t("metrics.needStrategy"),
       description: t("metrics.avgHoldingDesc"),
-      isPositive: true,
-      icon: Clock,
-      gradient: "from-indigo-500/20 to-indigo-500/5",
+      tone: "neutral" as Tone,
     },
     {
       label: t("metrics.simCurrentProfit"),
@@ -150,128 +151,48 @@ export function MetricsCards({
           ? ` (${t("metrics.allocatedSlots")} ${summary.portfolio.allocated_slots.toFixed(2)})`
           : ""),
       description: t("metrics.currentProfitDesc"),
-      isPositive: (summary.portfolio.total_profit || 0) >= 0,
-      icon: Zap,
-      gradient: "from-pink-500/20 to-pink-500/5",
+      tone: toneOf(summary.portfolio.total_profit || 0),
     },
   ]
 
-  return (
-    <div className="space-y-4">
-      {/* Real Trading Section */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className={`h-1 w-8 rounded-full bg-gradient-to-r ${sectionGradient}`} />
-            <h2 className="text-sm font-semibold text-muted-foreground">
-              {isUSMarket ? (language === "ko" ? "미국 실전투자" : "US Real Trading") : t("metrics.realTrading")}
-              {" "}({seasonInfo.seasonName})
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-semibold ${sectionTextColor}`}>
-              {seasonInfo.startDate.replace(/-/g, ".")} {t("metrics.started")}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              ({daysElapsed}{t("metrics.elapsed")})
-            </span>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {realMetrics.map((metric, index) => {
-            const Icon = metric.icon
-            return (
-              <Card
-                key={index}
-                className="relative overflow-hidden border-border/50 hover:border-border transition-all duration-300 hover:shadow-lg"
-              >
-                <div className={`absolute inset-0 bg-gradient-to-br ${metric.gradient} opacity-50`} />
-                <CardContent className="relative p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 rounded-lg bg-background/80 backdrop-blur-sm">
-                        <Icon className="w-4 h-4 text-foreground" />
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-muted-foreground block">{metric.label}</span>
-                        {metric.description && (
-                          <span className="text-xs text-muted-foreground/70">{metric.description}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-2xl font-bold text-foreground">{metric.value}</p>
-                    <div className="flex flex-col gap-0.5">
-                      <span className={`text-sm font-medium ${metric.isPositive ? "text-success" : "text-muted-foreground"}`}>
-                        {metric.change}
-                      </span>
-                      {metric.changeValue && <span className="text-xs text-muted-foreground">{metric.changeValue}</span>}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      </div>
+  const realTitle = isUSMarket ? (language === "ko" ? "미국 실전투자" : "US Real Trading") : t("metrics.realTrading")
 
-      {/* Simulator Section */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="h-1 w-8 rounded-full bg-gradient-to-r from-purple-500 to-pink-500" />
-            <h2 className="text-sm font-semibold text-muted-foreground">
-              {isUSMarket ? (language === "ko" ? "미국 시뮬레이터" : "US Simulator") : t("metrics.simulator")}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
-              {seasonInfo.startDate.replace(/-/g, ".")} {t("metrics.started")}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              ({daysElapsed}{t("metrics.elapsed")})
-            </span>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {simulatorMetrics.map((metric, index) => {
-            const Icon = metric.icon
-            return (
-              <Card
-                key={index}
-                className="relative overflow-hidden border-border/50 hover:border-border transition-all duration-300 hover:shadow-lg"
-              >
-                <div className={`absolute inset-0 bg-gradient-to-br ${metric.gradient} opacity-50`} />
-                <CardContent className="relative p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 rounded-lg bg-background/80 backdrop-blur-sm">
-                        <Icon className="w-4 h-4 text-foreground" />
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-muted-foreground block">{metric.label}</span>
-                        {metric.description && (
-                          <span className="text-xs text-muted-foreground/70">{metric.description}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-2xl font-bold text-foreground">{metric.value}</p>
-                    <div className="flex flex-col gap-0.5">
-                      <span className={`text-sm font-medium ${metric.isPositive ? "text-success" : "text-muted-foreground"}`}>
-                        {metric.change}
-                      </span>
-                      {metric.changeValue && <span className="text-xs text-muted-foreground">{metric.changeValue}</span>}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
+  const section = (title: string, metrics: Metric[]) => (
+    <section className="space-y-2.5">
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <h2 className="text-sm font-medium text-foreground">{title}</h2>
+        <span className="text-xs text-muted-foreground font-mono tabular-nums">
+          {seasonInfo.startDate.replace(/-/g, ".")} {t("metrics.started")} · {daysElapsed}{t("metrics.elapsed")}
+        </span>
       </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {metrics.map((metric, index) => (
+          <Card key={index} className="gap-0 py-0 rounded-lg shadow-none">
+            <CardContent className="p-4 sm:p-5 space-y-2.5 sm:space-y-3">
+              <div>
+                <span className="text-[13px] text-muted-foreground block">{metric.label}</span>
+                {metric.description && (
+                  <span className="text-xs text-muted-foreground/70">{metric.description}</span>
+                )}
+              </div>
+              <p className={`font-serif text-[1.75rem] sm:text-[2rem] leading-none tracking-tight tabular-nums ${TONE_CLASS[metric.tone]}`}>
+                {metric.value}
+              </p>
+              <div className="flex flex-col gap-0.5 text-xs tabular-nums">
+                <span className="text-foreground/80">{metric.change}</span>
+                {metric.changeValue && <span className="text-muted-foreground">{metric.changeValue}</span>}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+  )
+
+  return (
+    <div className="space-y-6">
+      {section(realTitle.includes(seasonInfo.seasonName) ? realTitle : `${realTitle} (${seasonInfo.seasonName})`, realMetrics)}
+      {section(isUSMarket ? (language === "ko" ? "미국 시뮬레이터" : "US Simulator") : t("metrics.simulator"), simulatorMetrics)}
     </div>
   )
 }
