@@ -37,7 +37,7 @@ def review_policy_binding(*, research_mode="legacy"):
     from live import (scenario_calculated_review, scenario_review_adapter,
                       scenario_review_guard, scenario_llm, scenario_contract,
                       scenario_model_input, scenario_preview, scenario_runtime,
-                      scenario_entry_contract)
+                      scenario_entry_contract, scenario_position_flow)
     from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
     from engine import scenario_ma_context
 
@@ -58,6 +58,7 @@ def review_policy_binding(*, research_mode="legacy"):
         'engine/scenario_ma_context.py': scenario_ma_context,
         'live/scenario_runtime.py': scenario_runtime,
         'live/scenario_entry_contract.py': scenario_entry_contract,
+        'live/scenario_position_flow.py': scenario_position_flow,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
     if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
@@ -180,6 +181,7 @@ def _manifest():
                     'live/scenario_fee_projection.py',
                     'live/scenario_entry_thesis.py',
                     'live/scenario_entry_contract.py',
+                    'live/scenario_position_flow.py',
                     'live/scenario_model_input.py',
                     'live/scenario_preview.py', 'engine/scenario_snapshot.py',
                     'engine/scenario_ma_context.py',

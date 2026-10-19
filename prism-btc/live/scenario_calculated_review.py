@@ -16,7 +16,7 @@ from engine.scenario_ma_context import build_ma_structure_context
 from live import scenario_llm
 from live.scenario_contract import _matches, _object, response_schema, validate_wire_proposal
 from live.scenario_entry_contract import strip_metadata
-from live.scenario_model_input import project_model_input
+from live.scenario_position_flow import project_position_flow_input
 from live.scenario_runtime import snapshot_input_time
 
 
@@ -382,7 +382,7 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
                    response_contract=response_contract)
     if calculated_candidates is not None:
         payload["calculated_candidates"] = calculated_candidates
-    return project_model_input(payload)[0]
+    return project_position_flow_input(payload)[0]
 
 
 ALLOCATION_SINGLE_PROMPT = """
