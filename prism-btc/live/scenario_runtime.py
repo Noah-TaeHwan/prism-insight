@@ -723,6 +723,12 @@ class ScenarioRuntime:
                 if stored_input is None or tuple(stored_input) != (_json(snap), _json(ctx)):
                     raise ValueError("review_input_mutated")
                 if review_envelope.get("outcome", {}).get("status") != "COMPLETE":
+                    failed = review_envelope.get("outcome", {})
+                    if (failed.get("error") == {"type": "ValueError", "message": "research_input_size"}
+                            and review_envelope.get("calls") == 0
+                            and all(op.get("kind") == "clock" for op in review_envelope.get("operations", []))):
+                        # Preserve the failed tape; no request/generator was reached.
+                        raise ScenarioModelError("input_size")
                     raise ValueError("review_tape_incomplete")
                 recorded_events = [json.loads(row[0]) for row in self.conn.execute(
                     "SELECT body FROM llm_scenario_review_events WHERE slot=? ORDER BY sequence", (slot,))]

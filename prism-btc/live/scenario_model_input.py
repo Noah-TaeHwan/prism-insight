@@ -69,6 +69,55 @@ def _has_receipt_marker(value):
     return isinstance(value, list) and any(_has_receipt_marker(v) for v in value)
 
 
+def _has_recovery_marker(value):
+    if isinstance(value, dict):
+        return "$recovery_changes" in value or any(_has_recovery_marker(v) for v in value.values())
+    return isinstance(value, list) and any(_has_recovery_marker(v) for v in value)
+
+
+def _recovery_changes(recovery):
+    if not isinstance(recovery, dict):
+        return None
+    baseline, current = recovery.get("baseline"), recovery.get("current")
+    if not all(isinstance(v, dict) and all(isinstance(k, str) and type(n) in (int, float)
+               for k, n in v.items()) for v in (baseline, current)):
+        return None
+    # Match prepare_input exactly: numeric equality determines changed paths;
+    # canonical JSON equality below separately preserves int/float distinctions.
+    return {path: {"before": baseline[path], "now": value}
+            for path, value in current.items() if path in baseline and baseline[path] != value}
+
+
+def _restore_recovery_changes(original, metadata):
+    if metadata.get("recovery_changed_evidence_path") != "contract_context.recovery.changed_evidence":
+        raise ValueError("invalid_recovery_change_path")
+    recovery = (original.get("contract_context") or {}).get("recovery")
+    reference = recovery.get("changed_evidence") if isinstance(recovery, dict) else None
+    if (not isinstance(reference, dict) or set(reference) not in (
+            {"$recovery_changes", "restored_sha256", "key_order"},
+            {"$recovery_changes", "restored_sha256", "key_order", "path_prefix"})
+            or reference.get("$recovery_changes") != "baseline-current-v1"):
+        raise ValueError("invalid_recovery_change_reference")
+    if "path_prefix" in reference and reference["path_prefix"] != "timeframes.":
+        raise ValueError("invalid_recovery_change_prefix")
+    changes = _recovery_changes(recovery)
+    if changes is None:
+        raise ValueError("invalid_recovery_change_sources")
+    if "key_order" in reference:
+        order = reference["key_order"]
+        if not isinstance(order, list) or any(not isinstance(k, str) for k in order):
+            raise ValueError("invalid_recovery_change_order")
+        order = [reference.get("path_prefix", "") + key for key in order]
+        if len(order) != len(set(order)) or set(order) != set(changes):
+            raise ValueError("invalid_recovery_change_order")
+        changes = {key: changes[key] for key in order}
+    if hashlib.sha256(_json(changes).encode()).hexdigest() != reference["restored_sha256"]:
+        raise ValueError("recovery_change_hash_mismatch")
+    recovery["changed_evidence"] = changes
+    if _has_recovery_marker(original):
+        raise ValueError("unregistered_recovery_change")
+
+
 def _receipt_locations(payload):
     for path, receipt in _wrapper_locations(payload):
         if isinstance(receipt, dict):
@@ -231,7 +280,7 @@ def _restore_tables(original, metadata):
         values = [dict(zip(columns, row)) for row in rows]
         if "keys" in body:
             keys = body["keys"]
-            if (metadata["version"] != 4 or path not in {
+            if (metadata["version"] not in (4, 5) or path not in {
                     "contract_context.ma_structure.levels", "contract_context.recovery.changed_evidence"}
                     or not isinstance(keys, list) or len(keys) != len(rows)
                     or any(not isinstance(k, str) for k in keys) or len(keys) != len(set(keys))):
@@ -248,10 +297,29 @@ def project_model_input(payload):
     original = _json(payload)
     projected = deepcopy(payload)
     if ("model_input_projection" in payload or _has_table_marker(payload)
-            or _has_wrapper_marker(payload) or _has_proposal_marker(payload) or _has_receipt_marker(payload)):
+            or _has_wrapper_marker(payload) or _has_proposal_marker(payload) or _has_receipt_marker(payload)
+            or _has_recovery_marker(payload)):
         raise ValueError("reserved_projection_field")
     references, definitions, paths = [], {}, []
     recovery = projected.get("contract_context", {}).get("recovery")
+    recovery_change_path = None
+    changes = _recovery_changes(recovery)
+    supplied_changes = recovery.get("changed_evidence") if isinstance(recovery, dict) else None
+    if (changes and isinstance(supplied_changes, dict)
+            and all(isinstance(v, dict) and list(v) == ["before", "now"] for v in supplied_changes.values())
+            and _json(changes, sort_keys=True) == _json(supplied_changes, sort_keys=True)):
+        reference = {"$recovery_changes": "baseline-current-v1",
+                     "restored_sha256": hashlib.sha256(_json(supplied_changes).encode()).hexdigest(),
+                     "key_order": list(supplied_changes)}
+        if all(key.startswith("timeframes.") for key in supplied_changes):
+            prefixed = dict(reference, path_prefix="timeframes.",
+                            key_order=[key[len("timeframes."):] for key in supplied_changes])
+            if len(_json(prefixed).encode()) < len(_json(reference).encode()):
+                reference = prefixed
+        if len(_json(reference).encode()) + 600 < len(_json(supplied_changes).encode()):
+            recovery["changed_evidence"] = reference
+            recovery_change_path = "contract_context.recovery.changed_evidence"
+            paths.append(recovery_change_path)
     if isinstance(recovery, dict) and isinstance(recovery.get("current"), dict):
         from live.scenario_recovery import numeric_market
         try:
@@ -351,7 +419,7 @@ def project_model_input(payload):
             paths.append(path)
     if paths:
         projected["model_input_projection"] = {
-            "version": 4 if proposal_paths or keyed_tables or value_paths else 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
+            "version": 5 if recovery_change_path else 4 if proposal_paths or keyed_tables or value_paths else 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
             "meaning": "Lossless references only. Resolve numeric_market-v1 as the supplied snapshot numeric paths; feature-definition references use this shared dictionary. All original values are retained or exactly reproducible."}
         if table_paths:
             projected["model_input_projection"]["row_table_paths"] = table_paths
@@ -369,6 +437,9 @@ def project_model_input(payload):
             projected["model_input_projection"].update(receipt_value_definitions=value_definitions,
                                                      receipt_value_paths=value_paths)
             projected["model_input_projection"]["meaning"] += " First expand $receipt_value using receipt_value_definitions (key is its SHA256); these are exact shared receipt blocks, not shared decisions. Then restore wrappers and proposals. Effective-plan overrides apply only to that effective_plan, never to the raw proposal."
+        if recovery_change_path:
+            projected["model_input_projection"]["recovery_changed_evidence_path"] = recovery_change_path
+            projected["model_input_projection"]["meaning"] += " After expanding tables and numeric_market-v1 current, $recovery_changes baseline-current-v1 provides host-computed ordered changed paths in key_order; prepend path_prefix to each key when present. Do NOT calculate which paths changed. For each full path, read changed_evidence[path]={before:baseline[path],now:current[path]}. Preserve source numeric types. restored_sha256 verifies insertion-order compact UTF-8 JSON of reconstructed changes. No changed facts are omitted."
     encoded = _json(projected)
     if len(encoded.encode()) >= len(original.encode()):
         projected, encoded, paths = deepcopy(payload), original, []
@@ -389,6 +460,8 @@ def restore_model_input(payload):
     original = deepcopy(payload)
     metadata = original.pop("model_input_projection", None)
     if metadata is None:
+        if _has_recovery_marker(original):
+            raise ValueError("unregistered_recovery_change")
         if _has_receipt_marker(original):
             raise ValueError("unregistered_receipt_value")
         if _has_proposal_marker(original):
@@ -398,21 +471,21 @@ def restore_model_input(payload):
         if _has_table_marker(original):
             raise ValueError("unregistered_row_table")
         return original
-    if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2, 3, 4):
+    if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2, 3, 4, 5):
         raise ValueError("unknown_projection_version")
-    if metadata["version"] == 4 and "receipt_value_paths" in metadata:
+    if metadata["version"] in (4, 5) and "receipt_value_paths" in metadata:
         _restore_receipt_values(original, metadata)
     elif _has_receipt_marker(original):
         raise ValueError("unregistered_receipt_value")
-    if metadata["version"] == 3 or (metadata["version"] == 4 and "model_wrapper_paths" in metadata):
+    if metadata["version"] == 3 or (metadata["version"] in (4, 5) and "model_wrapper_paths" in metadata):
         _restore_wrappers(original, metadata)
     elif _has_wrapper_marker(original):
         raise ValueError("unregistered_model_wrapper")
-    if metadata["version"] == 4 and "model_proposal_paths" in metadata:
+    if metadata["version"] in (4, 5) and "model_proposal_paths" in metadata:
         _restore_proposals(original, metadata)
     elif _has_proposal_marker(original):
         raise ValueError("unregistered_model_proposal")
-    if metadata["version"] == 2 or (metadata["version"] in (3, 4) and "row_table_paths" in metadata):
+    if metadata["version"] == 2 or (metadata["version"] in (3, 4, 5) and "row_table_paths" in metadata):
         _restore_tables(original, metadata)
     elif _has_table_marker(original):
         raise ValueError("unregistered_row_table")
@@ -423,7 +496,11 @@ def restore_model_input(payload):
     if "contract_context.recovery.current" in metadata["numeric_market_references"]:
         from live.scenario_recovery import numeric_market
         original["contract_context"]["recovery"]["current"] = numeric_market(original["market_snapshot"])
-    if metadata["version"] == 4:
+    if metadata["version"] == 5:
+        _restore_recovery_changes(original, metadata)
+    elif _has_recovery_marker(original) or "recovery_changed_evidence_path" in metadata:
+        raise ValueError("unregistered_recovery_change")
+    if metadata["version"] in (4, 5):
         for _, receipt in _wrapper_locations(original):
             if isinstance(receipt, dict) and "receipt_sha256" in receipt:
                 body = {k: v for k, v in receipt.items() if k != "receipt_sha256"}

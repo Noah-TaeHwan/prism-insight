@@ -114,6 +114,28 @@ def test_optin_complete_proof_before_simulated_intent(tmp_path):
     assert final_receipt["atomic_with_intent"] is True
 
 
+def test_pre_call_oversize_keeps_failed_tape_but_reports_actual_input_error(tmp_path):
+    r, broker, calls = runtime(tmp_path)
+    broker.ctx['uncompressible_required_evidence'] = 'x' * 110000
+    result = r.tick()
+    assert result == dict(status='blocked', reason='llm_input_preparation_failed',
+        failure_stage='model_input_preparation', failure_code='input_size', model_called=False)
+    assert calls == [] and broker.executed == []
+    tape = json.loads(r.conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()[0])
+    assert tape['outcome']['error'] == dict(type='ValueError', message='research_input_size')
+    assert tape['calls'] == 0
+
+
+def test_post_call_failure_is_not_claimed_as_no_model_call(tmp_path):
+    def changed(tape):
+        tape['outcome'] = dict(status='FAILED', error=dict(type='ValueError', message='research_input_size'))
+    r, broker, calls = runtime(tmp_path, tape_change=changed)
+    result = r.tick()
+    assert len(calls) == 2 and broker.executed == []
+    assert result['reason'] == 'reconciliation_or_proposal_failed'
+    assert result.get('model_called') is not False
+
+
 @pytest.mark.parametrize("change", [
     lambda c: c.update(account_version="2"),
     lambda c: c.update(account_captured_at=c["account_captured_at"]-121),
