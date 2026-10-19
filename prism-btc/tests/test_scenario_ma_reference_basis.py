@@ -27,10 +27,11 @@ def incident_snapshot():
         ('12h', 1792368000000, 83155.0, 81962.4, 83388.21999999999, 83260.49714285714, 1792419005659),
     ):
         confirmed = dict(open_time_ms=start, close_time_ms=1792411200000,
+            open=82684.2 if frame == '4h' else 82065.9,
             close=82320.7, high=high, low=low, ma10=INCIDENT_LEVELS[frame + '.ma10.confirmed'],
             ma35=slow, is_confirmed=True)
         forming = dict(open_time_ms=1792411200000, observed_at_ms=observed,
-            close=81915.6, high=82735.2, low=81715.8,
+            open=82320.7, close=81915.6, high=82735.2, low=81715.8,
             ma10=INCIDENT_LEVELS[frame + '.ma10.forming'], ma35=forming_slow, is_confirmed=False)
         frames[frame] = dict(ma_path=dict(version=1, confirmed_points=[confirmed], forming_point=forming))
     return dict(valid=True, as_of_ms=1792419005844, timeframes=frames)
