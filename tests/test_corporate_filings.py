@@ -113,3 +113,37 @@ def test_every_trading_prompt_reads_official_filings():
         source = (root / name).read_text(encoding="utf-8")
         for needle in needles:
             assert source.count(needle) == 1, (name, needle)
+
+
+def test_reentry_blocks_only_unambiguous_events_in_progress():
+    frame = pd.DataFrame([
+        {"published_at": "2026-10-07 16:00", "provider": "공시", "title": "공개매수신고서(XX홀딩스)"},
+        {"published_at": "2026-10-06 09:00", "provider": "공시", "title": "자기주식 공개매수 결정"},
+        {"published_at": "2026-10-05 09:00", "provider": "공시", "title": "주권매매거래정지해제"},
+        {"published_at": "2026-10-04 09:00", "provider": "공시", "title": "합병 결정"},
+        {"published_at": "2026-10-03 09:00", "provider": "공시", "title": "감사의견 적정"},
+    ])
+    out = cf.reentry_blocking_events("KR", "123456", today=TODAY, kr_fetch=lambda *a: frame)
+    assert out["status"] == "ok" and out["blocking"] == ["2026-10-07 공개매수신고서(XX홀딩스)"]
+    quiet = frame.iloc[1:]
+    assert cf.reentry_blocking_events("KR", "123456", today=TODAY, kr_fetch=lambda *a: quiet)["blocking"] == []
+
+
+def test_reentry_us_blocks_tender_and_bankruptcy_not_listing_notices():
+    fetch = _sec([
+        ("SC TO-T", "2026-09-17", "", "000119312526393827"),
+        ("8-K", "2026-09-20", "3.01", "000119312526000003"),
+        ("25-NSE", "2026-09-21", "", "000119312526000006"),
+        ("8-K", "2026-09-22", "1.03", "000119312526000007"),
+    ], subjects={"000119312526393827": 1637873})
+    out = cf.reentry_blocking_events("US", "ACVA", today=TODAY, us_fetch=fetch)
+    assert out["blocking"] == ["2026-09-17 SC TO-T", "2026-09-22 8-K (1.03)"]
+
+
+def test_reentry_lookup_failure_is_unknown_not_clear(monkeypatch):
+    def boom(*_a, **_k):
+        raise OSError("http_403")
+    assert cf.reentry_blocking_events("KR", "123456", today=TODAY, kr_fetch=boom) == \
+        {"status": "unavailable", "blocking": [], "listed": 0}
+    monkeypatch.setenv("CORP_FILINGS_ENABLED", "false")
+    assert cf.reentry_blocking_events("US", "ACVA", today=TODAY, us_fetch=boom)["status"] == "disabled"

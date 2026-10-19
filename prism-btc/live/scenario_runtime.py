@@ -860,6 +860,7 @@ class ScenarioRuntime:
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids"):
                     if state["active"] and payload.get("thesis_assessment") is not None:
                         state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
+                        state["active"]["last_thesis_assessment_at"] = ctx["now"]
                     receipt = self._apply_review(state["active"], payload, validated,
                                                  ctx["review_memory"], input_id, slot,
                                                  observed_at=commit_at if self.calculated_review_enabled else None)
@@ -888,6 +889,7 @@ class ScenarioRuntime:
                                              observed_at=commit_at if self.calculated_review_enabled else None)
                 if payload.get("thesis_assessment") is not None:
                     state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
+                    state["active"]["last_thesis_assessment_at"] = ctx["now"]
                     if payload["thesis_assessment"]["status"] == "FAILED":
                         state["active"]["entry_contract_model_failure"] = dict(
                             source="MODEL_ASSESSMENT", contract=fresh["registered_entry_contract"],
