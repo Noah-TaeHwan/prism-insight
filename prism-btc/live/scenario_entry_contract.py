@@ -77,7 +77,17 @@ def contract_context(active, enabled):
         return {}
     record = active.get("entry_contract") if active else None
     valid = bool(active and valid_record(record, active.get("scenario_id")))
+    prior = active.get("last_thesis_assessment") if valid else None
+    previous = None
+    if (isinstance(prior, dict) and prior.get("contract_id") == record["contract_id"]
+            and prior.get("status") in ("INTACT", "WEAKENING", "FAILED", "UNKNOWN")
+            and isinstance(prior.get("reason"), str) and prior["reason"].strip() and len(prior["reason"]) <= 240):
+        at = active.get("last_thesis_assessment_at")
+        previous = dict(contract_id=prior["contract_id"], status=prior["status"], reason=prior["reason"],
+            assessed_at=at if _number(at) and at >= record["origin"]["registered_at"] else None,
+            source="HISTORICAL_MODEL_OPINION")
     return dict(entry_contract_version=1, registered_entry_contract=copy.deepcopy(record) if valid else None,
+        previous_thesis_assessment=previous,
         entry_contract_status="REGISTERED" if valid else "CORRUPT" if record is not None else "LEGACY_UNKNOWN",
         entry_contract_failure_rule=dict(copy.deepcopy(record["definition"]["explicit_failure"]),
             confirmation_scope="DISTINCT_CONSECUTIVE_FRESH_DECISION_SLOTS") if valid else None,

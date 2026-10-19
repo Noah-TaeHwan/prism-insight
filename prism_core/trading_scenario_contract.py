@@ -21,12 +21,17 @@ _ONEIL_BREAKOUT_TOLERANCE = 0.01
 
 # These are the existing BUY prompt's policy template, not model-generated rules.
 # Detailed trailing parameters remain owned by the live SELL instruction/state.
+# 2026-10-19: bands are the exit code's exact values (cores/oneil_fallback.py and
+# prism-us/cores/oneil_fallback.py TRAIL_ACTIVATION_PCT=5, TRAIL_DROP_BULL=0.92,
+# TRAIL_DROP_WEAK=0.95, TRAIL_DROP_UNKNOWN=0.90); trend weakness is the SELL prompt's
+# Tier 3 (all three). Pinned by tests/test_buy_prompt_alignment_20261019.py.
 _SELL_TRIGGERS_KO = (
     ('익절 마일스톤: 목표가·주요 저항선 도달은 어떤 국면에서도 매도 사유가 아닙니다. '
-    '추세가 유지되면 보유하고, 이익은 현재 매도 에이전트의 trailing stop 규율'
-    '(강세 고점 대비 -8%, 횡보·약세 -3~5%)로 지킵니다.'),
-    ('추세 약화: 기존 종가·거래량·섹터/시장 조건에 따른 매도 에이전트의 규율을 적용합니다. '
-    '매수 시나리오의 자유서술로 새로운 단독 매도 조건을 만들지 않습니다.'),
+    '추세가 유지되면 보유하고, 이익은 현재 매도 에이전트의 trailing stop 규율로 지킵니다'
+    '(고점이 매수가 대비 +5% 이상이 된 뒤 활성화; 강세 국면 고점 × 0.92(-8%), 횡보·약세 국면 '
+    '고점 × 0.95(-5%), 국면 확인 불가 시 고점 × 0.90(-10%)).'),
+    ('추세 약화: 매도 에이전트의 3단계 규칙(3거래일 연속 종가 하락 + 평균 이상 거래량 + 20일선 아래 '
+    '마감, 셋 모두 충족)을 적용합니다. 매수 시나리오의 자유서술로 새로운 단독 매도 조건을 만들지 않습니다.'),
     ('하드 스탑: 장중 현재가가 stop_loss×0.995(0.5% 꼬리 버퍼) 이하가 되면 장중 하드스탑이 '
     '즉시 전량 매도하며 종가 마감을 기다리지 않습니다.'),
     ('오닐 절대 손절: 장중 현재가 기준 매수가 대비 -7% 손실 기준과 기존 매도 에이전트의 '
@@ -35,10 +40,12 @@ _SELL_TRIGGERS_KO = (
 )
 _SELL_TRIGGERS_EN = (
     ('Target/resistance is never a sell reason in any regime. Retain intact trends '
-    'and protect the gain with the live SELL agent trailing policy (-8% from the '
-    'peak in bull regimes, -3~5% in sideways/bear).'),
-    ('Trend weakening follows the existing SELL closing-price, volume and '
-    'sector/market rules. BUY free text cannot create a new standalone exit rule.'),
+    'and protect the gain with the live SELL agent trailing policy (active once the '
+    'peak is +5% above entry; peak × 0.92 (-8%) in bull regimes, peak × 0.95 (-5%) '
+    'in sideways/bear, peak × 0.90 (-10%) when the live regime is unavailable).'),
+    ('Trend weakening follows the SELL agent Tier 3 rule (3 consecutive lower closes + '
+    'above-average volume + close below the 20d MA, all three). BUY free text cannot '
+    'create a new standalone exit rule.'),
     ('Hard stop is intraday: a live price at or below stop_loss x 0.995 (0.5% wick '
     'buffer) exits fully without waiting for the close.'),
     ('Apply the existing SELL absolute live-price -7% loss rule and its explicit '

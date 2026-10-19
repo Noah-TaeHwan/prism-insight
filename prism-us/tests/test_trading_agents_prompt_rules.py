@@ -222,13 +222,14 @@ def test_us_macro_sector_leader_detail_present_en():
 
 def test_us_contrarian_value_detail_present_ko():
     agent = create_us_trading_scenario_agent(language="ko")
-    assert "**Contrarian Value 트리거 분석 포인트:**" in agent.instruction
+    # 2026-10-19: trigger renamed to the real US trigger name "Contrarian Value Pick" (us_trigger_batch.py).
+    assert "**Contrarian Value Pick 트리거 분석 포인트:**" in agent.instruction
     assert "구조적(실적 악화, 경쟁력 상실)" in agent.instruction
 
 
 def test_us_contrarian_value_detail_present_en():
     agent = create_us_trading_scenario_agent(language="en")
-    assert "**Contrarian Value trigger — analysis points:**" in agent.instruction
+    assert "**Contrarian Value Pick trigger — analysis points:**" in agent.instruction
     assert "earnings deterioration / loss of competitive edge" in agent.instruction
 
 
@@ -312,27 +313,27 @@ def test_us_parabolic_regime_row_in_matrix_en():
     assert "| parabolic     | 4 | 0.7 | -7% | 1+ | 0 |" in agent.instruction
 
 
-def test_us_parabolic_activation_conditions_ko():
+# 2026-10-19: the deterministic regime never outputs parabolic (prism-us/cores/data_prefetch.py
+# _compute_us_regime) and the gate uses the computed regime, so the LLM no longer self-selects
+# parabolic from index 90/30-day returns it is not given.
+def test_us_parabolic_self_selection_removed_ko():
     agent = create_us_trading_scenario_agent(language="ko")
-    assert "S&P 500 90-day return ≥ +30%" in agent.instruction
-    assert "S&P 500 30-day return ≥ +10%" in agent.instruction
-    assert "Daily Rise Top / Closing Strength Top / Gap Up Momentum Top" in agent.instruction
-    assert "Volume Surge Top / Capital Inflow Ratio는 제외" in agent.instruction
+    assert "S&P 500 90-day return ≥ +30%" not in agent.instruction
+    assert "S&P 500 30-day return ≥ +10%" not in agent.instruction
 
 
-def test_us_parabolic_activation_conditions_en():
+def test_us_parabolic_self_selection_removed_en():
     agent = create_us_trading_scenario_agent(language="en")
-    assert "S&P 500 90-day return ≥ +30%" in agent.instruction
-    assert "S&P 500 30-day return ≥ +10%" in agent.instruction
-    assert "Daily Rise Top / Closing Strength Top / Gap Up Momentum Top" in agent.instruction
-    assert 'excludes** "Volume Surge Top" and' in agent.instruction
+    assert "S&P 500 90-day return ≥ +30%" not in agent.instruction
+    assert "S&P 500 30-day return ≥ +10%" not in agent.instruction
 
 
 def test_us_distribution_day_kill_switch_ko():
     agent = create_us_trading_scenario_agent(language="ko")
     assert "Distribution Day Kill Switch" in agent.instruction
     assert "분포일" in agent.instruction
-    assert "4주 내" in agent.instruction
+    # 2026-10-19: distribution days come from the Market Pulse line (no report 4-week fallback).
+    assert "4주 내" not in agent.instruction
     assert "parabolic → strong_bull" in agent.instruction
 
 
@@ -357,19 +358,18 @@ def test_us_target_price_fallback_rule_en():
     assert "15~30%" not in agent.instruction
 
 
-def test_us_parabolic_position_sizing_ko():
+# 2026-10-19: sizing is set by the system (micro-split, rebound pilot, fixed slot amount), and
+# parabolic is never computed, so the parabolic sizing section was removed.
+def test_us_parabolic_position_sizing_removed_ko():
     agent = create_us_trading_scenario_agent(language="ko")
-    # v2.10.0: parabolic switched from sizing reduction to active full deployment
-    assert "parabolic 포지션 운영" in agent.instruction
-    assert "슬롯 축소 금지" in agent.instruction
-    assert "max_portfolio_size를 보고서 기준값 그대로 사용" in agent.instruction
+    assert "parabolic 포지션 운영" not in agent.instruction
+    assert "max_portfolio_size를 보고서 기준값 그대로 사용" not in agent.instruction
 
 
-def test_us_parabolic_position_sizing_en():
+def test_us_parabolic_position_sizing_removed_en():
     agent = create_us_trading_scenario_agent(language="en")
-    assert "Parabolic position management" in agent.instruction
-    assert "Do NOT reduce slots" in agent.instruction
-    assert "use the report-derived max_portfolio_size as-is" in agent.instruction
+    assert "Parabolic position management" not in agent.instruction
+    assert "use the report-derived max_portfolio_size as-is" not in agent.instruction
 
 
 def test_us_parabolic_min_score_in_schema_ko():

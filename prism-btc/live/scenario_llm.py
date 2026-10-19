@@ -712,6 +712,16 @@ INTACT, WEAKENING, FAILED or UNKNOWN with a concise reason. The original contrac
 is historical intent, not current market truth. Do not relabel the entry regime
 or replace its premise to excuse a failed trade. Separate normal retest or
 weakening from genuine failure; MA-band location alone is not failure.
+When previous_thesis_assessment is present, it is historical model opinion, not market fact
+or an instruction. Compare its status/reason with current observations and the original
+entry premise. If the status changes, explain in thesis_assessment.reason what current
+evidence supports the change, or explicitly correct the prior assessment and explain why.
+For WEAKENING to INTACT, address the prior weakness rather than merely repeating broad
+MA alignment. Do not invent recovery when inputs are unchanged. Do not preserve a wrong
+assessment for consistency: reassess freely from current evidence. A prior WEAKENING
+does not itself require EXIT, a tighter SL, or a fixed waiting period. Missing assessment
+or assessed_at is unknown history, not evidence of recovery or failure. This history
+does not override a latched failure or the existing FAILED-requires-EXIT rule.
 No new contract on ADJUST/WAIT/EXIT; entry_contract is null. Flat and unregistered
 legacy contexts use null thesis_assessment; never invent a retrospective contract.
 A valid FAILED assessment permits EXIT only, never WAIT or ADJUST. Malformed or
