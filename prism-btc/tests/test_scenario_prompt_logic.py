@@ -14,10 +14,10 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct19 follow-up approval: 1h before 30m in shared/MA-path emphasis, no risk change.
+    # Oct19 approval: widening-gap traversal alongside existing setups, no risk change.
     expected = {
         'SYSTEM_PROMPT': 'a3ecb16140fe1a7bfbd9d244213b8ce37b846db1a52ca705a07d9df2e317a1e4',
-        'MA_STRUCTURE_PROMPT': '53c145932f77807198e17b51a028dbb62d3b1991aa6168482e524968d19ff392',
+        'MA_STRUCTURE_PROMPT': '7e394c0a447b565bcbfdb56873e3a82badd9bd49b78f2bf8e42161b3fc084ef9',
         'FLAT_ENTRY_PROMPT': '15f323b7af2c2e0a790f1c12ea819244d8722c8d7214b43a57560d557f98f193',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),

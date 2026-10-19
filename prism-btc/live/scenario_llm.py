@@ -616,6 +616,47 @@ overextension and failed-break/reversal counterexamples rather than chase by hab
 Below-to-between recovery weakens a SHORT differently from above-to-between
 deterioration of a LONG. Between is mixed, neither automatic range nor trade ban.
 A touch alone is not support, rejection, a held retest or confirmed reversal.
+Separately evaluate MA10-to-MA35 countertrend gap traversal while the old-order
+gap is still WIDENING; this is not the MA35-reaction/trend-resumption setup below.
+LONG: MA10 < MA35, actual price rises from below MA10 through MA10 into the gap
+toward overhead MA35. SHORT: MA10 > MA35, actual price falls from above MA10
+through MA10 into the gap toward lower MA35. The old MA order may persist and
+the gap may continue widening throughout the price crossing.
+Do not require convergence, a divergence peak, an MA-order crossover, full trend
+reversal, prior MA35 touch/rejection, another closed bar or an additional retest.
+Width or WIDENING alone is insufficient: verify chronological own-time price
+movement across MA10, not merely a moving MA passing stationary price. Distinguish
+confirmed from provisional evidence; do not infer intrabar order from OHLC.
+For this setup's structural evidence prefer 1h and available 4h over 30m; 30m is
+secondary/timing and 15m timing only, not independent confirmation votes. This
+setup-specific reliability preference does not replace the global directional
+priority or require agreement of both 1h and 4h. For 4h chronology use supplied
+market_snapshot.timeframes['4h'].ma_path own-time points; higher_frames latest
+levels alone cannot establish a crossing or widening sequence. Missing, stale or
+future path evidence is unknown, not fabricated confirmation or an automatic veto.
+Compare remaining room from the proposed entry toward MA35, closer obstacles,
+host-calculated costs and structural invalidation; size within the existing risk
+cap, never use small size to repair an absent edge. No fixed gap threshold or
+invented probability. Acting now, an evidenced reservation and WAIT remain choices.
+For a NEW gap candidate as well as its holdings, compare exits at/before MA35 or
+a nearer actual obstacle; do not justify economic edge or a distant runner by
+assuming continuation beyond MA35. This bounded-purpose rule takes precedence
+over generic runner/allocation defaults for this setup only, without imposing an
+exact MA35 TP, fixed allocation or automatic touch exit.
+When opening this evidenced local MA10-boundary breakout with entry_contract_version=1,
+use existing BREAKOUT regime, not a new enum or a claim of full trend reversal.
+In its premise and expected_progress name the bounded gap-traversal purpose and
+relevant timeframe; band position alone does not establish it. Keep that contract's
+explicit_failure as the only authoritative numeric failure rule, with no duplicate
+prose threshold. Without version 1, describe the purpose in existing rationale only;
+never emit unsupported contract fields.
+For an original gap-traversal holding, do not silently turn MA35 arrival/rejection
+or failed progress into a new full-reversal or trend-resumption thesis. Unlike a
+trend runner, do not assume extension beyond MA35: assess existing TP, verified
+remaining quantity and costs within the original bounded purpose. Arrival/touch
+alone is not automatic FAILED or EXIT; use existing WAIT/ADJUST/EXIT and protection
+rules. A genuinely different thesis needs reconciled flat and a new decision,
+not rewriting the original contract. Never relabel pre-existing or legacy holdings.
 Evaluate ordered price paths, especially 1h with 30m confirmation/conflict, symmetrically:
 SHORT: rebound above MA10, failed advance at MA35 or evidenced resistance,
 then price back below MA10 with renewed downside progress is a short candidate.
