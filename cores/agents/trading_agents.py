@@ -23,6 +23,13 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
     Returns:
         Agent: Trading scenario generation agent
     """
+    # 2026-10-19 BUY prompt/code alignment (tests/test_buy_prompt_alignment_20261019.py). Sources:
+    # re-entry watch = prism_core/reentry_v3_live.py + observability/reentry_shadow.py (STOP_EXIT,
+    # LOCATION_SKIP, ENTER_BLOCKED); slot = cores/regime_policy.py configured_entry_amount (per-account
+    # buy amount); rebound pilot / bull step-down = prism_core/entry_score_policy.py; distribution days =
+    # Market Pulse facts line (cores/market_pulse.py, read by cores/buy_gate.py); no parabolic from the
+    # computed regime (cores/data_prefetch.py, prism-us/cores/data_prefetch.py); target never sells and
+    # trailing bands = cores/oneil_fallback.py; runner hold = prism_core/runner_hold.py.
     sectors = sector_names or KR_SECTOR_NAMES
     sector_constraint = ", ".join(sectors)
 
@@ -30,13 +37,23 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         instruction = """
         ## SYSTEM CONSTRAINTS
 
-        1. This system has NO watchlist tracking. Trigger fires ONCE only — there is no "next time".
-        2. Conditional waits are meaningless. Do NOT use phrases like "enter after support confirmation",
-           "wait for breakout consolidation", or "re-enter on pullback".
-        3. Decision is NOW only: "Enter" OR "No Entry". Never say "later" or "next opportunity".
-        4. No partial fills. 1 slot = 10% of portfolio = 100% buy or 100% sell. All-in / all-out.
+        1. The decision is made NOW. This decision has no "put it on a watchlist and buy later" option.
+        2. Conditional waits are not a decision. Do NOT write phrases like "enter after support confirmation",
+           "wait for breakout consolidation", or "re-enter on pullback" in the enter / no-entry decision.
+        3. Decision is "Enter" OR "No Entry". Never write "later" or "check again after confirmation".
+           Constraints 2 and 3 apply to the enter / no-entry decision only; when a micro-split add_plan
+           appendix is attached, its conditional add scenarios are not forbidden.
+        4. The system sets the size. One slot is the account's fixed buy amount; with micro-split on, the entry
+           starts with an initial fraction of a slot and grows through add_plan scenarios, and a rebound pilot
+           enters with half a slot. You decide enter / no-entry and the scenario; sells are full exits.
         5. If a setup is genuinely ambiguous, name the *specific* uncertainty in the rationale and still pick
            Enter or No Entry. "Vague concern" is not allowed as a No Entry reason (see prohibited expressions).
+        6. Re-entry watch (a fact, not your decision): a candidate held off with all fundamentals passed and a
+           score just short of the minimum, a candidate you chose to enter that a system rule blocked, and a
+           stopped-out position are watched by a separate rule-based re-entry batch, which may buy them again on
+           a re-breakout or pullback-support signal. This BUY decision does not control that watch or that
+           re-buy. So neither force an entry because "this is the only chance" nor skip one because "re-entry
+           will catch it"; judge only on the criteria below.
 
         ## Your Identity
 
@@ -125,7 +142,9 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         min_score column: when a "Micro-split entry threshold" appendix follows this instruction, its minimum score
         replaces this column (with the exceptions it states); without that appendix, use this column, but the
         system's regime floor applies when it is higher (sideways / moderate_bear 8, strong_bear 9, sideways with an
-        UPTREND market pulse 7).
+        UPTREND market pulse 7). Exception (rebound pilot, decided by the system): in sideways with an UPTREND market
+        pulse and no distribution step-down, an entry with effective_score exactly 6 goes in as a half-slot pilot
+        instead of meeting the 7 floor.
 
         | Regime | min_score | R/R floor | Max stop | Momentum signals | Extra confirmations |
         |--------|-----------|-----------|----------|------------------|---------------------|
@@ -142,38 +161,28 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
           → **Enter**.
         - Any condition fails → **No Entry** with rejection_reason naming the failing item.
 
-        ### Parabolic regime activation (when to use the parabolic row)
-
-        Apply the **parabolic** row ONLY when ALL of the following hold:
-        1. Base regime evaluates to `strong_bull` (KOSPI ≥ 20-day MA, recent 2-week return strong)
-        2. KOSPI 90-day return ≥ +30% (clearly accelerated, not just bullish)
-        3. KOSPI 30-day return ≥ +10% (acceleration ongoing, not cooling)
-        4. Trigger type is one of: "Daily Rise Top / Closing Strength / Gap Up Momentum"
-           (the **momentum-leader cohort**; explicitly **excludes** "Volume Surge" and
-           "Capital Inflow Ratio" — these tend to mark distribution in late-cycle
-           parabolic phases per historical data, so they keep the strong_bull row)
-
-        If any condition fails → fall back to the standard `strong_bull` row (R/R floor 1.0, stop -7%).
+        The row is the system `market_regime` copied as-is (section A). The parabolic row applies only when the
+        system value itself is parabolic; the system's regime calculation does not currently output parabolic,
+        so never select parabolic yourself.
 
         **Distribution Day Kill Switch (new-buy defense only):**
-        Distribution days (institutional selling sessions with ≥ -0.2% close on rising volume) are
-        counted **deterministically** in `index_summary.distribution_days` (rolling 25-session window,
-        expiring on a +5% recovery; null when volume is missing → then judge from the report's last
-        4 weeks). The HIGHER this count of distribution days, the more institutional selling is underway.
+        Distribution days (index sessions closing ≥ 0.2% lower on rising volume) are counted
+        **deterministically** by the system and given in the individual trend facts as the line
+        'Market Pulse … 분산일(distribution days, 최근 N세션)' (rolling 25-session window; a day expires once a
+        later close recovers +5% above it; the count resets after a follow-through day). The final buy check
+        reads the same line. If the line is absent the system applies no distribution step-down, so do not count
+        distribution days yourself to step down. The HIGHER this count, the more selling pressure is underway.
         - When it is **6 or more**, the system steps the regime down ONE level for NEW BUYS ONLY
           (parabolic → strong_bull, strong_bull → moderate_bull, moderate_bull → sideways, sideways → moderate_bear,
           moderate_bear → strong_bear, strong_bear stays). Judge new buys with the stepped-down regime's matrix row
           (min_score, R/R floor, max stop, momentum signals, extra confirmations); the final buy check applies the same row.
+        - When a bull regime (parabolic / strong_bull / moderate_bull) is stepped down, only the stepped-down row
+          applies; the system floor for a genuinely sideways market (8) does not (e.g. moderate_bull → sideways uses
+          min_score 5). The Step 1 regime split also uses the stepped-down regime (moderate_bull → sideways closes the
+          one-fail compensation path). During a step-down the UPTREND easing (7) and the rebound pilot do not apply.
         - Do NOT change sell or trailing-stop decisions for existing holdings — those keep the original
           regime. Distribution days never force an early exit.
         - State the distribution_days value and any new-buy caution in the `market_condition` field.
-
-        **Parabolic position management** (apply when parabolic row is active):
-        - Active buying recommended: use the report-derived max_portfolio_size as-is. Do NOT reduce slots.
-        - Risk control comes ONLY from (1) Distribution Day Kill Switch and (2) momentum / buy_score gating
-          and (3) tight stop_loss enforcement — do not work around it via sizing reduction.
-        - State the parabolic regime in `portfolio_context`, but do NOT use "reduction" or "축소" language.
-          Parabolic = momentum tailwind = full deployment; risk is managed downstream by the kill switch.
 
         ## Step 3 — Momentum Signals (count toward matrix row)
 
@@ -243,8 +252,8 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         6. (RSI ≥ 85 OR 20d-MA deviation ≥ +25%) AND (foreign + institutional net selling ≥ 5 sessions)
 
         **Prohibited single reasons:** "overheating concern", "inflection signal", "needs more confirmation",
-        "short-term correction risk", "wait and see is safer". These are vague-hedge expressions and the
-        system has no "next opportunity", so they must NOT appear as the rejection_reason.
+        "short-term correction risk", "wait and see is safer". These are vague-hedge expressions that defer a
+        decision that is made now, so they must NOT appear as the rejection_reason.
 
         ## buy_score Rubric (1~10)
 
@@ -272,7 +281,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         - Stop must NOT be set wider than matrix max stop just to "give room".
         - **primary_support sanity check (mandatory)**: if the derived expected_loss_pct is below 50% of the matrix max stop, the primary support is too close to the entry price. In that case:
           1. Prefer secondary_support from report 1-1; if that is also too close,
-          2. Use 50% of the matrix max stop as a floor (e.g. parabolic max -7% → at least -3.5% guaranteed).
+          2. Use 50% of the matrix max stop as a floor (e.g. strong_bull max -7% → at least -3.5% guaranteed).
           This guardrail prevents post-entry stop-outs from normal market noise.
 
         ## R/R Calculation (reference)
@@ -298,7 +307,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
              (b) Report 1-1 shows no major resistance above the current price other than that 52-week high (the breakout pivot), and no other major resistance within entry_price × 1.20.
              (c) Current price is not more than 5% above the breakout pivot (O'Neil's chase limit).
              (d) Not caught by the Step 1.5 trend gate (T1/T2).
-             This is the low end of William O'Neil's "take profits at 20-25%" rule: a rule-based milestone, not a price forecast. Handling after it is reached follows the existing SELL rules (trailing in bull regimes, exit in sideways/bear).
+             This uses +20%, the low end of William O'Neil's 20-25% profit zone, as a rule-based R/R reference point: not a price forecast and not a sell point. Reaching it is never a sell in any regime; the trailing stop takes over, and a runner that closes +20% above entry within sessions 4-15 is held under the runner-hold rule with its stop moved to the entry price (that rule sets the conditions).
              Write target_provenance with status="supported", source_type="oneil_breakout" and cite the sections confirming (a)-(c) in source_section. Never change the 1.20 ratio or use it when a condition fails. Stop, score, momentum and the matrix R/R floor still apply unchanged.
           3. If evidence is unavailable, leave target_price and dependent risk fields null and choose NO ENTRY. Never invent a percentage target or skip resistance to satisfy the R/R floor. The fixed rule target in 2a is the only exception.
           Evaluate the existing regime R/R floor AFTER target selection. Missing target evidence is not an independent company-quality score penalty.
@@ -371,11 +380,21 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
 
         - **Morning session (09:30~10:30 KST)**: today's volume/candle is in-progress. Do NOT make assertions
           like "today's volume is weak". Use prior-day confirmed data; today is reference only.
+          Exceptions already set above: Step 1.5 T1/T2 use the facts block's current price at any hour, and
+          cumulative intraday volume already at ≥200% of the completed 20-session average counts as momentum
+          signal 1 ('today') met (lower-bound rule).
         - **Afternoon (including 14:50+ KST)**: time alone does not establish finality. Use today's
           close/volume as final only with explicit source confirmation for that trading date. Otherwise
           label observed data intraday, or BAR_FINALITY_UNKNOWN if finality is unavailable; do not call
           it a confirmed close. Separate confirmed prior-day indicators from provisional current-day
           observations and cite the actual basis used, even if the report calls an intraday value a close.
+
+        ## Using the Trading Journal & Intuitions (when injected)
+        When the prompt includes "Same Stock Trade History" or "Accumulated Trading Intuitions", weigh them carefully:
+        - If this stock was **exited recently (<=5 trading days)** (especially when tagged ⚠️), or shows a **past similar-loss pattern**, slow down a chase re-entry and apply stricter R/R and setup checks.
+        - Do NOT mechanically skip based on the journal alone — the key is judging **what is different now** versus the past setup.
+        - If you still enter despite a recent exit, state "why now is different" in the rationale and fill the journal_reflection field.
+        - Always output journal_reflection. If no journal was injected, set referenced=false and the rest null.
 
         ## JSON Response Format
 
@@ -426,8 +445,8 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
                     "volume_baseline": "Normal volume baseline (string)"
                 },
                 "sell_triggers": [
-                    "Take-profit milestone: hitting target / major resistance is a milestone, NOT a sell trigger in any regime. Switch to the trailing stop (-8% from the peak in parabolic/strong_bull/moderate_bull, -3~5% in sideways/moderate_bear/strong_bear) and keep holding while the trend persists",
-                    "Trend weakness (multi-condition AND): on a closing-price basis, exit fully if 2 or more of these hold simultaneously — (1) close below 20d MA, (2) volume at or above average, (3) sector/market weakness in tandem",
+                    "Take-profit milestone: hitting target / major resistance is a milestone, NOT a sell trigger in any regime. Keep holding while the trend persists; the trailing stop activates once the peak is +5% above entry (peak × 0.92, -8%, in parabolic/strong_bull/moderate_bull; peak × 0.95, -5%, in sideways/moderate_bear/strong_bear; peak × 0.90, -10%, when the live regime is unavailable)",
+                    "Trend weakness (ALL three, closing basis): (1) 3 consecutive lower daily closes, (2) volume at or above average, (3) close below the 20d MA — exit fully only when all three hold",
                     "Hard stop (intraday): the intraday hard stop exits fully as soon as the live price is at or below stop_loss × 0.995 (0.5% wick buffer). It does not wait for the close; a brief touch inside the buffer is NOT a sell reason",
                     "O'Neil absolute rule: a live-price loss of 7% or more from entry triggers automatic full exit, no exceptions",
                     "Time review (NOT a trigger): N trading days elapsed is a trend-review checkpoint, not an auto-sell trigger. Only consider exit if both close and volume confirm clear range-bound drift"
@@ -445,11 +464,12 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         instruction = """
         ## 시스템 제약사항
 
-        1. 이 시스템은 종목을 관심목록에 넣고 추적하는 기능이 없습니다. 트리거는 단 한 번 발동 — "다음 기회"는 없습니다.
-        2. 조건부 관망은 무의미합니다. "지지 확인 후 진입", "돌파 안착 후 진입", "눌림 시 재진입 고려" 등의 표현은 사용하지 마십시오.
-        3. 판단 시점은 오직 "지금"뿐: "진입" OR "미진입". "나중에 확인"이라는 언급은 금지합니다.
-        4. 분할매매는 불가능합니다. 1슬롯 = 포트폴리오의 10% = 100% 매수 또는 100% 매도. 올인/올아웃입니다.
+        1. 판단은 지금 내립니다. 이 판단에는 관심목록에 넣어 두었다가 나중에 사는 선택지가 없습니다.
+        2. 조건부 관망은 결정이 아닙니다. 진입/미진입 결정 문장에 "지지 확인 후 진입", "돌파 안착 후 진입", "눌림 시 재진입 고려" 등의 표현을 쓰지 마십시오.
+        3. 결정은 "진입" OR "미진입"입니다. "나중에 확인"이라는 언급은 금지합니다. 제약 2·3은 진입/미진입 결정 문장에만 적용되며, 초분할 증액 시나리오(add_plan) 부록이 붙어 있으면 그 조건부 증액 시나리오는 막지 않습니다.
+        4. 비중은 시스템이 정합니다. 1슬롯은 계좌별로 정해 둔 매수 금액이고, 초분할이 켜져 있으면 1슬롯의 일부(최초 비중)로 시작해 증액 시나리오(add_plan)로 키우며, 반등 시험매수는 0.5슬롯으로 들어갑니다. 당신은 진입/미진입과 시나리오를 정합니다. 매도는 전량 매도입니다.
         5. 진짜로 애매한 setup이라면 어떤 부분이 불확실한지 rationale에 *구체적으로* 명시한 뒤 진입/미진입 중 하나를 선택하십시오. "막연한 우려"는 미진입 사유로 인정되지 않습니다(아래 금지 표현 참조).
+        6. 재진입 감시(당신의 판단이 아닌 사실): 펀더멘털은 모두 통과했지만 점수가 기준에 조금 못 미쳐 보류한 종목, 진입으로 판단했지만 시스템 규칙에 막힌 종목, 손절된 종목은 별도의 규칙 기반 재진입 배치가 계속 지켜보며, 재돌파·눌림 지지 신호가 나오면 다시 매수할 수 있습니다. 이 감시와 재매수는 이 BUY 판단이 통제하지 않습니다. 그러니 "이번이 유일한 기회"라며 억지로 진입하지도, "재진입이 잡아줄 것"이라며 미진입하지도 말고 아래 기준대로만 판단하십시오.
 
         ## 당신의 정체성
 
@@ -510,6 +530,9 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         - (T2) 20일선이 하향이고 현재가가 20일선 대비 5% 이상 아래 — 급격한 초기 붕괴
         입력으로 제공되는 '개별 추세 팩트' 섹션과 보고서 '1-1 가격'을 사용해 판정하십시오
         (팩트가 없으면 보고서로 보수적으로 판단).
+        **이동평균은 개별 추세 팩트 블록에 있는 것만 인용하십시오.** 데이터 없음으로 표시됐거나 목록에 없는 선은
+        현재가가 그 위인지 아래인지 단정하지 말고 지지·저항이라고도 부르지 말며, 데이터가 없다고 쓰십시오.
+        시장 지수의 200일선은 지수의 것이지 종목의 것이 아닙니다.
         T1·T2는 시간대와 관계없이 '개별 추세 팩트'의 현재가와 시스템이 계산한 T1_hit/T2_hit로 판정하고,
         직전 종가나 보고서의 과거 가격으로 다시 판정하지 마십시오(최종 매수 검증도 같은 현재가 기준입니다).
         **예외(진입 허용)**: 직전 종가가 50일선 아래였더라도 현재가가 50일선 위로 회복했으면(T1_hit=False)
@@ -528,7 +551,8 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         펀더 게이트 평가가 끝난 후에만 적용하십시오.
         min_score 열: 이 지시문 뒤에 '초분할 진입 기준' 부록이 붙어 있으면 그 부록의 최소 점수가 이 열을 대신합니다(부록이 정한
         예외 포함). 부록이 없으면 이 열을 따르되, 시스템 국면 하한(횡보·moderate_bear 8점, strong_bear 9점, 횡보이면서
-        시장 흐름 UPTREND 7점)이 더 높으면 그 값이 적용됩니다.
+        시장 흐름 UPTREND 7점)이 더 높으면 그 값이 적용됩니다. 예외(반등 시험매수, 시스템이 판단): 횡보이면서 시장 흐름
+        UPTREND이고 분산일 강등이 없을 때 effective_score가 정확히 6점인 진입은 7점 하한 대신 0.5슬롯 시험매수로 들어갑니다.
 
         | 시장 체제 | min_score | 손익비 floor | 최대 손절폭 | 모멘텀 신호 | 추가 확인 |
         |----------|-----------|------------|----------|----------|--------|
@@ -545,35 +569,25 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
           → **진입**.
         - 위 조건 중 하나라도 미달 → **미진입**. 미달 항목을 rejection_reason에 명시하십시오.
 
-        ### parabolic 행 적용 조건 (언제 strong_bull 대신 parabolic을 적용하나)
-
-        다음을 **모두** 충족할 때에 한해 parabolic 행을 적용하십시오:
-        1. 기본 regime이 `strong_bull` (KOSPI ≥ 20일선, 최근 2주 강세)
-        2. KOSPI 90일 수익률 ≥ +30% (단순 강세가 아니라 명백한 가속)
-        3. KOSPI 30일 수익률 ≥ +10% (가속이 식지 않고 진행 중)
-        4. 트리거 유형이 다음 중 하나: "일중 상승률 상위주 / 마감 강도 상위주 / 갭 상승 모멘텀 상위주"
-           (모멘텀 리더 코호트 한정. **거래량 급증 / 시총 대비 자금 유입은 제외** —
-           과거 데이터에서 폭주장 후반부 distribution 신호와 일치하므로 strong_bull 행 유지)
-
-        하나라도 미달 → 일반 `strong_bull` 행으로 fallback (R/R 1.0, 손절 -7%).
+        적용 행은 시스템이 준 `market_regime` 값을 그대로 복사해 정합니다(A항). parabolic 행은 시스템 값 자체가
+        parabolic일 때만 적용하며, 현재 시스템 국면 계산은 parabolic을 내지 않으므로 직접 parabolic을 고르지 마십시오.
 
         **Distribution Day Kill Switch (신규매수 방어 전용):**
-        분포일(거래량 동반 -0.2%↓ 마감)은 `index_summary.distribution_days`에 **결정론적으로 집계**됩니다
-        (최근 25거래일 윈도우, +5% 회복 시 만료; 거래량 결측이면 null → 보고서 최근 4주 내 분포일로 판단).
-        이 값이 높을수록 기관 분배가 진행 중이라는 천장 경고입니다.
+        분포일(지수가 거래량 증가와 함께 0.2% 이상 하락 마감한 날)은 시스템이 **결정론적으로 집계**해 개별 추세 팩트의
+        'Market Pulse … 분산일(distribution days, 최근 N세션)' 줄로 제공합니다(최근 25세션 윈도우, 이후 종가가 그날 종가보다
+        +5% 이상 회복하면 만료, 반등 확인일(FTD) 이후 초기화). 최종 매수 점검도 이 줄의 값을 씁니다. 이 줄이 없으면 시스템은
+        분산일 강등을 적용하지 않으므로 직접 분산일을 세어 강등하지 마십시오.
+        이 값이 높을수록 매도 압력이 쌓이고 있다는 천장 경고입니다.
         - 값이 **6건 이상**이면 시스템이 **신규 매수에 한해** regime을 1단계 낮춰 판정합니다
           (parabolic → strong_bull, strong_bull → moderate_bull, moderate_bull → sideways, sideways → moderate_bear,
           moderate_bear → strong_bear, strong_bear는 그대로). 신규 매수는 낮춘 regime의 매트릭스 행(min_score·손익비 floor·
           최대 손절폭·모멘텀 신호·추가 확인)으로 판단하십시오. 최종 매수 점검도 같은 기준을 적용합니다.
+        - 강세 국면(parabolic·strong_bull·moderate_bull)이 한 단계 내려간 경우에는 내려간 국면의 매트릭스 행만 적용되고,
+          원래 횡보장에 붙는 시스템 하한(8점)은 적용되지 않습니다(예: moderate_bull → sideways이면 min_score 5).
+          1단계 펀더 게이트의 국면 구분도 내려간 국면 기준입니다(moderate_bull → sideways이면 F 1개 미달 보완 경로가 닫힘).
+          분산일 강등 중에는 시장 흐름 UPTREND 완화(7점)와 반등 시험매수도 적용되지 않습니다.
         - **보유 종목의 매도·trailing 판단은 원래 regime을 그대로 사용**하며, 분산일로 조기 청산하지 않습니다.
         - distribution_days 값과 신규매수 보수화 여부를 `market_condition` 필드에 명시하십시오.
-
-        **parabolic 포지션 운영** (parabolic 행이 활성화될 때):
-        - 적극 매수 권장: max_portfolio_size를 보고서 기준값 그대로 사용하십시오. **슬롯 축소 금지**.
-        - 리스크 관리는 (1) Distribution Day Kill Switch, (2) momentum / buy_score 게이트, (3) 타이트한 stop_loss 집행
-          이 세 가지로만 수행합니다 — 사이징 축소로 우회하지 마십시오.
-        - parabolic regime이라는 사실은 `portfolio_context`에 명시하되 "축소" 표현은 사용하지 않습니다.
-          parabolic = 모멘텀 순풍 = 풀 가동이며, 리스크는 kill switch에서 관리합니다.
 
         ## 3단계 — 모멘텀 신호 (매트릭스 행에 카운트)
 
@@ -639,7 +653,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         6. (RSI ≥ 85 OR 20일선 괴리율 ≥ +25%) AND (외국인 + 기관 5거래일+ 순매도)
 
         **단독 사유로 사용 금지된 표현:** "과열 우려", "변곡 신호", "추가 확인 필요", "단기 조정 가능성", "관망이 안전".
-        이 표현들은 막연한 회피이며, 시스템에 "다음 기회"가 없으므로 rejection_reason으로 사용할 수 없습니다.
+        이 표현들은 막연한 회피이며 지금 내려야 할 판단을 미루는 말이므로 rejection_reason으로 사용할 수 없습니다.
 
         ## buy_score 산정 가이드 (1~10점)
 
@@ -667,7 +681,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         - "여유를 주려고" 매트릭스 최대 손절폭보다 넓게 설정하지 마십시오.
         - **primary_support 검증 (필수)**: 산출된 expected_loss_pct가 매트릭스 최대 손절폭의 50% 미만이면, 1차 지지선이 진입가 너무 가까이 있는 상태입니다. 이때는:
           1. 보고서 1-1의 secondary_support를 우선 검토하고, 그것도 너무 가까우면
-          2. 매트릭스 최대 손절폭의 50%를 floor로 채택 (예: parabolic max -7% → 최소 -3.5% 보장)
+          2. 매트릭스 최대 손절폭의 50%를 floor로 채택 (예: strong_bull max -7% → 최소 -3.5% 보장)
           이는 매수 직후 정상 시장 노이즈로 인한 손절 발동을 방지하기 위한 가드레일입니다.
 
         ## 손익비 계산식 (참고)
@@ -693,7 +707,7 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
              (b) 보고서 1-1에서 현재가 위의 주요 저항이 없거나 그 52주 최고가(돌파 대상 고점) 하나뿐이고, entry_price × 1.20 이내에 그 밖의 주요 저항이 없습니다.
              (c) 현재가가 돌파 대상 고점보다 5% 넘게 높지 않습니다(오닐의 추격 매수 한도).
              (d) 1.5단계 추세 게이트(T1/T2)에 해당하지 않습니다.
-             이 목표는 윌리엄 오닐의 "20~25% 수익에서 익절" 규칙의 하단을 그대로 쓴 규칙 기반 마일스톤이며 가격 예측이 아닙니다. 도달 이후 처리는 기존 매도 규칙(강세 국면 trailing 전환, 횡보·약세 국면 매도)을 따릅니다.
+             이 목표는 윌리엄 오닐의 20~25% 수익 구간 하단(+20%)을 손익비 계산의 기준점으로 쓴 규칙 기반 마일스톤이며 가격 예측도 매도 지점도 아닙니다. 목표 도달은 어떤 국면에서도 매도가 아니고 trailing stop이 이어받으며, 진입 후 4~15거래일 사이 종가로 +20%에 도달한 주도주는 주도주 보유 규칙에 따라 손절을 매수가로 옮긴 채 보유합니다(세부 조건은 그 규칙이 정합니다).
              target_provenance는 status="supported", source_type="oneil_breakout"으로 쓰고 source_section에 (a)~(c)를 확인한 절을 적습니다. 1.20 외의 비율로 바꾸거나 조건 미충족 종목에 쓰지 않습니다. 손절·점수·모멘텀·매트릭스 R/R floor 등 다른 기준은 그대로 적용합니다.
           3. 근거가 없으면 target_price와 종속 손익비 필드는 null, 미진입으로 남깁니다. 임의 상승률로 목표를 만들거나 R/R floor를 맞추려고 저항을 건너뛰지 않습니다. 2a의 고정 규칙 목표만 예외입니다.
           목표를 확정한 후 기존 regime R/R floor를 평가합니다. 근거 미확인은 기업 품질 자체의 감점 사유가 아닙니다.
@@ -756,6 +770,8 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
         ## 시간대별 데이터 신뢰도
 
         - **오전장 (09:30~10:30 KST)**: 당일 거래량/캔들은 미완성입니다. "오늘 거래량이 약하다" 같은 확정 판단은 금지하십시오. 전일 종가/거래량 기준으로 분석하고, 당일 데이터는 추세 변화 참고용으로만 사용합니다.
+          예외(위에서 이미 정한 규칙): 1.5단계 T1·T2는 시간대와 관계없이 개별 추세 팩트의 현재가로 판정하고, 장중 누적 거래량이
+          이미 확정 20거래일 평균의 200% 이상이면 모멘텀 신호 1의 '당일' 조건을 충족한 것으로 셉니다(하한 판정).
         - **오후 장 (14:50+ KST 포함)**: 시각만으로 데이터 확정을 판단하지 마십시오. 해당 거래일의
           확정 여부를 출처가 명시적으로 확인한 경우에만 당일 종가·거래량을 확정값으로 사용하십시오.
           그 외에는 장중 관측값으로, 확정 여부를 알 수 없으면 BAR_FINALITY_UNKNOWN으로 표시하고
@@ -818,8 +834,8 @@ def create_trading_scenario_agent(language: str = "ko", sector_names: list = Non
                     "volume_baseline": "평소 거래량 기준 (문자열 가능)"
                 },
                 "sell_triggers": [
-                    "익절 마일스톤: 목표가·주요 저항선 도달은 어떤 국면에서도 매도 트리거가 아닙니다. trailing stop(parabolic/strong_bull/moderate_bull은 고점 대비 -8%, sideways/moderate_bear/strong_bear는 -3~5%)으로 전환해 추세 지속 시 보유",
-                    "추세 약화 (multi-condition AND): 종가 기준 ① 20일선 이탈 ② 거래량 평균 이상 동반 ③ 섹터/시장 동반 약세 — 이 중 2개 이상 동시 충족 시 전량 매도",
+                    "익절 마일스톤: 목표가·주요 저항선 도달은 어떤 국면에서도 매도 트리거가 아닙니다. 추세 지속 시 보유하고, 고점이 매수가 대비 +5% 이상이 된 뒤부터 trailing stop이 켜집니다(parabolic/strong_bull/moderate_bull은 고점 × 0.92(-8%), sideways/moderate_bear/strong_bear는 고점 × 0.95(-5%), 국면 확인 불가 시 고점 × 0.90(-10%))",
+                    "추세 약화 (3개 모두 충족, 종가 기준): ① 3거래일 연속 종가 하락 ② 거래량 평균 이상 동반 ③ 20일선 아래 마감 — 셋 모두 충족할 때만 전량 매도",
                     "하드 스탑(장중): 현재가가 stop_loss×0.995(0.5% 꼬리 버퍼) 이하가 되면 장중 하드스탑이 즉시 전량 매도. 종가 마감을 기다리지 않으며, 버퍼 안의 일시 터치만으로는 매도하지 않음",
                     "오닐 절대 룰: 장중 현재가 기준 매수가 대비 -7% 이상 손실 도달 시 무조건 전량 매도",
                     "시간 점검 (트리거 아님): 보유 N거래일 경과는 자동 매도 트리거가 아니라 추세 점검 시점일 뿐. 박스권 횡보가 종가·거래량 모두에서 명확히 확인될 때에만 매도 검토"

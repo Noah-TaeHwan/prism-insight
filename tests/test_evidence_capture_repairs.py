@@ -80,9 +80,9 @@ def test_buy_prompt_reconciles_evidence_without_new_gate(market, language):
             [("이 값은 거래량 동반 가격 하락의 누적 경고이며, 기관 매도를 직접 관측한 값은 아닙니다.",
               "이 값이 높을수록 기관 분배가 진행 중이라는 천장 경고입니다.")]
             if language == "ko" else
-            [("Distribution days (price-volume proxies with ≥ -0.2% close on rising volume) are",
-              "Distribution days (institutional selling sessions with ≥ -0.2% close on rising volume) are"),
-             ("A higher count of distribution days warns of repeated price-volume weakness, not confirmed institutional selling.",
+            # 2026-10-19: the distribution-day definition sentence was rewritten (Market Pulse source), so
+            # its legacy reversal is gone; the new text is covered by the refreshed hashes below.
+            [("A higher count of distribution days warns of repeated price-volume weakness, not confirmed institutional selling.",
               "The HIGHER this count of distribution days, the more institutional selling is underway.")]
         )
         replacements += (
@@ -131,11 +131,16 @@ def test_buy_prompt_reconciles_evidence_without_new_gate(market, language):
             # facts block (as the final gate does); the exception is the current price back above the 50-day MA.
             # 2026-10-10 reviewed: rules + JSON — text aligned with executed rules (distribution-day step-down ladder,
             # min_score source: micro-split appendix else matrix with the system regime floor). No rule change.
+            # 2026-10-19 reviewed: rules + JSON — US BUY prompt/code alignment (same set as KR, see
+            # tests/test_buy_prompt_alignment_20261019.py): system sizing + re-entry watch constraints, 2a never
+            # sells, parabolic copied from the system only, Market Pulse distribution source with bull step-down
+            # and rebound pilot, real US trigger names, ko MA guard, one consolidated research query,
+            # opening-hour exceptions, exit-code trailing bands and SELL Tier 3 in sell_triggers.
             # Unrelated execution rules retain their original hashes.
-            "ko": ("9d6cef2faa33449f8c12646b143673b44c937032c7d20e56f3354e1b714c9968",
-                   "81f47cf757e66f2d26a87db9b3dd576ca73e47a28599889b13992ef6b7e93d51"),
-            "en": ("3d507918b2395758417d45e43ec8fb6581fe1339b179735870ba599ab3828547",
-                   "9cb53fd22d445ee72aae571c3000e1140e1c92496ab9c17d5d0a22ac08f59f72"),
+            "ko": ("1369c85e07b6a85e178fdab691143a27e2b3364c6d38bbf447fd6e5b14f6a3d9",
+                   "f618a904c4187d696f1672b09684d848907bc3f0792fe5f339ca3a66b4b141e9"),
+            "en": ("763a30272ca2fda955ffc956bea8c768d1f0caed35ca1b9bad1208f6aac57a20",
+                   "7523cb8013327a159e57f607e06a3fb20501efdf3fb1e530d00c442fae770dbc"),
         }
         tool_heading = "## 도구 사용" if language == "ko" else "## Tool Usage"
         json_heading = "## JSON 응답 형식" if language == "ko" else "## JSON Response Format"
