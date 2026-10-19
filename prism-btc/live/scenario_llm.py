@@ -638,11 +638,13 @@ Compare remaining room from the proposed entry toward MA35, closer obstacles,
 host-calculated costs and structural invalidation; size within the existing risk
 cap, never use small size to repair an absent edge. No fixed gap threshold or
 invented probability. Acting now, an evidenced reservation and WAIT remain choices.
-When opening this evidenced local MA10-boundary breakout, use existing BREAKOUT
-regime, not a new enum or a claim of full trend reversal. In premise and
-expected_progress name the bounded gap-traversal purpose and relevant timeframe;
-band position alone does not establish it. Keep the existing explicit_failure
-as the only authoritative numeric failure rule, with no duplicate prose threshold.
+When opening this evidenced local MA10-boundary breakout with entry_contract_version=1,
+use existing BREAKOUT regime, not a new enum or a claim of full trend reversal.
+In its premise and expected_progress name the bounded gap-traversal purpose and
+relevant timeframe; band position alone does not establish it. Keep that contract's
+explicit_failure as the only authoritative numeric failure rule, with no duplicate
+prose threshold. Without version 1, describe the purpose in existing rationale only;
+never emit unsupported contract fields.
 For an original gap-traversal holding, do not silently turn MA35 arrival/rejection
 or failed progress into a new full-reversal or trend-resumption thesis. Unlike a
 trend runner, do not assume extension beyond MA35: assess existing TP, verified

@@ -17,7 +17,7 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     # Oct19 approval: widening-gap traversal alongside existing setups, no risk change.
     expected = {
         'SYSTEM_PROMPT': 'a3ecb16140fe1a7bfbd9d244213b8ce37b846db1a52ca705a07d9df2e317a1e4',
-        'MA_STRUCTURE_PROMPT': '9d13b24c12d2f8bc102f152b52a3e3a341e740a4a7fff7409ce417fd342f1eb9',
+        'MA_STRUCTURE_PROMPT': 'e93f5b597634c35c54b917e74993a3caef3854c5d87c83eda5f05c517ca80c8b',
         'FLAT_ENTRY_PROMPT': '15f323b7af2c2e0a790f1c12ea819244d8722c8d7214b43a57560d557f98f193',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),

@@ -49,6 +49,8 @@ def test_gap_policy_keeps_bounded_thesis_and_existing_host_authority():
         'size within the existing risk cap',
         'No fixed gap threshold or invented probability',
         'use existing BREAKOUT regime',
+        'with entry_contract_version=1',
+        'Without version 1, describe the purpose in existing rationale only',
         'only authoritative numeric failure rule',
         'do not assume extension beyond MA35',
         'Arrival/touch alone is not automatic FAILED or EXIT',
@@ -63,9 +65,12 @@ def test_gap_policy_keeps_bounded_thesis_and_existing_host_authority():
 
 @pytest.mark.parametrize('side', ['LONG', 'SHORT'])
 @pytest.mark.parametrize('provisional', [False, True])
-def test_widening_price_crossing_survives_both_actual_review_requests(side, provisional):
+@pytest.mark.parametrize('contract_version', [None, 1])
+def test_widening_price_crossing_survives_both_actual_review_requests(side, provisional, contract_version):
     ctx = context()
     ctx.update(now=NOW / 1000, input_captured_at=NOW / 1000, account_captured_at=NOW / 1000)
+    if contract_version:
+        ctx['entry_contract_version'] = contract_version
     snap = gap_snapshot(side, provisional)
     original = deepcopy((snap, ctx))
     calls = []
@@ -89,6 +94,13 @@ def test_widening_price_crossing_survives_both_actual_review_requests(side, prov
             candidate, wait = wire(ctx, side), wire(ctx)
             candidate['take_profits'][0]['price'] = 83880 if side == 'LONG' else 82940
             candidate['expires_at'] = wait['expires_at'] = ctx['now'] + 100
+            if contract_version:
+                from tests.test_scenario_entry_contract_wire import definition
+                premise = definition(side)
+                premise.update(premise='1h MA10 local breakout into widening gap',
+                               expected_progress='Bounded traversal toward MA35, not a full reversal')
+                candidate.update(entry_contract=premise, thesis_assessment=None)
+                wait.update(entry_contract=None, thesis_assessment=None)
             reply = dict(wait_proposal=wait, candidates=[candidate], no_candidate_reason='')
         else:
             candidate = next(c for c in payload['calculated_candidates']['candidates'] if c['eligible'])
@@ -101,6 +113,27 @@ def test_widening_price_crossing_survives_both_actual_review_requests(side, prov
     assert result['selected']['raw_proposal']['side'] == side
     assert result['orders_submitted'] == 0 and result['executable'] is False
     assert (snap, ctx) == original
+
+
+@pytest.mark.parametrize('contract_version', [None, 1])
+def test_single_request_keeps_gap_policy_and_legacy_wire_compatibility(contract_version):
+    from live.scenario_llm import propose
+    ctx = context()
+    if contract_version:
+        ctx['entry_contract_version'] = contract_version
+    calls = []
+
+    def generate(**request):
+        calls.append(request)
+        assert MA_STRUCTURE_PROMPT in request['system_prompt']
+        result = wire(ctx)
+        if contract_version:
+            result.update(entry_contract=None, thesis_assessment=None)
+        return SimpleNamespace(text=json.dumps(result))
+
+    assert propose(dict(valid=True, as_of_ms=1000000), ctx, response_contract(ctx),
+                   generate=generate, clock=lambda: 1000)['action'] == 'WAIT'
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('side', ['LONG', 'SHORT'])
