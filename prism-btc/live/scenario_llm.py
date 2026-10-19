@@ -638,6 +638,11 @@ Compare remaining room from the proposed entry toward MA35, closer obstacles,
 host-calculated costs and structural invalidation; size within the existing risk
 cap, never use small size to repair an absent edge. No fixed gap threshold or
 invented probability. Acting now, an evidenced reservation and WAIT remain choices.
+For a NEW gap candidate as well as its holdings, compare exits at/before MA35 or
+a nearer actual obstacle; do not justify economic edge or a distant runner by
+assuming continuation beyond MA35. This bounded-purpose rule takes precedence
+over generic runner/allocation defaults for this setup only, without imposing an
+exact MA35 TP, fixed allocation or automatic touch exit.
 When opening this evidenced local MA10-boundary breakout with entry_contract_version=1,
 use existing BREAKOUT regime, not a new enum or a claim of full trend reversal.
 In its premise and expected_progress name the bounded gap-traversal purpose and
