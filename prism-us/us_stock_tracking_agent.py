@@ -525,7 +525,12 @@ def _scenario_slot_limit(scenario: Dict[str, Any], *, hard_max: int) -> int:
 def _effective_buy_score(
     scenario: Dict[str, Any], *, journal_adjustment: float = 0.0
 ) -> Dict[str, float]:
-    """Recompute the score contract used by both the prompt and final gate."""
+    """Recompute the score contract used by both the prompt and final gate.
+
+    effective_score = buy_score + macro_adjustment, as the BUY instruction defines it and as KR
+    computes it (stock_tracking_enhanced_agent._kr_effective_score). The journal adjustment is
+    reference-only (user decision 2026-10-19): returned for observability, never added.
+    """
     buy_score = _safe_number((scenario or {}).get("buy_score"))
     macro_adjustment = _safe_number((scenario or {}).get("macro_adjustment"))
     journal_value = _safe_number(journal_adjustment)
@@ -533,7 +538,7 @@ def _effective_buy_score(
         "buy_score": buy_score,
         "macro_adjustment": macro_adjustment,
         "journal_adjustment": journal_value,
-        "effective_score": buy_score + macro_adjustment + journal_value,
+        "effective_score": buy_score + macro_adjustment,
     }
 
 
@@ -1504,6 +1509,7 @@ class USStockTrackingAgent:
                 - Recommended Adjustment: {'+' if adjustment > 0 else ''}{adjustment} points
                 - Reason: {', '.join(reasons) if reasons else 'N/A'}
                 - ⚠️ This adjustment is a reference based on past experience.
+                - Reference only: do not add it to buy_score or effective_score (the system records it and does not apply it).
                 """
 
             journal_influence_context = build_journal_influence_context(
@@ -4435,7 +4441,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     adjusted_score = score_parts["effective_score"]
                     logger.info(
                         f"Buy score: {company_name} ({ticker}) - Original: {buy_score}, "
-                        f"Macro: {macro_adjustment:+g}, Journal: {score_adjustment:+d}, "
+                        f"Macro: {macro_adjustment:+g}, Journal (reference only): {score_adjustment:+d}, "
                         f"Effective: {adjusted_score:g}, Min: {min_score:g}"
                     )
 
@@ -4548,9 +4554,9 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         score_before=score_before_journal,
                         score_after=adjusted_score,
                         min_score=min_score,
-                        applied_adjustment=score_adjustment,
+                        applied_adjustment=0,
                         adjustment_reasons=adjustment_reasons,
-                        application_mode="PROMPT_AND_DETERMINISTIC_SCORE",
+                        application_mode="PROMPT_ONLY",
                     )
                     scenario["_decision_context"] = {
                         "decision": normalized_decision,
