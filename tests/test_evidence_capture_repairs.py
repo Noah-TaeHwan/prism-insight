@@ -136,10 +136,12 @@ def test_buy_prompt_reconciles_evidence_without_new_gate(market, language):
             # sells, parabolic copied from the system only, Market Pulse distribution source with bull step-down
             # and rebound pilot, real US trigger names, ko MA guard, one consolidated research query,
             # opening-hour exceptions, exit-code trailing bands and SELL Tier 3 in sell_triggers.
+            # 2026-10-19 reviewed: rules hash only — max_portfolio_size from the system regime / Market Pulse line,
+            # compared with slot-weighted usage (PR-C). JSON unchanged.
             # Unrelated execution rules retain their original hashes.
-            "ko": ("1369c85e07b6a85e178fdab691143a27e2b3364c6d38bbf447fd6e5b14f6a3d9",
+            "ko": ("a6fe9387273b8ff4a6eec0f155444ed66acc3c6aa78cbef98c81f0dd4413ac62",
                    "f618a904c4187d696f1672b09684d848907bc3f0792fe5f339ca3a66b4b141e9"),
-            "en": ("763a30272ca2fda955ffc956bea8c768d1f0caed35ca1b9bad1208f6aac57a20",
+            "en": ("e449b3acf2c9c6ebb6f7675be09e57a7555115bb436a40d2a15f0172bc9cfa5e",
                    "7523cb8013327a159e57f607e06a3fb20501efdf3fb1e530d00c442fae770dbc"),
         }
         tool_heading = "## 도구 사용" if language == "ko" else "## Tool Usage"

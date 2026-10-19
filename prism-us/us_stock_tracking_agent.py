@@ -1131,6 +1131,28 @@ class USStockTrackingAgent:
         account_key, _ = self._account_scope()
         return get_us_holdings_count(self.cursor, account_key=account_key)
 
+    def _holding_scenarios(self) -> list:
+        """Stored scenarios of the current account's holdings (for slot-weighted usage)."""
+        self.cursor.execute("SELECT scenario FROM us_stock_holdings WHERE account_key = ?",
+                            (self._account_scope()[0],))
+        return [row[0] for row in self.cursor.fetchall()]
+
+    def _weighted_slots_if_capped(self, current_slots: int, slot_limit: int) -> float:
+        """Slot-weighted usage, read only when the row count already reaches the AI cap.
+
+        Each row weighs at most 1 slot (prism_core.slot_weight), so weighted usage never exceeds the
+        row count and a count below the cap needs no read. A failed read keeps the row count (the
+        previous, stricter comparison)."""
+        if current_slots < slot_limit:
+            return float(current_slots)
+        try:
+            from prism_core.micro_split_live import used_slots
+            return float(used_slots(self._holding_scenarios()))
+        except Exception as error:  # noqa: BLE001 - fall back to the row count
+            logger.warning("[PORTFOLIO_CAP] weighted usage read failed (%s); using row count",
+                           type(error).__name__)
+            return float(current_slots)
+
     def _get_db_lock(self) -> asyncio.Lock:
         """Serialize the shared sqlite cursor around bounded parallel pre-pass reads."""
         lock = getattr(self, "_db_lock", None)
@@ -1476,9 +1498,13 @@ class USStockTrackingAgent:
                 except Exception:
                     pass
 
-            # Portfolio info string
+            # Portfolio info string (2026-10-19: slot-weighted usage is what max_portfolio_size is compared with)
+            from prism_core.micro_split_live import usage_line
+            _usage = usage_line(current_slots, [h.get("scenario") for h in holdings], self.max_slots,
+                                getattr(self, "language", "ko"))
             portfolio_info = f"""
             Current holdings: {current_slots}/{self.max_slots}
+            {_usage}
             Sector distribution: {json.dumps(sector_distribution, ensure_ascii=False)}
             Investment period distribution: {json.dumps(investment_periods, ensure_ascii=False)}
             """
@@ -1958,9 +1984,13 @@ class USStockTrackingAgent:
 
             # Check available slots
             current_slots = await self._get_current_slots_count()
+            if current_slots >= self.max_slots:
+                logger.warning(f"Holdings already at maximum ({self.max_slots})")
+                return LegacyPositionWriteResult(False, None)
+            # 2026-10-19: the AI cap is compared with slot-weighted usage (legacy rows = 1), not row count.
             slot_limit = _scenario_slot_limit(scenario, hard_max=self.max_slots)
-            if current_slots >= slot_limit:
-                logger.warning(f"Holdings already at scenario maximum ({slot_limit})")
+            if self._weighted_slots_if_capped(current_slots, slot_limit) >= slot_limit:
+                logger.warning(f"Holdings already at scenario maximum ({slot_limit}, slot-weighted)")
                 return LegacyPositionWriteResult(False, None)
 
             # Current time
@@ -4364,16 +4394,19 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     scenario_slot_limit = _scenario_slot_limit(
                         scenario, hard_max=self.max_slots
                     )
-                    if current_slots >= scenario_slot_limit:
+                    # 2026-10-19: hard row cap unchanged; the AI cap is compared with slot-weighted usage.
+                    weighted_slots = self._weighted_slots_if_capped(current_slots, scenario_slot_limit)
+                    if current_slots >= self.max_slots or weighted_slots >= scenario_slot_limit:
                         # User-facing reason must NOT include the account label (leaks
                         # masked account number to broadcast channels). Keep detail in logs only.
                         reason = (
                             "Scenario max portfolio size reached "
-                            f"({current_slots}/{scenario_slot_limit})"
+                            f"({current_slots} holdings, {weighted_slots:.1f}/{scenario_slot_limit} slots)"
                         )
                         logger.info(
                             f"Purchase deferred: {company_name} ({ticker}) - "
-                            f"scenario slots {current_slots}/{scenario_slot_limit} for {label}"
+                            f"scenario slots {current_slots} rows / {weighted_slots:.2f} weighted"
+                            f"/{scenario_slot_limit} for {label}"
                         )
                         state["should_save_watchlist"] = True
                         state["skip_reason"] = state["skip_reason"] or reason

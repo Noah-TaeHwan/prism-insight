@@ -635,6 +635,24 @@ def used_slots(scenarios):
     return sum(slot_fraction(s) for s in scenarios)
 
 
+def ai_cap_reached(holding_scenarios, max_portfolio_size):
+    """True when the AI's max_portfolio_size is used up by slot weight, not by row count.
+
+    User decision 2026-10-19: six 35% micro-split rows use about 2.1 slots, so an AI cap of 6 must
+    not block a new buy. Legacy rows count as 1 slot. The hard row cap (MAX_SLOTS rows) is a
+    separate check that callers keep unchanged.
+    """
+    return used_slots(holding_scenarios) >= max_portfolio_size
+
+
+def usage_line(rows, scenarios, hard_max, language="ko"):
+    """Portfolio-status line for the BUY prompt: holdings count and slot-weighted usage."""
+    used = used_slots(scenarios)
+    if language == "ko":
+        return f"보유 {rows}종목 / 실제 사용 비중 {used:.1f}슬롯 (최대 {hard_max})"
+    return f"Holdings {rows} / slot-weighted usage {used:.1f} slots (max {hard_max})"
+
+
 def keep_fresh_record(cursor, market, row_id, scenario):
     """Before rewriting a holding's scenario from an older snapshot (e.g. the highest_price ratchet),
     carry over the row's current micro_split block so a worker add or plan written meanwhile is not lost,
