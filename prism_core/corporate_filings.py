@@ -297,3 +297,62 @@ async def official_event_block_async(market: str, ticker: str, *, timeout: float
 
 def _timed_out(*_args, **_kwargs):
     raise TimeoutError("corporate_filings_timeout")
+
+
+# --- Re-entry entry check (no AI reads the block on that path) ------------------
+
+# The BUY prompt's rule for this block: no new entry while a control/going-private tender offer, a
+# delisting or a trading halt is in progress. Rule-approved re-entries (prism_core/reentry_v3_live.py)
+# have no AI to read it, so the same rule runs here on the official record, narrowed to filings whose
+# meaning does not depend on reading the document: US Form 25/15 can be an exchange transfer or a
+# non-common class and 8-K 3.01 is often a deficiency notice; KR titles saying the halt/delisting was
+# lifted or that the listing moved markets are not in progress.
+_US_REENTRY_BLOCK_FORMS = {"SC TO-T", "SC TO-C", "SC 14D9", "SC 13E3"}
+_US_REENTRY_BLOCK_8K = ("8-K 1.03",)
+_KR_REENTRY_BLOCK = re.compile(r"공개매수|상장폐지|정리매매|거래정지")
+_KR_REENTRY_NOT_IN_PROGRESS = re.compile(r"해제|해소|철회|취소|재개|이전상장|자기주식|자사주")
+
+
+def reentry_blocking_events(market: str, ticker: str, *, today: date | None = None,
+                            us_fetch=_fetch_sec, kr_fetch=_fetch_kr_titles) -> dict:
+    """{"status": "ok"|"unavailable"|"disabled", "blocking": [labels], "listed": n}; never raises.
+
+    "unavailable" is unknown, not clear: the caller records it and does not treat it as a pass."""
+    if os.getenv("CORP_FILINGS_ENABLED", "true").strip().lower() in ("0", "false", "no", "off"):
+        return {"status": "disabled", "blocking": [], "listed": 0}
+    today = today or datetime.now().date()
+    market = market.upper()
+    try:
+        if market == "US":
+            items = us_event_filings(ticker, today, fetch=us_fetch)
+        else:
+            items = kr_event_disclosures(ticker, today, fetch=kr_fetch)[0]
+    except Exception as exc:  # noqa: BLE001 — reported as unknown
+        logger.warning("[CORP_FILINGS] reentry market=%s ticker=%s lookup failed: %s",
+                       market, ticker, type(exc).__name__)
+        return {"status": "unavailable", "blocking": [], "listed": 0}
+    blocking = []
+    for item in items:
+        if item.kind != "event":
+            continue
+        if market == "US":
+            hit = _us_form(item.label) in _US_REENTRY_BLOCK_FORMS or any(k in item.note for k in _US_REENTRY_BLOCK_8K)
+        else:
+            compact = item.label.replace(" ", "")
+            hit = bool(_KR_REENTRY_BLOCK.search(compact)) and not _KR_REENTRY_NOT_IN_PROGRESS.search(compact)
+        if hit:
+            blocking.append(f"{item.filed} {item.label}")
+    logger.info("[CORP_FILINGS] reentry market=%s ticker=%s blocking=%d listed=%d",
+                market, ticker, len(blocking), len(items))
+    return {"status": "ok", "blocking": blocking, "listed": len(items)}
+
+
+async def reentry_blocking_events_async(market: str, ticker: str, *, timeout: float = 15, **kwargs) -> dict:
+    """Off the event loop; a timeout is 'unavailable' (unknown)."""
+    import asyncio
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(reentry_blocking_events, market, ticker, **kwargs), timeout)
+    except asyncio.TimeoutError:
+        logger.warning("[CORP_FILINGS] reentry market=%s ticker=%s lookup timed out", market, ticker)
+        return {"status": "unavailable", "blocking": [], "listed": 0}
