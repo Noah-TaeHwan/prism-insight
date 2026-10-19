@@ -428,7 +428,8 @@ def test_invalidation_expiry_sell_day_and_no_regime_ban():
     weak = dict(_evidence(), daily=_daily(closes=[10000] * 19 + [9900]))
     assert P.evaluate_plan(plan, _state(), weak, now=_now())["action"] == "INVALIDATED"
     assert P.evaluate_plan(plan, _state(), weak, now=_now())["reason"] == "CLOSE_BELOW"
-    stalled = dict(_evidence(), daily=_daily(closes=[10000] * 16 + [10200, 10100, 10050, 10000]))
+    stalled = dict(_evidence(closes=(10190, 10200), price=10200),
+                   daily=_daily(closes=[10000] * 16 + [10200, 10100, 10050, 10000]))
     stall_state = _state(entry_session="2026-09-25")
     assert P.evaluate_plan(plan, stall_state, stalled, now=_now())["reason"] == "STALL"
     assert P.evaluate_plan(plan, _state(), _evidence(session_date="2026-10-06"), now=_now())["reason"] == \
@@ -444,6 +445,24 @@ def test_invalidation_expiry_sell_day_and_no_regime_ban():
     bear = P.evaluate_plan(plan, _state(), _evidence(market_regime="strong_bear", market_pulse="CORRECTION"),
                            now=_now())
     assert calm["action"] == bear["action"] == "ADD" and calm["target_allocation"] == bear["target_allocation"]
+
+
+def test_stall_does_not_block_the_session_the_live_price_breaks_out():
+    """2026-10-20: stall cancels adds for a weak drift. Intraday, a live price above every close
+    since entry is progress, so the breakout add is not blocked until the close confirms it."""
+    plan, _ = _plan(invalidation={"stall_sessions": 3})
+    daily = _daily(closes=[10000] * 16 + [10200, 10100, 10050, 10000])  # 10,200 high, 3 weaker closes
+    state = _state(entry_session="2026-09-25")
+    breakout = dict(_evidence(closes=(10450, 10460), price=10460), daily=daily)
+    assert P.evaluate_plan(plan, state, breakout, now=_now())["action"] == "ADD"
+    # At or below the closing high the drift is still weak: the stall keeps cancelling.
+    drift = dict(_evidence(closes=(10190, 10200), price=10200), daily=daily)
+    assert P.evaluate_plan(plan, state, drift, now=_now())["reason"] == "STALL"
+    # The close phase already used today's official close; a weak close stays stalled.
+    weak_close = dict(drift, phase="CLOSE",
+                      today_daily={"date": SESSION, "open": 10100, "high": 10450, "low": 10050, "close": 10150,
+                                   "volume": 900})
+    assert P.evaluate_plan(plan, state, weak_close, now=_now(420))["reason"] == "STALL"
 
 
 def test_llm_json_parser_keeps_a_four_level_add_plan():

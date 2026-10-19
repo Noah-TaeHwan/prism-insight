@@ -562,7 +562,11 @@ def _invalidated(plan, evidence, daily, phase, entry_session):
         since = [close for day, close in closes if day >= str(entry_session)]
         if since:
             best = max(range(len(since)), key=lambda i: (since[i], i))
-            if len(since) - 1 - best >= rule["stall_sessions"]:
+            # A live price above every close since entry is progress: the stall rule cancels
+            # adds for a weak drift, not on the session the stock breaks out (2026-10-20).
+            live = _dec(evidence.get("price")) if phase == "INTRADAY" else None
+            broke_out = live is not None and live > since[best]
+            if len(since) - 1 - best >= rule["stall_sessions"] and not broke_out:
                 return "STALL"
     return None
 
