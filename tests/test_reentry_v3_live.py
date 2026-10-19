@@ -568,6 +568,25 @@ def test_real_agent_method_respects_the_reentry_cooldown_score_and_the_entry_loc
     assert asyncio.run(enter(**_kwargs(market)))["reason"] == "reentry_cooldown" and agent.calls == []
 
 
+@pytest.mark.parametrize("market", ["KR", "US"])
+def test_real_agent_method_skips_a_reentry_while_an_official_event_is_in_progress(market, monkeypatch, no_cooldown):
+    """The batch BUY reads the filing block; a rule-approved re-entry checks the same rule in code."""
+    from prism_core import corporate_filings as cf
+    agent = _Agent(_table(market))
+
+    async def blocking(*a, **k):
+        return {"status": "ok", "blocking": ["2026-10-07 공개매수신고서"], "listed": 1}
+    monkeypatch.setattr(cf, "reentry_blocking_events_async", blocking)
+    assert asyncio.run(_enter(market, agent, monkeypatch)(**_kwargs(market))) == \
+        {"bought": False, "reason": "corp_event_in_progress"} and agent.calls == []
+
+    async def unknown(*a, **k):
+        return {"status": "unavailable", "blocking": [], "listed": 0}
+    monkeypatch.setattr(cf, "reentry_blocking_events_async", unknown)
+    assert asyncio.run(_enter(market, agent, monkeypatch)(**_kwargs(market)))["bought"] is True
+    assert agent.calls[0]["scenario"]["_decision_context"]["official_filings"] == "unavailable"
+
+
 class _LockProbe:
     """Records entry_lock calls; the first step after the lock raises so the long entry body is not run."""
 

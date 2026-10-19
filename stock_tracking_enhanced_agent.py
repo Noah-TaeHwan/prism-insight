@@ -1237,7 +1237,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
         already held and slots (strict reads: a DB error skips the buy), sector limit, the signal price
         band on a fresh quote, regime/trend stamp and the stop cap of the tracker regime, regime score
         floor (env-gated), micro-split score floor, buy score >= min score, final buy gate, re-entry
-        cooldown, an available micro-split plan (never a full slot). Emits the batch's
+        cooldown, no official event in progress (prism_core.corporate_filings), an available micro-split plan (never a full slot). Emits the batch's
         candidate.evaluated / decision-input events. Returns {"bought", "reason", "holding_ids",
         "entry_price", "account_refs"}; no watchlist row or skip message is written for a refusal.
         """
@@ -1320,6 +1320,14 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 enforce = True
             if enforce:
                 return {"bought": False, "reason": "reentry_cooldown"}
+            # The batch BUY reads the official filing block (no entry while a control tender offer, a
+            # delisting or a trading halt is in progress); a rule-approved re-entry has no AI to read it.
+            from prism_core.corporate_filings import reentry_blocking_events_async
+            filings = await reentry_blocking_events_async("KR", ticker)
+            if filings["blocking"]:
+                logger.warning("[REENTRY_V3][KR] %s official event in progress: %s", ticker,
+                               "; ".join(filings["blocking"]))
+                return {"bought": False, "reason": "corp_event_in_progress"}
             if not micro_split_live.live_enabled("KR") or not micro_split_live.plan_available(
                     self, market="KR", ticker=ticker, current_price=current_price,
                     stop_loss=scenario.get("stop_loss")):
@@ -1328,7 +1336,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                                              "gate_allowed": True, "gate_reason": buy_gate.get("reason"),
                                              "gate_findings": buy_gate.get("findings") or [], "sector_diverse": True,
                                              "is_add": False, "rebound_pilot": False, "slots_used": slots_used,
-                                             "slots_max": getattr(self, "max_slots", 10), "source": "reentry_v3"}
+                                             "slots_max": getattr(self, "max_slots", 10), "source": "reentry_v3",
+                                             "official_filings": filings["status"]}
             trigger_info = getattr(self, "trigger_info_map", {}).get(ticker, {}) or {}
             observe_or_emit(self, emit_trading_context, "candidate.evaluated", market="KR", ticker=ticker,
                             company_name=company_name, decision_id=source_decision_id,

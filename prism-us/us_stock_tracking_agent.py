@@ -5019,7 +5019,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
         the scenario contract, adaptive-owned routing, already held and slots (strict reads: a DB error
         skips the buy; no pyramiding for re-entries), sector limit, regime score floor (env-gated),
         journal and macro score adjustment, micro-split score floor, effective score >= min score, final
-        buy gate, re-entry cooldown, an available micro-split plan (never a full slot). Emits the batch's
+        buy gate, re-entry cooldown, no official event in progress (prism_core.corporate_filings), an available micro-split plan (never a full slot). Emits the batch's
         micro-split shadow / candidate.evaluated / decision-input events. Returns {"bought", "reason",
         "holding_ids", "entry_price", "account_refs"}; no watchlist row or skip message for a refusal.
         """
@@ -5114,6 +5114,14 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                 enforce = True
             if enforce:
                 return {"bought": False, "reason": "reentry_cooldown"}
+            # The batch BUY reads the official filing block (no entry while a control tender offer, a
+            # delisting or a trading halt is in progress); a rule-approved re-entry has no AI to read it.
+            from prism_core.corporate_filings import reentry_blocking_events_async
+            filings = await reentry_blocking_events_async("US", ticker)
+            if filings["blocking"]:
+                logger.warning("[REENTRY_V3][US] %s official event in progress: %s", ticker,
+                               "; ".join(filings["blocking"]))
+                return {"bought": False, "reason": "corp_event_in_progress"}
             if not micro_split_live.live_enabled("US") or not micro_split_live.plan_available(
                     self, market="US", ticker=ticker, current_price=current_price,
                     stop_loss=scenario.get("stop_loss")):
@@ -5123,7 +5131,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                                              "gate_reason": buy_gate.get("reason"),
                                              "gate_findings": buy_gate.get("findings") or [], "sector_diverse": True,
                                              "rebound_pilot": False, "slots_used": current_slots,
-                                             "slots_max": scenario_slot_limit, "is_add": False, "source": "reentry_v3"}
+                                             "slots_max": scenario_slot_limit, "is_add": False, "source": "reentry_v3",
+                                             "official_filings": filings["status"]}
             observe_or_emit(self, emit_micro_split_shadow, market="US", ticker=ticker, decision_id=source_decision_id,
                             account_id=str(account.get("account_key") or "default"),
                             unit_amount=account.get("buy_amount_usd"), current_price=current_price,
