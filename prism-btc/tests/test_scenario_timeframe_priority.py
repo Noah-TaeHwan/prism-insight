@@ -48,5 +48,6 @@ def test_order_is_shared_instruction_without_higher_frame_veto():
 def test_missing_hourly_frame_remains_unknown_despite_highest_priority():
     data = build_ma_structure_context(snapshot(), dict(now=NOW/1000, mark_price=100))
     assert data['decision_priority']['descending'][0] == '1h'
-    assert '1h' not in data['primary']
-    assert '30m' in data['primary']
+    assert data['primary']['1h']['status'] == 'unavailable'
+    assert data['primary']['1h']['points'] == []
+    assert data['primary']['30m']['status'] == 'available'
