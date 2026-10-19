@@ -5,6 +5,7 @@ import math
 import sqlite3
 
 from live.scenario_entry_contract import valid_record
+from live.scenario_model_input import project_model_input
 
 MAX_BYTES = 6000
 SCAN_LIMIT = 288
@@ -60,8 +61,6 @@ def project_position_flow_input(payload):
     Projection audit hashes describe the actual trimmed input. The frozen source
     is untouched, and every omission is disclosed inside the model-facing flow.
     """
-    from live.scenario_model_input import project_model_input
-
     projected, audit = project_model_input(payload)
     flow = (payload.get("contract_context") or {}).get("position_flow")
     if _size(projected) <= _MODEL_INPUT_LIMIT or not isinstance(flow, dict):
