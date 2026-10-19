@@ -432,13 +432,18 @@ def test_weekly_report_marks_partial_positions(live_on):
 def test_buy_prompt_block_states_the_frame_and_what_it_supersedes(live_on):
     """2026-10-03 framing: scout entry, asymmetric error cost, and explicit overrides of shared lines."""
     ko = live.buy_prompt_block("KR", "ko")
-    assert "정찰병 진입" in ko and "놓친 진입은 되돌릴 수 없습니다" in ko
-    assert "시스템 제약 4(분할매매 불가·올인/올아웃)는 이번 매수에 적용되지 않습니다" in ko
+    # 2026-10-19: a missed entry is re-caught only by the re-entry rule (not "never again"), and the shared
+    # constraint 4 now states system sizing, so the frame no longer has to supersede "all-in/all-out".
+    assert "정찰병 진입" in ko and "놓친 진입은 재진입 규칙이 신호를 낼 때에만 다시 잡히고" in ko
+    assert "되돌릴 수 없습니다" not in ko and "올인/올아웃" not in ko and "parabolic" not in ko
+    assert "이번 매수는 초분할(최초 비중 + 증액 시나리오)이고 매도는 기존대로 전량입니다(시스템 제약 4)" in ko
     assert "effective_score ≥ 5" in ko and "손익비 ≥ 현재 국면 floor" in ko
     assert "미진입 단독 사유 1(지지선이 -10% 이하)은 이번 진입에 적용하지 않습니다" in ko
     assert "현재가 +3% 이내이면 그 저항은 목표가 아니라 증액 조건" in ko and "횡보·약세" in ko
     en = live.buy_prompt_block("US", "en")
-    assert "scout entry" in en and "System constraint 4" in en and "within +3% of the current" in en
+    assert "scout entry" in en and "(system constraint 4)" in en and "within +3% of the current" in en
+    assert "re-caught only when the re-entry rule fires" in en
+    assert "cannot be recovered" not in en and "all-in/all-out" not in en and "parabolic" not in en
     assert "Standalone no-entry reason 1" in en and "effective_score >= 5" in en
     # 2026-10-04: the 7-holdings "buy_score >= 6 only" portfolio rule keeps precedence over the floor of 5.
     assert "보유 종목이 7개 이상이면 '6점 이상만 진입' 규칙은 그대로 적용됩니다" in ko

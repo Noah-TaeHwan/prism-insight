@@ -1215,6 +1215,7 @@ class StockTrackingAgent:
                 - Recommended Adjustment: {'+' if adjustment > 0 else ''}{adjustment} points
                 - Reason: {', '.join(reasons) if reasons else 'N/A'}
                 - ⚠️ This adjustment is a reference based on past experience.
+                - 참고용입니다. buy_score·effective_score에 더하지 마십시오(시스템도 점수에 반영하지 않고 기록만 합니다).
                 """
 
                     else:
@@ -1223,6 +1224,7 @@ class StockTrackingAgent:
                 - Recommended Adjustment: {'+' if adjustment > 0 else ''}{adjustment} points
                 - Reason: {', '.join(reasons) if reasons else 'N/A'}
                 - ⚠️ This adjustment is a reference based on past experience.
+                - Reference only: do not add it to buy_score or effective_score (the system records it and does not apply it).
                 """
 
             journal_influence_context = build_journal_influence_context(

@@ -86,7 +86,9 @@ async def main():
     baseline = seen[0]
     assert seen[1] == baseline and seen[2] == baseline
     # LIVE on: the score-floor block (PR #873) and then the add_plan block are appended.
-    expected = micro_split_live.buy_prompt_block(market, language) + buy_block(market, prompt_language, None)
+    # 2026-10-19: the US BUY add_plan block follows the agent language like KR (was fixed "en");
+    # the US holdings-review block below is sell-side and still English (prompt_language).
+    expected = micro_split_live.buy_prompt_block(market, language) + buy_block(market, language, None)
     assert seen[3].startswith(baseline) and seen[3][len(baseline):] == expected
 
     # Holdings review on a micro-split row.

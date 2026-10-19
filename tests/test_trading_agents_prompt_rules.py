@@ -303,30 +303,32 @@ def test_parabolic_regime_row_in_matrix_en():
     assert "| parabolic     | 4 | 0.7 | -7% | 1+ | 0 |" in agent.instruction
 
 
-def test_parabolic_activation_conditions_ko():
+# 2026-10-19: the LLM no longer self-selects parabolic from KOSPI 90/30-day returns (inputs it never
+# receives). The computed regime never outputs parabolic (cores/data_prefetch.py), the scenario regime is
+# overwritten by the computed one (cores/regime_policy.py stamp_scenario_market_regime) and the buy gate
+# uses the computed value, so the prompt says: copy the system value, never pick parabolic yourself.
+def test_parabolic_is_copied_from_the_system_regime_ko():
     agent = create_trading_scenario_agent(language="ko")
-    # All 4 activation conditions must be present
-    assert "KOSPI 90일 수익률 ≥ +30%" in agent.instruction
-    assert "KOSPI 30일 수익률 ≥ +10%" in agent.instruction
-    assert "일중 상승률 상위주 / 마감 강도 상위주 / 갭 상승 모멘텀 상위주" in agent.instruction
-    # Exclude volume surge and capital inflow from parabolic
-    assert "거래량 급증 / 시총 대비 자금 유입은 제외" in agent.instruction
+    assert "KOSPI 90일 수익률" not in agent.instruction and "KOSPI 30일 수익률" not in agent.instruction
+    assert "parabolic 행 적용 조건" not in agent.instruction
+    assert "현재 시스템 국면 계산은 parabolic을 내지 않으므로 직접 parabolic을 고르지 마십시오" in agent.instruction
 
 
-def test_parabolic_activation_conditions_en():
+def test_parabolic_is_copied_from_the_system_regime_en():
     agent = create_trading_scenario_agent(language="en")
-    assert "KOSPI 90-day return ≥ +30%" in agent.instruction
-    assert "KOSPI 30-day return ≥ +10%" in agent.instruction
-    assert "Daily Rise Top / Closing Strength / Gap Up Momentum" in agent.instruction
-    assert 'excludes** "Volume Surge" and' in agent.instruction
+    assert "KOSPI 90-day return" not in agent.instruction and "KOSPI 30-day return" not in agent.instruction
+    assert "Parabolic regime activation" not in agent.instruction
+    assert "never select parabolic yourself" in agent.instruction
 
 
+# 2026-10-19: distribution days come from the Market Pulse facts line the buy gate reads (cores/buy_gate.py
+# _DIST_RE, cores/market_pulse.py), not index_summary (never sent to BUY) or a report "4-week" fallback.
 def test_distribution_day_kill_switch_ko():
     agent = create_trading_scenario_agent(language="ko")
     assert "Distribution Day Kill Switch" in agent.instruction
     assert "분포일" in agent.instruction
-    # 4-week / 4-day rule
-    assert "4주 내" in agent.instruction
+    assert "Market Pulse … 분산일(distribution days" in agent.instruction
+    assert "index_summary" not in agent.instruction and "4주 내" not in agent.instruction
     # Demotion mapping must be explicit
     assert "parabolic → strong_bull" in agent.instruction
 
@@ -335,6 +337,8 @@ def test_distribution_day_kill_switch_en():
     agent = create_trading_scenario_agent(language="en")
     assert "Distribution Day Kill Switch" in agent.instruction
     assert "distribution days" in agent.instruction
+    assert "Market Pulse … 분산일(distribution days" in agent.instruction
+    assert "index_summary" not in agent.instruction
     assert "parabolic → strong_bull" in agent.instruction
 
 
@@ -352,19 +356,18 @@ def test_target_price_fallback_rule_en():
     assert "15~30%" not in agent.instruction
 
 
-def test_parabolic_position_sizing_ko():
+# 2026-10-19: the parabolic sizing section is removed with the self-selected parabolic row; sizing is
+# set by the system (constraint 4: per-account slot, micro-split, rebound pilot half slot).
+def test_parabolic_position_sizing_section_removed_ko():
     agent = create_trading_scenario_agent(language="ko")
-    # v2.10.0: parabolic switched from sizing reduction to active full deployment
-    assert "parabolic 포지션 운영" in agent.instruction
-    assert "슬롯 축소 금지" in agent.instruction
-    assert "max_portfolio_size를 보고서 기준값 그대로 사용" in agent.instruction
+    assert "parabolic 포지션 운영" not in agent.instruction
+    assert "비중은 시스템이 정합니다" in agent.instruction
 
 
-def test_parabolic_position_sizing_en():
+def test_parabolic_position_sizing_section_removed_en():
     agent = create_trading_scenario_agent(language="en")
-    assert "Parabolic position management" in agent.instruction
-    assert "Do NOT reduce slots" in agent.instruction
-    assert "use the report-derived max_portfolio_size as-is" in agent.instruction
+    assert "Parabolic position management" not in agent.instruction
+    assert "The system sets the size" in agent.instruction
 
 
 def test_parabolic_min_score_in_schema_ko():
