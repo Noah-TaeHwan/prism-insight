@@ -93,7 +93,7 @@ def test_missing_levels_and_confirmed_forming_straddle_are_not_collapsed():
 def test_both_review_requests_keep_current_facts_and_unmodified_bad_candidate_prose():
     ctx = context()
     ctx.update(now=1792419006.002721, input_captured_at=1792419005.271,
-               account_captured_at=1792419004.966, mark_price=MARK)
+               account_captured_at=1792419004.966, mark_price=MARK, conditional_entry_version=1)
     snap = incident_snapshot()
     original = deepcopy((snap, ctx))
     calls = []
