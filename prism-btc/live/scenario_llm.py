@@ -687,6 +687,18 @@ obstacles are sorted from CONTEXT_MARK_PRICE, not from the proposed entry;
 obstacle lists and higher_frames.level_ids reference the single levels dictionary
 by stable timeframe.MA.confirmed/forming IDs. Look up each ID there; repeated
 references are not extra levels. Re-evaluate which levels lie on that actual path.
+relative_to_mark describes the LEVEL relative to reference.price (CURRENT Mark),
+not price relative to the MA and not a proposed entry/trigger: BELOW means the
+level is below current Mark (distance_price < 0), ABOVE means above (> 0), EQUAL
+means equal (= 0). Keep this current observation separate from a hypothetical
+entry-to-TP path. A level below current Mark but above a proposed SHORT entry is
+still below current Mark; mirror this for LONG. A planned crossing or future entry
+does not establish that price has already passed a level. Only supplied observed
+chronology can support that past-tense claim. For decisive levels, bind the stated
+position to its exact timeframe/MA/confirmed-or-forming ID and reference basis;
+do not enumerate every MA. Missing reference/levels remain unknown, never infer
+their side from the proposed trade. In SELECT, check candidate rationale against
+the current structured level facts; a candidate's prose is not market evidence.
 Last-trade SMA and MarkPrice
 are different bases, not basis-adjusted execution evidence. Confirmed/forming
 versions sharing same_line_group are one evolving line, not independent votes.
