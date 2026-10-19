@@ -141,6 +141,7 @@ def test_full_holding_two_candidate_select_fee_views_fit_and_restore(target_coun
     from tests.test_scenario_snapshot import snapshot
     from live import scenario_calculated_review as review
     from live.scenario_model_input import project_model_input, restore_model_input
+    from live.scenario_position_flow import project_position_flow_input
     from live.scenario_preview import response_contract
     from live.scenario_recovery import numeric_market
     from live.scenario_runner_economics import runner_economics
@@ -179,13 +180,13 @@ def test_full_holding_two_candidate_select_fee_views_fit_and_restore(target_coun
         return value
     def project(value):
         originals.append(deepcopy(value))
-        result=project_model_input(value)
+        result=project_position_flow_input(value)
         if 'calculated_candidates' in value:
             baseline=project_model_input(without_fee_additions(value))[1]['projected_utf8_bytes']
             sizes.append((baseline,result[1]['projected_utf8_bytes']))
             assert restore_model_input(result[0])==value
         return result
-    monkeypatch.setattr(review,'project_model_input',project)
+    monkeypatch.setattr(review,'project_position_flow_input',project)
     calls=[]
     def generate(**kwargs):
         calls.append(kwargs)

@@ -297,3 +297,15 @@ def test_oversized_input_without_optional_flow_remains_rejected(monkeypatch):
     monkeypatch.setattr(module, "_MODEL_INPUT_LIMIT", 100)
     payload = dict(market_snapshot=dict(mandatory="x" * 1000), contract_context={})
     assert project_position_flow_input(payload) == project_model_input(payload)
+
+
+@pytest.mark.parametrize("bad_value", [True, False, "81000.12345678912", {"price": 81000}])
+def test_sql_projection_rejects_non_numeric_scalars(history, bad_value):
+    conn, active, ctx, _ = history
+    decision(history, 2)
+    stored = json.loads(conn.execute("SELECT context FROM llm_scenario_decisions WHERE slot=2").fetchone()[0])
+    stored["mark_price"] = bad_value
+    conn.execute("UPDATE llm_scenario_decisions SET context=? WHERE slot=2", (json.dumps(stored),))
+    flow = build_position_flow(conn, active, ctx, 9000)
+    assert flow["historical_observation_changes"] == []
+    assert flow["coverage"]["invalid_rows"] == 1

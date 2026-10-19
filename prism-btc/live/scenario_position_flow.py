@@ -196,25 +196,48 @@ def _build_position_flow(conn, active, context, now):
         # boundary; snapshots and full prompts are intentionally never fetched.
         # SQLite 3.26 JSON serialization rounds scalar doubles. Return numeric
         # columns directly, and parse preserved JSON array text only in Python.
-        projections = []
-        for key in _CONTEXT_FIELDS:
-            extract = f"json_extract(context,'$.{key}')"
-            if key in {"positions", "target_status"}:
-                extract = f"substr({extract},1,{_ROW_BYTES + 1})"
-            elif key in {"scenario_id", "accounting_status"}:
-                extract = (f"CASE WHEN length({extract})<=128 THEN {extract} "
-                           "ELSE NULL END")
-            else:
-                extract = (f"CASE WHEN json_type(context,'$.{key}') IN ('integer','real') "
-                           f"THEN {extract} WHEN json_type(context,'$.{key}') IS NULL "
-                           f"OR json_type(context,'$.{key}')='null' THEN NULL ELSE 'INVALID_NUMBER' END")
-            projections.append(f"CASE WHEN json_valid(context) THEN {extract} END")
-        rows = conn.execute(f"""
-            SELECT slot,json_valid(context),{','.join(projections)},
+        rows = conn.execute("""
+            SELECT slot,json_valid(context),
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN length(json_extract(context,'$.scenario_id'))<=128
+                    THEN json_extract(context,'$.scenario_id') END END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN json_type(context,'$.now') IN ('integer','real') THEN json_extract(context,'$.now')
+                    WHEN json_type(context,'$.now') IS NULL OR json_type(context,'$.now')='null'
+                    THEN NULL ELSE 'INVALID_NUMBER' END END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN json_type(context,'$.input_captured_at') IN ('integer','real')
+                    THEN json_extract(context,'$.input_captured_at')
+                    WHEN json_type(context,'$.input_captured_at') IS NULL OR json_type(context,'$.input_captured_at')='null'
+                    THEN NULL ELSE 'INVALID_NUMBER' END END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN json_type(context,'$.account_captured_at') IN ('integer','real')
+                    THEN json_extract(context,'$.account_captured_at')
+                    WHEN json_type(context,'$.account_captured_at') IS NULL OR json_type(context,'$.account_captured_at')='null'
+                    THEN NULL ELSE 'INVALID_NUMBER' END END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN json_type(context,'$.mark_price') IN ('integer','real') THEN json_extract(context,'$.mark_price')
+                    WHEN json_type(context,'$.mark_price') IS NULL OR json_type(context,'$.mark_price')='null'
+                    THEN NULL ELSE 'INVALID_NUMBER' END END,
+                CASE WHEN json_valid(context) THEN substr(json_extract(context,'$.positions'),1,?) END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN json_type(context,'$.previous_hard_stop') IN ('integer','real')
+                    THEN json_extract(context,'$.previous_hard_stop')
+                    WHEN json_type(context,'$.previous_hard_stop') IS NULL OR json_type(context,'$.previous_hard_stop')='null'
+                    THEN NULL ELSE 'INVALID_NUMBER' END END,
+                CASE WHEN json_valid(context) THEN substr(json_extract(context,'$.target_status'),1,?) END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN length(json_extract(context,'$.accounting_status'))<=128
+                    THEN json_extract(context,'$.accounting_status') END END,
+                CASE WHEN json_valid(context) THEN CASE
+                    WHEN json_type(context,'$.recorded_scenario_net') IN ('integer','real')
+                    THEN json_extract(context,'$.recorded_scenario_net')
+                    WHEN json_type(context,'$.recorded_scenario_net') IS NULL OR json_type(context,'$.recorded_scenario_net')='null'
+                    THEN NULL ELSE 'INVALID_NUMBER' END END,
                 substr(proposal,1,?),substr(outcome,1,?)
             FROM llm_scenario_decisions WHERE slot<? AND outcome IS NOT NULL
             ORDER BY slot DESC LIMIT ?
-            """, (_ROW_BYTES + 1, _ROW_BYTES + 1,
+            """, (_ROW_BYTES + 1, _ROW_BYTES + 1, _ROW_BYTES + 1, _ROW_BYTES + 1,
                   int(now // 300), SCAN_LIMIT + 1)).fetchall()
         coverage["older_history"] = "OMITTED_SCAN_LIMIT" if len(rows) > SCAN_LIMIT else "NO_OLDER_STORED_ROWS"
         rows = rows[:SCAN_LIMIT]
