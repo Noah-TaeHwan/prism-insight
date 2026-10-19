@@ -112,7 +112,7 @@ def build_ma_structure_context(snapshot: dict, context: dict) -> dict:
               "long_upward_obstacles": [], "short_downward_obstacles": [],
               "equal_reference_levels": [], "levels": {},
               "levels_price_basis": "LAST_TRADE_OHLC_SMA", "reference": None,
-              "decision_priority": {"descending": ["30m", "1h", "4h", "12h", "1d", "1w"],
+              "decision_priority": {"descending": ["1h", "30m", "4h", "12h", "1d", "1w"],
                   "timing_only": "15m", "interpretation": "QUALITATIVE_EMPHASIS_NOT_PROBABILITY_OR_VETO"},
               "extrema_interpretation": "RECENT_BAR_EXTREMES_NOT_CONFIRMED_SWING_OR_SUPPORT_RESISTANCE"}
     as_of, now = snapshot.get("as_of_ms"), context.get("now")
