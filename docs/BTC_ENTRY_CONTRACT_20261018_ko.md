@@ -5,6 +5,24 @@
 
 ## 구현 전 기준
 
+### 2026-10-19 판단 연속성 보완 (M3/M4)
+
+- 확인한 결함: last_thesis_assessment는 저장하지만 다음 모델 입력에서 빠졌다.
+  과거 rationale 전체를 복원하지 않고 같은 불변 contract_id의 마지막 유효 판단 한 건만
+  previous_thesis_assessment로 전달한다. 상태·최대 240자 이유·입력 기준 시각·과거 모델
+  의견이라는 출처를 포함한다. 기존 기록에 시각이 없으면 null이며 추정하지 않는다.
+- 목표: 직전 약화 이유를 비교할 수 있게 한다. 상태 변경은 현재 근거 또는 이전 오판을
+  정정하는 이유를 설명한다. 설명의 의미를 코드가 검증했다고 주장하지 않는다.
+- 적합성: TREND/BREAKOUT/RANGE와 LONG/SHORT에 같은 원칙을 쓴다. 기존 판단을
+  사실/명령으로 취급하지 않으며 약화 횟수·시간에 따른 강제 EXIT, SL 축소, 상태 고정은
+  추가하지 않는다. 숫자 실패 latch와 FAILED→EXIT 안전 규칙은 그대로다.
+- 연결: 검증된 WAIT/ADJUST/EXIT의 상태 저장 → contract_context → 단일/계산 분리
+  DRAFT/SELECT 공통 입력 → 기존 guard/집행. 새 과거 의견은 경제 계산·권한이 아니다.
+- 검증 기준: 누락 재현, 동일 계약 결합, 길이/상태 오류와 legacy 제외, 시각 미확인,
+  재시작 후 유지, 두 단계의 입력/정확 재생, 이전 WEAKENING에서 현재 WAIT 허용.
+  기존 FAILED 집행 회귀는 유지한다. 수익 개선·정성 판단 정확도는 별도 관측 대상이다.
+- 배포 전 테스트·CI 및 배포 후 자연 판단은 PR 영수증에 분리해 기록한다.
+
 - 최초 OPEN의 작은 entry_contract를 action/input/scenario ID에 묶어 active에 불변 보존한다.
 - regime은 TREND/BREAKOUT/RANGE. MA 사이 위치만으로 RANGE를 추정하지 않는다.
 - premise/expected_progress는 각각 최대 240자로 최초 진입 전제를 보유 판단에 연결한다.
