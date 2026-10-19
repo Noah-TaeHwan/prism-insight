@@ -40,7 +40,7 @@ def test_flow_and_priority_survive_real_two_phase_requests():
     for call in calls:
         restored = restore_model_input(json.loads(call['user_prompt']))
         assert restored['contract_context']['position_flow'] == ctx['position_flow']
-        assert restored['contract_context']['ma_structure']['decision_priority']['descending'][0] == '30m'
+        assert restored['contract_context']['ma_structure']['decision_priority']['descending'][0] == '1h'
 
 
 def test_flow_helper_is_part_of_policy_provenance():

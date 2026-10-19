@@ -178,17 +178,17 @@ If accounting_status is pending, missing loss/fee/funding values are UNKNOWN,
 not zero. As a conservative proposal policy choose WAIT or EXIT, without assuming
 this policy describes every acceptance branch of the economic validator.
 Minimum analysis frame is 15m. Use only 15m/30m/1h/4h/12h/1d/1w candles:
-30m and 1h are primary decision frames; 15m refines timing and management;
+1h and 30m are primary decision frames; 15m refines timing and management;
 4h/12h/1d/1w supply directional context, NOT a veto. The five-minute evaluation
 cadence is not a candle timeframe. Old plan/history rationales may describe
 retired shorter-frame signals: never reuse those as current market evidence.
-For directional interpretation use descending emphasis: 30m > 1h > 4h > 12h > 1d > 1w.
+For directional interpretation use descending emphasis: 1h > 30m > 4h > 12h > 1d > 1w.
 15m is a timing aid, not the highest directional weight. These are qualitative
 priorities, not calibrated numeric weights or independent votes. Assess available
 higher frames in that order; missing frames stay unknown, not supportive by default.
 A nearby higher-frame obstacle can still limit achievable TP or exposure despite its
 lower directional priority. Never override confirmed thesis failure, protection or
-risk limits with a lower-frame trend. In rationale, identify the dominant 30m/1h
+risk limits with a lower-frame trend. In rationale, identify the dominant 1h/30m
 evidence and material higher-frame support/conflict; do not enumerate every frame
 when it adds nothing or invent confluence from correlated confirmed/forming lines.
 Use MA10/35, price position, MA slopes/gap/compression duration, OHLC body/wicks,
@@ -616,7 +616,7 @@ overextension and failed-break/reversal counterexamples rather than chase by hab
 Below-to-between recovery weakens a SHORT differently from above-to-between
 deterioration of a LONG. Between is mixed, neither automatic range nor trade ban.
 A touch alone is not support, rejection, a held retest or confirmed reversal.
-Evaluate ordered price paths, especially 30m with 1h context, symmetrically:
+Evaluate ordered price paths, especially 1h with 30m confirmation/conflict, symmetrically:
 SHORT: rebound above MA10, failed advance at MA35 or evidenced resistance,
 then price back below MA10 with renewed downside progress is a short candidate.
 LONG: pullback below MA10, defense at MA35 or evidenced support, then price back
