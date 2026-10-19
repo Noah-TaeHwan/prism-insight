@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 
 from engine.scenario_ma_context import build_ma_structure_context
-from live.scenario_model_input import project_model_input
+from live.scenario_position_flow import project_position_flow_input
 
 MODEL = "gpt-6-luna"
 EFFORT = "high"
@@ -182,6 +182,15 @@ Minimum analysis frame is 15m. Use only 15m/30m/1h/4h/12h/1d/1w candles:
 4h/12h/1d/1w supply directional context, NOT a veto. The five-minute evaluation
 cadence is not a candle timeframe. Old plan/history rationales may describe
 retired shorter-frame signals: never reuse those as current market evidence.
+For directional interpretation use descending emphasis: 30m > 1h > 4h > 12h > 1d > 1w.
+15m is a timing aid, not the highest directional weight. These are qualitative
+priorities, not calibrated numeric weights or independent votes. Assess available
+higher frames in that order; missing frames stay unknown, not supportive by default.
+A nearby higher-frame obstacle can still limit achievable TP or exposure despite its
+lower directional priority. Never override confirmed thesis failure, protection or
+risk limits with a lower-frame trend. In rationale, identify the dominant 30m/1h
+evidence and material higher-frame support/conflict; do not enumerate every frame
+when it adds nothing or invent confluence from correlated confirmed/forming lines.
 Use MA10/35, price position, MA slopes/gap/compression duration, OHLC body/wicks,
 observed volume pace and remaining candle time. MA is lagging. Between MAs is
 mixed, not necessarily range-bound. Compression does not guarantee a breakout.
@@ -399,6 +408,22 @@ alone is not a mandatory full EXIT. Compare protected WAIT, conditional partial
 SL and full EXIT using actual primary-structure failure versus normal pullback;
 do not require a candle close or MA35 break when risk, protection or genuine
 invalidation already requires exit. Symmetric rules apply to SHORT.
+When position_flow is supplied, review this SAME scenario from original intent
+through confirmed entry evidence, observed holdings/target states, requested plan
+changes and thesis transitions before choosing WAIT/ADJUST/EXIT. Use its original
+anchor to preserve the entry's purpose; use current account/market evidence for
+the decision. History and past rationales are not current market facts or orders.
+An intent, pending adjustment or observation delta is NOT a confirmed fill or
+installed TP/SL. Use the separate current verified evidence; do not double-count
+partial fills, realized profit or fees across history records. Historical target
+prices are not automatically current targets. Consult unresolved review checkpoints
+as advisory conditions, never as installed orders or an excuse to delay failure exit.
+The flow is a bounded extract: read coverage/omissions and unknown fields, never
+claim all intervening history or no intervening changes. Missing/partial history
+does not by itself require EXIT or block a justified current decision. Do not
+invent earlier MFE/MAE, regenerate missing reasons, or use past profits to excuse
+current invalidation. Explain a material change from the prior plan using current
+evidence; correct mistaken prior opinions rather than perpetuating them.
 When entry_thesis is VERIFIED, use its original executed entry anchors and first
 fill time alongside the supplied timestamped 15m/30m/1h price path. Separately
 assess the broad MA trend and whether this particular entry still has supporting
@@ -805,7 +830,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     payload = {"market_snapshot": snapshot, "contract_context": model_context,
                "response_contract": response_contract}
     try:
-        payload, projection_audit = project_model_input(payload)
+        payload, projection_audit = project_position_flow_input(payload)
         prompt = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (TypeError, ValueError):
         raise ScenarioModelError("invalid_input") from None

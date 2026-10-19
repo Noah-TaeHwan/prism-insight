@@ -112,6 +112,8 @@ def build_ma_structure_context(snapshot: dict, context: dict) -> dict:
               "long_upward_obstacles": [], "short_downward_obstacles": [],
               "equal_reference_levels": [], "levels": {},
               "levels_price_basis": "LAST_TRADE_OHLC_SMA", "reference": None,
+              "decision_priority": {"descending": ["30m", "1h", "4h", "12h", "1d", "1w"],
+                  "timing_only": "15m", "interpretation": "QUALITATIVE_EMPHASIS_NOT_PROBABILITY_OR_VETO"},
               "extrema_interpretation": "RECENT_BAR_EXTREMES_NOT_CONFIRMED_SWING_OR_SUPPORT_RESISTANCE"}
     as_of, now = snapshot.get("as_of_ms"), context.get("now")
     if not _number(as_of) or not _number(now) or as_of > now * 1000:
@@ -194,7 +196,9 @@ def build_ma_structure_context(snapshot: dict, context: dict) -> dict:
                         result[bucket].append(level_id)
                     result["levels"][level_id] = level
                     levels.append(level_id)
-            result["higher_frames"][frame] = {"status": facts["status"], "source": source, "level_ids": levels}
+            result["higher_frames"][frame] = {"status": facts["status"], "source": source, "level_ids": levels,
+                "latest_structure": {key: points[-1][key] for key in
+                    ("as_of_ms", "is_confirmed", "ma_order", "price_position")} if points else None}
     result["long_upward_obstacles"].sort(key=lambda key: result["levels"][key]["price"])
     result["short_downward_obstacles"].sort(key=lambda key: -result["levels"][key]["price"])
     result["status"] = "available" if any(p["status"] == "available" for p in result["primary"].values()) else "unavailable"

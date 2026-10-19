@@ -690,6 +690,8 @@ class ScenarioRuntime:
                         outcome["lock_wait_seconds"] = snapshot_lock["lock_wait_seconds"]
                     return outcome
                 ctx["now"] = now
+                from live.scenario_position_flow import build_position_flow
+                ctx["position_flow"] = build_position_flow(self.conn, current["active"], ctx, now)
                 if ctx.get("recovery_observing"):
                     recovery.prepare_input(self.conn, current, ctx, snap, slot, self.clock())
                     # Baseline, mandatory INPUT and the full decision input must

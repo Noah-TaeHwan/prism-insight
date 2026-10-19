@@ -14,9 +14,9 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct17 approval: rolling cost-net recovery without changing active legacy permits.
+    # Oct19 approval: same-position continuity and explicit timeframe emphasis, no risk change.
     expected = {
-        'SYSTEM_PROMPT': '2c54109c97b35e193a751e709620da7af161b8119052629d5263527777c693e2',
+        'SYSTEM_PROMPT': 'abb50db6e0e889685172a8f44ae8d624070339092e31c621f6d5259bafeec3df',
         'MA_STRUCTURE_PROMPT': '5c9ab2f52121bccac987b7b65d3d5a494b7c7aaa0e79b9a01dc3b03d86785bf8',
         'FLAT_ENTRY_PROMPT': '15f323b7af2c2e0a790f1c12ea819244d8722c8d7214b43a57560d557f98f193',
     }
