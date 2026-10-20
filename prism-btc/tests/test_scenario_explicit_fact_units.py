@@ -1,12 +1,14 @@
 """Deterministic fact/units representation, not free-text correctness guarantees."""
 from copy import deepcopy
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from engine.scenario_ma_context import build_ma_structure_context
-from live.scenario_calculated_review import _model_payload, calculate_candidate, receipt_hash
+from live.scenario_calculated_review import _model_payload, calculate_candidate, receipt_hash, research_review
 from live.scenario_model_input import restore_model_input
+from live.scenario_preview import response_contract
 from tests.test_scenario_calculated_review import context, run, wire
 from tests.test_scenario_ma_context import NOW, point, snapshot
 
@@ -89,3 +91,33 @@ def test_units_are_supplied_only_with_calculations_in_real_two_phase_requests():
     assert 'calculation_field_units' not in draft
     assert 'projection.targets' in selection['calculation_field_units']
     assert all(len(call['user_prompt'].encode()) <= 100000 for call in calls)
+
+
+def test_both_phases_deliver_new_relations_and_keep_snapshot_and_receipts_exact():
+    ctx = context()
+    ctx.update(now=NOW / 1000, input_captured_at=NOW / 1000, account_captured_at=NOW / 1000)
+    snap = dict(snapshot(), valid=True)
+    original = deepcopy((snap, ctx))
+    calls = []
+
+    def generate(**request):
+        calls.append(request)
+        payload = restore_model_input(json.loads(request['user_prompt']))
+        assert payload['market_snapshot'] == snap
+        points = payload['contract_context']['ma_structure']['primary']['30m']['points']
+        assert [p['phase'] for p in points] == ['CONFIRMED', 'FORMING']
+        assert all((p['close_vs_ma10'], p['close_vs_ma35']) == ('BELOW', 'ABOVE') for p in points)
+        if len(calls) == 1:
+            candidate, wait = wire(ctx, 'LONG'), wire(ctx)
+            candidate['expires_at'] = wait['expires_at'] = ctx['now'] + 100
+            reply = dict(wait_proposal=wait, candidates=[candidate], no_candidate_reason='')
+        else:
+            assert payload['calculation_field_units']['projection.targets']['quantity'] == 'BTC'
+            chosen = payload['calculated_candidates']['wait']
+            reply = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale='fixture')
+        return SimpleNamespace(text=json.dumps(reply))
+
+    result = research_review(snap, ctx, response_contract(ctx), generate=generate,
+                             record=lambda _: None, clock=lambda: ctx['now'])
+    assert len(calls) == 2 and result['orders_submitted'] == 0
+    assert (snap, ctx) == original
