@@ -447,8 +447,8 @@ def main(argv=None):
     try:
         from dotenv import load_dotenv
         load_dotenv(ROOT / ".env", override=False)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as error:  # noqa: BLE001 - the environment may already carry the settings
+        print(f".env not loaded: {type(error).__name__}", file=sys.stderr)
     if not enabled():
         print("OPS_WATCHDOG_ENABLED=false -> skipped")
         return 0
