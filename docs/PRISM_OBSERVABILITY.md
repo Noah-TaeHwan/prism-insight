@@ -35,6 +35,24 @@ authorization are replaced with `[REDACTED]` before the local append.
 - One corrupt JSONL record is skipped and cannot block later records.
 - ClickStack is not queried from any buy, sell, hard-stop, or fill path.
 
+## Operations watchdog (maintenance chat)
+
+`tools/ops_watchdog.py` (db-server cron, every 5 minutes, added 2026-10-21 after US re-entry
+orders failed silently from 10/13 to 10/20) reads the job logs incrementally and sends one grouped
+message to the private maintenance chat (`prism_core.ops_alert`):
+
+- `[장애]`: Traceback/CRITICAL, failed sell/amend/cancel orders, a market a loop skipped (trading
+  context or holdings failed), failed re-entry orders, a loop with no completed run inside its session
+  window, a daily job past its deadline.
+- `[주의]`: data a check could not get (price, daily bars, live regime, sell facts) and other ERROR lines.
+- The same signature is held for 6 hours, then re-sent with its count; a stopped job that runs again
+  sends `[복구]`; a daily summary at 08:30 KST lists runs and re-entry signals → orders. No morning
+  summary means the watchdog itself is down.
+
+Jobs and their heartbeat lines are listed in `JOBS` (the loops' own summary lines, pinned in
+`tests/test_ops_watchdog.py`). Add a job there when a new scheduled job is added. Rollback:
+`OPS_WATCHDOG_ENABLED=false` or remove the cron line. State: `runtime/ops_watchdog_state.json`.
+
 ## Deployment topology
 
 - `db-server`: PRISM pipeline, JSONL spool, shipper, SSH local-forward tunnel.
