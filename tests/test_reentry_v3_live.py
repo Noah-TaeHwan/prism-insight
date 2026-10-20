@@ -248,7 +248,7 @@ def test_no_buy_after_the_deadline_outside_hours_or_when_not_approved(tmp_path, 
 def test_an_exception_is_contained_recorded_and_never_retried_the_same_day(tmp_path, live_on):
     broken, emitted = FakeExecutor(error=RuntimeError("broker down")), []
     state, results = _process(tmp_path, [_record()], {"ev1": _item()}, broken, emitted=emitted)
-    assert results[0]["status"] == "ERROR" and results[0]["reason"] == "executor_error:RuntimeError"
+    assert results[0]["status"] == "ERROR" and results[0]["reason"] == "executor_error:RuntimeError: broker down"
     assert state["watches"][0]["live"][DAY]["status"] == "ERROR" and emitted[0][3]["status"] == "ERROR"
     healthy = FakeExecutor()
     _, again = _process(tmp_path, [_record()], {"ev1": _item()}, healthy)
@@ -315,7 +315,7 @@ def test_us_entry_fans_out_per_account_like_the_batch():
 def test_agent_errors_auction_hours_and_the_deadline_never_buy():
     agent = FakeAgent(error=ValueError("x"))
     assert asyncio.run(LIVE.enter_with_agent(agent, "KR", _entry(), now=KR_1400)) == \
-        {"bought": False, "reason": "error:ValueError"}
+        {"bought": False, "reason": "error:ValueError: x"}
     late = FakeAgent()
     out = asyncio.run(LIVE.enter_with_agent(late, "KR", _entry(),
                                             now=datetime(2026, 10, 7, 6, 21, tzinfo=timezone.utc)))
