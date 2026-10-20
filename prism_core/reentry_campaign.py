@@ -37,11 +37,35 @@ Bars are dicts {date, open, high, low, close, volume} sorted by date. A function
 """
 from __future__ import annotations
 
+import importlib.util
+import sys
 from itertools import pairwise
+from pathlib import Path
 
-from cores.buy_gate import REGIME_RULES
 from prism_core import pivot_reentry as P
 from prism_core.oneil_adaptive_policy import initial_sizing
+
+
+def _root_buy_gate():
+    """The shared cores/buy_gate.py loaded by file path.
+
+    Inside the US process `cores` is prism-us/cores, so `from cores.buy_gate import ...` failed and
+    every US re-entry order errored (ModuleNotFoundError, 10/19~10/21). Same module name as the US tracker.
+    """
+    name = "prism_root_buy_gate"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / "cores" / "buy_gate.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(name, None)
+            raise
+    return sys.modules[name]
+
+
+REGIME_RULES = _root_buy_gate().REGIME_RULES
 
 POLICY_VERSION = "reentry_campaign_v3"
 STOP_EXIT = "STOP_EXIT"
