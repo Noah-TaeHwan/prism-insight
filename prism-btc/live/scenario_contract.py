@@ -93,6 +93,9 @@ def response_schema(context):
         from live.scenario_entry_contract import assessment_schema, entry_contract_schema
         properties["entry_contract"] = {"anyOf": [entry_contract_schema(), {"type": "null"}]}
         properties["thesis_assessment"] = assessment_schema(context)
+    if context.get('pending_renewal_version') == 1:
+        properties['pending_renewal'] = {'anyOf': [_object({'offer_id': {
+            'type': 'string', 'enum': [context['pending_renewal_offer']['offer_id']]}}), {'type': 'null'}]}
     return _object(properties)
 
 
@@ -172,6 +175,13 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
     if context.get("entry_contract_version") == 1:
         from live.scenario_entry_contract import validate_metadata
         validate_metadata(payload, context, allow_failed_wait_template=_allow_failed_wait_template)
+    if payload.get('pending_renewal') is not None:
+        assessment = payload.get('thesis_assessment') or {}
+        if (payload['action'] != 'WAIT' or payload['cancel_entry_ids']
+                or context.get('entry_contract_version') != 1
+                or assessment.get('status') != 'INTACT'
+                or assessment.get('contract_id') != context['pending_renewal_offer']['contract_id']):
+            raise ValueError('pending_renewal_requires_intact_original_thesis')
     normalized = dict(payload)
     normalized["entries"] = [{key: value for key, value in row.items()
                               if key != "trigger_price" or value is not None}

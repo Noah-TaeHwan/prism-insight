@@ -579,7 +579,10 @@ class ScenarioDemoBroker(ScenarioExecution):
             daily=self._daily(observed)
             state=json.loads(self.conn.execute("SELECT body FROM llm_scenario_state WHERE id=1").fetchone()[0])
             from live.scenario_recovery import authorize_pending, managed_permit, normal_permission, risk_fraction
-            recovery_pending = authorize_pending(state, active, self.clock())
+            from live.scenario_pending_renewal import load
+            waiting_lease = load(self.conn, active)
+            recovery_pending = authorize_pending(state, active, self.clock(),
+                waiting_deadline=waiting_lease['until'] if waiting_lease else None)
             halted=not self._new_risk_enabled() or (state.get("breaker",{}).get("blocked",False) and not recovery_pending) or not daily.get("new_risk_allowed",False)
             permit = managed_permit(state, active)
             if permit:
@@ -632,6 +635,12 @@ class ScenarioDemoBroker(ScenarioExecution):
         if self.execution_enabled and (halted or expired or not protection or stop_hit):
             for child in self.children(active["scenario_id"]):
                 if child["kind"]=="entry" and child["status"]!="TERMINAL":
+                    if expired and not (halted or not protection or stop_hit):
+                        from live.scenario_pending_renewal import load, matching_child
+                        waiting_lease = load(self.conn, active)
+                        if (waiting_lease and self.clock() < waiting_lease['until']
+                                and matching_child(child, waiting_lease['anchor'])):
+                            continue
                     try:
                         self._cancel(child)
                     except Exception:
@@ -713,6 +722,16 @@ class ScenarioDemoBroker(ScenarioExecution):
             if any(not c["evidence"] or c["status"]=="UNKNOWN" for c in group):
                 continue
             if not group:
+                if payload.get('pending_renewal'):
+                    from live.scenario_pending_renewal import receipt, reject
+                    proof = receipt(self.conn, ident)
+                    if not proof and self.execution_enabled:
+                        # Interrupted before local apply: retain old expiry, never
+                        # infer an approval or submit/retry exchange work.
+                        reject(self.conn, ident, 'EXECUTION_NOT_APPLIED', self.clock())
+                        proof = receipt(self.conn, ident)
+                    if not proof or proof.get('status') not in {'APPLIED', 'REJECTED'}:
+                        continue
                 cancelled=all(any(c["kind"]=="entry" and (c["local_id"]==entry or c["order_id"]==entry) and c["status"]=="TERMINAL" for c in children) for entry in payload.get("cancel_entry_ids",[]))
                 adjusted=(payload["action"]=="ADJUST" and not payload.get("entries")
                     and (not payload.get("stop_revision") or self._stop_revision_evidence("stop_revision_confirmed", ident))
@@ -730,7 +749,8 @@ class ScenarioDemoBroker(ScenarioExecution):
                 terminal=cancelled and (payload["action"]=="WAIT" or adjusted or no_submit or aborted_adjust or (payload["action"]=="EXIT" and observed["exchange_flat"]))
                 if terminal:
                     items.append(dict(intent_id=ident,terminal=True,protection_ok=protection,orders_reconciled=True,
-                        executions_complete=True,execution_ids=[],filled_quantity=0.,exchange_order_ids=[],open_entries=[]))
+                        executions_complete=True,execution_ids=[],filled_quantity=0.,exchange_order_ids=[],open_entries=[],
+                        **({'pending_renewal_receipt': proof} if payload.get('pending_renewal') else {})))
                 continue
             execution_ids=[e["execId"] for c in group for e in c["evidence"]["executions"]]
             open_entries=[self._pending_entry(c)

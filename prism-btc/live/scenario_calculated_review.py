@@ -543,6 +543,8 @@ def _action_allocation_branches(context, actions=None):
             props["chase"] = deepcopy(props["chase"]["anyOf"][0])
             if action == "OPEN":
                 props["entries"]["minItems"] = 1
+        if 'pending_renewal' in props and action != 'WAIT':
+            props['pending_renewal'] = {'type': 'null'}
         branches.append(branch)
     return {"anyOf": branches}
 
@@ -622,6 +624,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return now
 
     base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
+    if context.get('pending_wait_policy_version') == 1:
+        base += scenario_llm.PENDING_WAIT_PROMPT
     if context.get("entry_contract_version") == 1:
         base += scenario_llm.ENTRY_CONTRACT_PROMPT
     if context.get("scenario_id") is None:
@@ -708,11 +712,15 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             appendix += "\nReturn exactly the root object {proposal: <action-specific allocation proposal>}. Follow its action branch; inactive fields must be null or empty as specified.\n"
         model_raw = call("single", appendix, payload, schema)
         raw = model_raw["proposal"] if action_contract else model_raw
+        if raw.get('pending_renewal'):
+            raise ValueError('pending_renewal_requires_calculated_selection')
         now_context = dict(frozen_context, now=fresh())
         if raw["action"] == "WAIT":
             normalized = validate_wire_proposal(raw, now_context)
-            validate_scenario({k: v for k, v in strip_metadata(normalized).items() if k not in {"review", "recovery"}}, now_context)
+            effective_wait = validate_scenario({k: v for k, v in strip_metadata(normalized).items() if k not in {"review", "recovery"}}, now_context)
             selected = dict(id="WAIT", raw_proposal=raw, input_sha256=original)
+            if effective_wait.get('pending_renewal'):
+                selected['effective_plan'] = effective_wait
             selected["receipt_sha256"] = receipt_hash(selected)
         else:
             calculator = calculate_economic_candidate if economic_reject else calculate_allocation_candidate
@@ -775,8 +783,10 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             raise ValueError("research_failed_thesis_requires_exit")
     wait_normalized = validate_wire_proposal(wait_wire, now_context,
                                              _allow_failed_wait_template=failed_template)
-    validate_scenario({k: v for k, v in strip_metadata(wait_normalized).items() if k not in {"review", "recovery"}}, now_context)
+    effective_wait = validate_scenario({k: v for k, v in strip_metadata(wait_normalized).items() if k not in {"review", "recovery"}}, now_context)
     wait_receipt = dict(id="WAIT", raw_proposal=wait_wire, input_sha256=original)
+    if effective_wait.get('pending_renewal'):
+        wait_receipt['effective_plan'] = effective_wait
     if failed_template:
         wait_receipt.update(eligible=False, executable=False, template_only=True,
                             rejection="failed_thesis_requires_exit")
@@ -787,6 +797,19 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     receipts = [calculator(wire, now_context, candidate_id=f"c{index}",
                                    original_input_now=frozen_context["now"])
                 for index, wire in enumerate(draft["candidates"])]
+    if effective_wait.get('pending_renewal'):
+        # Preserve the model's exact WAIT proposal as an explicit selectable
+        # renewal, plus a separately labelled host-derived inert fallback.
+        renewal_receipt = deepcopy(wait_receipt)
+        renewal_receipt.update(id='WAIT_RENEWAL', eligible=True, execution_authorized=False)
+        renewal_receipt.pop('receipt_sha256', None)
+        renewal_receipt['receipt_sha256'] = receipt_hash(renewal_receipt)
+        fallback = deepcopy(wait_wire)
+        fallback.update(pending_renewal=None, rationale='Host fallback: no waiting-lease extension selected.')
+        wait_receipt = dict(id='WAIT', raw_proposal=fallback, input_sha256=original,
+            proposal_source='HOST_NO_RENEWAL_FALLBACK', derived_from_model_proposal_sha256=receipt_hash(wait_wire))
+        wait_receipt['receipt_sha256'] = receipt_hash(wait_receipt)
+        receipts.append(renewal_receipt)
     if failed_template and not any(r["eligible"] for r in receipts):
         raise ValueError("research_failed_thesis_no_valid_exit")
     for receipt in receipts:

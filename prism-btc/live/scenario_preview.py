@@ -62,6 +62,13 @@ def response_contract(context):
         contract["entries"][0]["trigger_price"] = "null for ordinary LIMIT; positive MarkPrice crossing for conditional stop-LIMIT"
         contract["reservation_expires_at"] = (int(context.get("input_captured_at", context["now"])) // 300 + 1) * 300
         contract["rules"].append("reservation_expires_at is host input only; do not return this field. Conditional LONG trigger must exceed current mark, limit price>=trigger; SHORT trigger below mark, limit price<=trigger. Use expires_at<=reservation_expires_at, chase zero. All conditional risk is reserved before trigger. Deadline never extends; cancellation is asynchronous, not a guaranteed exact expiry. Do not pre-buffer conditional entry limits.")
+        if context.get('pending_wait_policy_version') == 1:
+            contract['rules'][-1] = (
+                'Version1: reservation_expires_at limits original submission/response only; expires_at must not exceed it. '
+                'LONG mark<trigger<=limit; SHORT mark>trigger>=limit; chase zero. '
+                'Separate host waiting lease starts at next boundary+120s, cap original creation+1h; '
+                'only selected explicit pending_renewal may extend waiting. Cancellation is asynchronous; late fills remain possible. '
+                'Never pre-buffer conditional limits or resubmit under a waiting lease.')
     fraction = context.get("scenario_risk_fraction", .02)
     contract["rules"] = [rule.replace("initial_equity*0.02", f"initial_equity*{fraction:g}") for rule in contract["rules"]]
     if context.get("recovery_contract_version") in (1, 2):

@@ -37,8 +37,9 @@ def review_policy_binding(*, research_mode="legacy"):
     from live import (scenario_calculated_review, scenario_review_adapter,
                       scenario_review_guard, scenario_llm, scenario_contract,
                       scenario_model_input, scenario_preview, scenario_runtime,
-                      scenario_entry_contract, scenario_position_flow)
+                      scenario_entry_contract, scenario_position_flow, scenario_pending_renewal)
     from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
+    from core import scenario_pending_renewal as pending_renewal_core
     from engine import scenario_ma_context
 
     root = Path(__file__).resolve().parents[1]
@@ -55,6 +56,8 @@ def review_policy_binding(*, research_mode="legacy"):
         'core/scenario_limit_prices.py': scenario_limit_prices,
         'core/llm_scenario.py': llm_scenario,
         'core/scenario_stop_policy.py': scenario_stop_policy,
+        'core/scenario_pending_renewal.py': pending_renewal_core,
+        'live/scenario_pending_renewal.py': scenario_pending_renewal,
         'engine/scenario_ma_context.py': scenario_ma_context,
         'live/scenario_runtime.py': scenario_runtime,
         'live/scenario_entry_contract.py': scenario_entry_contract,
@@ -181,7 +184,8 @@ def _manifest():
                     'live/scenario_fee_projection.py',
                     'live/scenario_entry_thesis.py',
                     'live/scenario_entry_contract.py',
-                    'live/scenario_position_flow.py',
+                    'live/scenario_position_flow.py', 'live/scenario_pending_renewal.py',
+                    'core/scenario_pending_renewal.py',
                     'live/scenario_model_input.py',
                     'live/scenario_preview.py', 'engine/scenario_snapshot.py',
                     'engine/scenario_ma_context.py',
