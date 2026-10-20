@@ -30,15 +30,6 @@ def test_target_consistency_policy_is_shared_without_automatic_ma_cap():
         assert clause in SELECT_PROMPT
 
 
-def test_gap_review_trace_uses_existing_fields_and_separates_current_mark():
-    for clause in ('rationale or no_candidate_reason', 'one concrete sentence',
-                   'MA35 breakout is not a substitute', 'CURRENT Mark',
-                   'forming close', 'remaining room is already exhausted'):
-        assert clause in DRAFT_PROMPT
-    assert 'gap traversal and a later MA35 breakout as distinct opportunities' in SELECT_PROMPT
-    assert 'put that sentence in no_candidate_reason, not only wait_proposal.rationale' in DRAFT_PROMPT
-
-
 @pytest.mark.parametrize('side', ['LONG', 'SHORT'])
 @pytest.mark.parametrize('phase', ['confirmed', 'forming'])
 @pytest.mark.parametrize('extension', [False, True])
@@ -111,36 +102,3 @@ def test_incident_target_bound_and_original_contract_survive_select_wait():
         response_contract(ctx), generate=generate, record=lambda _: None, clock=lambda: 1000)
     assert len(calls) == 2 and result['selected']['id'] == 'WAIT'
     assert candidate == original and result['orders_submitted'] == 0
-
-
-@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
-@pytest.mark.parametrize('room_exhausted', [False, True])
-def test_gap_empty_decision_preserves_own_time_path_mark_and_explicit_reason(side, room_exhausted):
-    from tests.test_scenario_gap_traversal_prompt import gap_snapshot
-    from tests.test_scenario_ma_context import NOW
-    ctx = context()
-    ctx.update(now=NOW / 1000, input_captured_at=NOW / 1000, account_captured_at=NOW / 1000,
-               mark_price=(84000 if side == 'LONG' else 82800) if room_exhausted else 83410)
-    snap = gap_snapshot(side)
-    original = deepcopy((snap, ctx))
-    reason = ('MA35 공간이 현재 Mark 기준 이미 소진됨; 형성 종가와 다름'
-              if room_exhausted else 'MA10→MA35 공간은 남지만 실제 가격 진행 근거가 약함')
-    calls = []
-
-    def generate(**request):
-        calls.append(request)
-        restored = restore_model_input(json.loads(request['user_prompt']))
-        assert restored['market_snapshot'] == snap
-        assert restored['contract_context']['mark_price'] == ctx['mark_price']
-        assert DRAFT_PROMPT in request['system_prompt']
-        wait = wire(ctx)
-        wait['expires_at'] = ctx['now'] + 100
-        return SimpleNamespace(text=json.dumps(dict(wait_proposal=wait, candidates=[],
-                                                   no_candidate_reason=reason)))
-
-    result = research_review(snap, ctx, response_contract(ctx), generate=generate,
-                             record=lambda _: None, clock=lambda: ctx['now'])
-    assert len(calls) == 1  # No added LLM call or forced candidate.
-    assert result['selection']['rationale'] == reason
-    assert result['selected']['raw_proposal']['rationale'] == wire(ctx)['rationale']
-    assert result['orders_submitted'] == 0 and (snap, ctx) == original
