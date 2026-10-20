@@ -13,6 +13,7 @@ final bar (no lookahead).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -64,7 +65,10 @@ _OUTCOME_COLUMNS = (
     ("outcome_basis", "TEXT"), ("mfe_pct", "REAL"), ("mae_pct", "REAL"),
     ("peak_session", "INTEGER"), ("peak_date", "TEXT"), ("ret_7s", "REAL"), ("ret_14s", "REAL"),
     ("ret_30s", "REAL"), ("hit_20_before_stop_7", "INTEGER"), ("hit_50", "INTEGER"),
+    ("mfe_5s", "REAL"), ("mae_5s", "REAL"), ("mfe_10s", "REAL"), ("mae_10s", "REAL"),
+    ("mfe_20s", "REAL"), ("mae_20s", "REAL"),
 )
+EXCURSION_SESSIONS = (5, 10, 20)
 _STATE_COLUMNS = (
     ("outcome_status", "TEXT"), ("descriptors_at", "TEXT"), ("last_attempt_at", "TEXT"),
     ("created_at", "TEXT"), ("updated_at", "TEXT"),
@@ -336,6 +340,10 @@ def compute_outcomes(bars: pd.DataFrame, anchor_date: str, base: float) -> dict:
     for horizon in RETURN_SESSIONS:
         if len(closes) >= horizon:
             result[f"ret_{horizon}s"] = (closes[horizon - 1] / base - 1) * 100
+    for horizon in EXCURSION_SESSIONS:
+        if len(highs) >= horizon:
+            result[f"mfe_{horizon}s"] = (max(highs[:horizon]) / base - 1) * 100
+            result[f"mae_{horizon}s"] = (min(lows[:horizon]) / base - 1) * 100
     for high, low in zip(highs, lows):
         if (low / base - 1) * 100 <= TOUCH_DOWN_PCT:
             result["hit_20_before_stop_7"] = 0
@@ -362,6 +370,37 @@ def _basis(bars: pd.DataFrame, anchor_date: str, captured_close, captured_volume
 
 
 # --- outcome pass ------------------------------------------------------------
+
+_EMIT_COLUMNS = ("trade_date", "mode", "trigger_type", "ticker", "name", "close", "selected", "market_regime",
+                 "anchor_date", "outcome_basis", "outcome_status", "sessions_observed", "evaluated_through")
+
+
+def _emit_final(row) -> bool:
+    """One ClickStack event when a row with a decision trace reaches its final outcome. Fail-open.
+
+    Only rows that carry ``trace_id`` in features_json (re-entry signals and near misses today) are sent,
+    so the outcome lands on the decision's own trace next to the signal it measures.
+    """
+    try:
+        features = json.loads(row.get("features_json") or "{}")
+        trace_id = features.get("trace_id")
+        if not trace_id:
+            return False
+        from observability.events import emit_event
+        attrs = {c: row.get(c) for c in _EMIT_COLUMNS}
+        attrs["ledger_mode"] = attrs.pop("mode")       # "mode" is the event's own OBSERVATION marker
+        attrs.update({c: row.get(c) for c, _ in _DESCRIPTOR_COLUMNS + _OUTCOME_COLUMNS})
+        attrs.update(event_ref=features.get("event_ref"), watch_ref=features.get("watch_ref"),
+                     reason=features.get("reason"), horizon_sessions=HORIZON_SESSIONS)
+        key = "|".join(str(row.get(c)) for c in _KEY)
+        return emit_event("candidate.forward_outcome", service="prism-candidate-ledger", market=row.get("market"),
+                          ticker=row.get("ticker"), trace_id=trace_id,
+                          event_id=hashlib.sha256(f"forward-outcome|{key}".encode()).hexdigest()[:32],
+                          attributes={"mode": "OBSERVATION", "trading_impact": "none", **attrs}) is not None
+    except Exception as exc:  # noqa: BLE001 - observation only
+        logger.warning("[CANDIDATE_LEDGER] outcome event unavailable: %s", type(exc).__name__)
+        return False
+
 
 def _default_fetcher(market: str) -> Callable[[str, str, str], pd.DataFrame]:
     if market == "KR":
@@ -451,6 +490,8 @@ def update_candidate_outcomes(market: str, *, db_path=None, fetch_bars=None, tod
                         update["outcome_status"] = "EXPIRED"
                         stats["expired"] += 1
                     stats["complete"] += int(update.get("outcome_status") == "COMPLETE")
+                    if update.get("outcome_status") in ("COMPLETE", "EXPIRED"):
+                        stats["emitted"] = stats.get("emitted", 0) + int(_emit_final({**row, **update}))
                     stats["rows"] += 1
                     assignments = ", ".join(f"{column}=?" for column in update)
                     # Column names come from the module constants; values are bound parameters.

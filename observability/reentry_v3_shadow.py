@@ -258,7 +258,7 @@ def decide(watch, quote, frames, completed, decision_day, market, ctx):
     projected = C.projected_volume(quote.get("volume"), market, share)
     regime = ctx.regime_detail(decision_day)
     eligible = {rule: info for rule, info in ledger["next"].items() if info["eligible"]}
-    by_rule, checks, results = {}, {}, {}
+    by_rule, checks, details, results = {}, {}, {}, {}
     for rule, info in eligible.items():
         window = info.get("window")
         key = (window["R"], window["start_date"]) if window else None
@@ -267,6 +267,7 @@ def decide(watch, quote, frames, completed, decision_day, market, ctx):
                                       price=quote["price"], day_low=quote.get("low"), regime=regime["effective"],
                                       window=window, volume_projected=projected)
         by_rule[rule], checks[rule] = results[key]["trigger"], results[key]["checks"]
+        details[rule] = results[key].get("details") or {}
     primary = C.POLICY["primary_rule"]
     trigger = by_rule.get(primary)       # only the primary L97 rule is rechecked / traded; SS is a record
     first = next(iter(results.values()))
@@ -276,6 +277,7 @@ def decide(watch, quote, frames, completed, decision_day, market, ctx):
                 "volume_share": share or C.VOLUME_SHARE_DEFAULT[market],
                 "volume_share_source": "ticker_profile" if share else "market_default",
                 "volume_projected": projected, "by_rule": by_rule, "trigger": trigger, "checks": checks,
+                "details": details,
                 "prev_close": first["prev_close"], "prior_high": first["prior_high"], "regime": first["regime"],
                 "regime_detail": regime, "regime_missing": first["regime_missing"],
                 "market_pulse": ctx.pulse_fn(bench)(decision_day),
@@ -375,10 +377,52 @@ def freeze_inputs(market, watch, decision, frames, completed, reports_root, arch
     return item
 
 
-def intraday(state, market, decision_day, frames, completed, quote_fn, ctx, reports_root, archive_db):
+# Primary-rule misses worth keeping as evidence (the rule's own filters), per trigger. Structural
+# non-events (not armed, no touch, previous close on the wrong side) are not near misses.
+NEAR_MISS = {"R2S": ("rr_below_floor", "target_unsupported", "chase", "below_level"),
+             "R1C": ("chase",), "SHAKEOUT_RECLAIM": ("chase", "volume_below_avg20")}
+
+
+def near_misses(decision, rule=None):
+    """[(trigger, reason, details)] for the primary rule when it did not fire."""
+    rule = rule or C.POLICY["primary_rule"]
+    if decision.get("trigger") or rule not in (decision.get("checks") or {}):
+        return []
+    details = (decision.get("details") or {}).get(rule) or {}
+    return [(trigger, reason, details.get(trigger) or {}) for trigger, reason in decision["checks"][rule].items()
+            if reason in NEAR_MISS.get(trigger, ())]
+
+
+def observe(watch, decision, frames, completed):
+    """Ledger facts for one decision (fired or near miss): structured snapshot, level, attempts, origin."""
+    from prism_core.decision_snapshot import snapshot
+    bars, bench = _frames_for(watch, frames, completed)
+    setup, ledger, row = watch["setup"], watch.get("ledger") or {}, watch["row"]
+    level = setup["L"]
+    price = decision["decision_price"]
+    prior = {rule: [{k: t.get(k) for k in ("date", "trigger", "exit_reason", "ret", "max_gain_pct", "max_loss_pct",
+                                            "real")} for t in camp["attempts"]]
+             for rule, camp in (ledger.get("campaigns") or {}).items()}
+    return {"snapshot": snapshot(bars, price=price, bench=bench),
+            "level_basis": setup.get("level_basis"), "prev_close": decision.get("prev_close"),
+            "day_low": decision.get("day_low"), "dist_level_pct": round((price / level - 1) * 100, 4) if level else None,
+            "low_vs_level_pct": (round((decision["day_low"] / level - 1) * 100, 4)
+                                 if level and decision.get("day_low") else None),
+            "volume_projected": decision.get("volume_projected"),
+            "volume_share_source": decision.get("volume_share_source"),
+            "elapsed": ledger.get("elapsed"), "anchor_date": setup.get("anchor_date"),
+            "prior_attempts": prior.get(C.POLICY["primary_rule"]) or [],
+            "original": {"decided_on": row.get("exit_date"), "skip_reason": row.get("skip_reason"),
+                         "buy_score": row.get("buy_score"), "min_score": row.get("min_score"),
+                         "entry_price": row.get("entry_price"), "exit_price": row.get("exit_price"),
+                         "realized_pct": row.get("realized_pct")}}
+
+
+def intraday(state, market, decision_day, frames, completed, quote_fn, ctx, reports_root, archive_db, observed=None):
     """Decision-time (KR 14:00 / US 13:50) evaluations for campaigns that may open a position today.
-    Returns (frozen, counts)."""
-    counts = {"candidates": 0, "quotes": 0, "quote_missing": 0, "quote_cap": 0, "decisions": 0, "triggers": 0}
+    Returns (frozen, counts); ``observed`` (a list) collects (watch, decision, near_misses) for the ledger."""
+    counts = {"candidates": 0, "quotes": 0, "quote_missing": 0, "quote_cap": 0, "decisions": 0, "triggers": 0,
+              "near_misses": 0}
     frozen = []
     for watch in state["watches"]:
         ledger = watch.get("ledger") or {}
@@ -398,6 +442,10 @@ def intraday(state, market, decision_day, frames, completed, quote_fn, ctx, repo
             continue    # no decision: the close phase falls back to the close (BACKFILL, no LLM)
         decision = decide(watch, quote, frames, completed, decision_day, market, ctx)
         counts["decisions"] += 1
+        misses = near_misses(decision)
+        counts["near_misses"] += len(misses)
+        if observed is not None and (decision["trigger"] or misses):
+            observed.append((watch, decision, misses))
         if decision["trigger"]:
             counts["triggers"] += 1
             item = freeze_inputs(market, watch, decision, frames, completed, reports_root, archive_db)
@@ -441,7 +489,10 @@ def _ledger_events(state, market):
                         "rule": rule, "attempt": att["attempt"], "trigger": att["trigger"], "mode": att["mode"],
                         "entry_date": att["date"], "exit_date": att["exit_date"], "exit_reason": att["exit_reason"],
                         "exit_rule": att["exit_rule"], "stop_rule": att["stop_rule"], "ret": att["ret"],
-                        "alloc": att["alloc"], "slot": att["slot"], "gates": att["gates"]}))
+                        "alloc": att["alloc"], "slot": att["slot"], "gates": att["gates"],
+                        "bars_held": att.get("bars_held"), "max_gain_pct": att.get("max_gain_pct"),
+                        "max_loss_pct": att.get("max_loss_pct"), "entry_price": att.get("entry"),
+                        "exit_price": att.get("exit_price"), "real": bool(att.get("real"))}))
             key = f"end|{rule}"
             if camp["status"] == "ENDED" and key not in seen:
                 seen.add(key)
@@ -450,6 +501,32 @@ def _ledger_events(state, market):
                     "end_rule": camp.get("end_rule"), **C.campaign_summary(camp)}))
         watch["emitted"] = sorted(seen)
     return out
+
+
+def _record_forward_outcomes(market, decision_day, observed, frozen, facts):
+    """Queue every signal and near miss for the forward max gain/loss pass (observability.candidate_ledger)."""
+    try:
+        from observability import candidate_ledger
+        events = {watch["watch_id"]: item["event_id"] for watch, item in frozen}
+        rows = {"reentry_v3_signal": [], "reentry_v3_near_miss": []}
+        for watch, decision, misses in observed:
+            entries = ([(decision["trigger"]["trigger"], None, "reentry_v3_signal")] if decision.get("trigger")
+                       else [(trigger, reason, "reentry_v3_near_miss") for trigger, reason, _ in misses])
+            for trigger, reason, mode in entries:
+                features = {"trace_id": _origin_trace(market, watch), "event_ref": events.get(watch["watch_id"]),
+                            "watch_ref": watch["watch_id"], "source": watch["source"], "level": watch["setup"]["L"],
+                            "reason": reason, "decision_time": decision["decision_time"],
+                            "snapshot": (facts.get(watch["watch_id"]) or {}).get("snapshot")}
+                rows[mode].append({"trigger_type": trigger, "ticker": watch["ticker"],
+                                   "name": watch["row"].get("company_name"), "close": decision["decision_price"],
+                                   "selected": int(mode == "reentry_v3_signal"),
+                                   "features_json": json.dumps(features, ensure_ascii=False, sort_keys=True,
+                                                               default=str)})
+        for mode, mode_rows in rows.items():
+            if mode_rows:
+                candidate_ledger.record(mode_rows, market=market, trade_date=decision_day, mode=mode)
+    except Exception:  # noqa: BLE001 - evidence must never stop the run
+        return
 
 
 def _tally(values):
@@ -525,10 +602,10 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
         ctx = MarketContext(frames.get("__regime_rows"))
         enrolled = advance(state, rows, frames, completed, market, ctx)
         state["last_completed"] = completed
-        frozen, counts = [], {}
+        frozen, counts, observed = [], {}, []
         if phase == "intraday":
             frozen, counts = intraday(state, market, decision_day, frames, completed, quote_fn, ctx, reports_root,
-                                      archive_db)
+                                      archive_db, observed=observed)
             state["last_intraday"] = decision_day
         archived, sent, ledger_events = 0, 0, []
         if not dry_run:
@@ -541,6 +618,12 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
             archived = archive_finished(state, p["archive"], completed)
             _atomic(p["state"], state)
             now = datetime.now(timezone.utc)
+            facts = {}
+            for watch, decision, _ in observed:
+                try:
+                    facts[watch["watch_id"]] = observe(watch, decision, frames, completed)
+                except Exception as error:  # noqa: BLE001 - evidence must never stop the run
+                    facts[watch["watch_id"]] = {"error": type(error).__name__}
             for watch, item in frozen:
                 attrs = {"mode": "SHADOW", "trading_impact": "none", "llm_recheck": "NOT_EVALUATED",
                          "policy_version": C.POLICY_VERSION, "source": watch["source"],
@@ -553,11 +636,26 @@ def run(market, completed, *, collector, phase="close", decision_day=None, quote
                                                                             item["attempts"].items()},
                          "gates": item["gates"], "allocation": item["allocation"],
                          "report_available": item["report_ref"] is not None,
-                         "micro_split_appendix": bool(item["appendix_text"])}
+                         "micro_split_appendix": bool(item["appendix_text"]),
+                         "event_ref": item["event_id"], **facts.get(watch["watch_id"], {})}
                 if emit_event("reentry_v3.shadow_trigger", service=_service(market), event_id=item["event_id"],
                               market=market, ticker=watch["ticker"], trace_id=_origin_trace(market, watch),
                               attributes=attrs, event_time=now) is not None:
                     sent += 1
+            for watch, decision, misses in observed:
+                for trigger, reason, detail in misses:
+                    emit_event("reentry_v3.shadow_near_miss", service=_service(market),
+                               event_id=_hash(watch["watch_id"], decision_day, trigger, "near_miss"), market=market,
+                               ticker=watch["ticker"], trace_id=_origin_trace(market, watch),
+                               attributes={"mode": "SHADOW", "trading_impact": "none",
+                                           "policy_version": C.POLICY_VERSION, "watch_ref": watch["watch_id"],
+                                           "source": watch["source"], "trigger": trigger, "reason": reason,
+                                           "trigger_date": decision_day, "decision_price": decision["decision_price"],
+                                           "decision_time": decision["decision_time"], "level": watch["setup"]["L"],
+                                           "regime": decision.get("regime"), "market_pulse": decision.get("market_pulse"),
+                                           **detail, **facts.get(watch["watch_id"], {})},
+                               event_time=now)
+            _record_forward_outcomes(market, decision_day, observed, frozen, facts)
             for name, watch, key, attrs in ledger_events:
                 emit_event(name, service=_service(market), event_id=_hash(watch["watch_id"], key), market=market,
                            ticker=watch["ticker"], trace_id=_origin_trace(market, watch),

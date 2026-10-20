@@ -146,6 +146,18 @@ One `trace_id` reads a decision end to end. Read it with `tools/clickstack_query
   decision, falling back to a watch-scoped trace when it is unknown. A live re-entry buy
   is a new position with its own trace. `reentry_v3.live_entry` carries its
   `entry_trace_id`, and that position's context events carry `origin_trace_id`.
+- **Re-entry evidence (2026-10-21)**: `reentry_v3.shadow_trigger` and
+  `reentry_v3.shadow_near_miss` (the primary rule missed only on its own filters: R/R floor,
+  no target, chase, below the level, shakeout volume) carry a `snapshot`
+  (`prism_core/decision_snapshot.py`, `decision_snapshot_v1`). It holds MA20/50/200 values,
+  distances and 10-bar slopes, the 50-day line flags, ATR14, the 60/252-day high distance,
+  50-day volume ratios and RS60. Uncomputable values are `null` and listed in `missing`.
+  The events also carry the level basis, previous close, day low, prior attempts and the
+  original decision. `reentry_v3.shadow_exit` adds `max_gain_pct`/`max_loss_pct` while held.
+  Every signal and near miss is also a `runtime/candidate_ledger.sqlite` row
+  (`mode=reentry_v3_signal|reentry_v3_near_miss`). The weekly outcome pass emits
+  `candidate.forward_outcome` (MFE/MAE over 5/10/20/30 sessions, `hit_50`, 7/14/30 returns,
+  descriptors) on the same trace once the row is final.
 - **BTC**: `btc.scenario.*` share `sha256("scenario:<id>")`. A `decision_input` joins the
   scenario trace when its run touched exactly one scenario (`scenario_inferred=true`).
 - Not linked by design: `broker.order_request` (HTTP layer; join by ticker, time and
