@@ -183,6 +183,32 @@ class ScenarioExecution:
             self._fail("order_precision_invalid")
         return text_number(v)
 
+    def _verify_entry_order_terms(self, child, order):
+        """Reuse exact entry identity/terms for queried and final account rows."""
+        if child['kind'] != 'entry':
+            return
+        request = child['request']
+        if (order.get('orderLinkId') != child['link_id'] or order.get('symbol') != 'BTCUSDT'
+                or order.get('side') != request['side'] or not order.get('orderId')
+                or (child.get('order_id') and order['orderId'] != child['order_id'])
+                or decimal(order.get('qty')) != decimal(request['qty'])):
+            self._fail('exact_order_identity_conflict')
+        if (decimal(order.get('price')) != decimal(request['price'])
+                or order.get('orderType') != 'Limit' or order.get('reduceOnly') is not False
+                or decimal(order.get('stopLoss')) != decimal(request['stopLoss'])
+                or order.get('slTriggerBy') != 'MarkPrice'):
+            self._fail('entry_order_terms_changed')
+        if request.get('triggerPrice') is not None:
+            if (decimal(order.get('triggerPrice')) != decimal(request['triggerPrice'])
+                    or order.get('triggerBy') != 'MarkPrice'
+                    or order.get('triggerDirection') != request['triggerDirection']
+                    or order.get('positionIdx') != 0 or order.get('timeInForce') != 'GTC'
+                    or request.get('slOrderType') != 'Market'
+                    or ('slOrderType' in order and order['slOrderType'] != 'Market')):
+                self._fail('conditional_entry_terms_changed')
+        elif decimal(order.get('triggerPrice') or 0) != 0:
+            self._fail('unexpected_entry_trigger')
+
     def _query_child(self, child):
         """Exact ID lookup plus exact cumulative execution reconciliation."""
         from live.scenario_broker import read_evidence_pages
@@ -214,22 +240,7 @@ class ScenarioExecution:
                     order.get("triggerBy")!="MarkPrice" or order.get("orderType")!="Market" or
                     order.get("reduceOnly") is not True):
                 self._fail("native_parent_identity_conflict")
-        if child["kind"]=="entry" and (
-                decimal(order.get("price"))!=decimal(request["price"]) or
-                order.get("orderType")!="Limit" or order.get("reduceOnly") is not False or
-                decimal(order.get("stopLoss"))!=decimal(request["stopLoss"]) or
-                order.get("slTriggerBy")!="MarkPrice"):
-            self._fail("entry_order_terms_changed")
-        if child["kind"] == "entry" and request.get("triggerPrice") is not None:
-            if (decimal(order.get("triggerPrice")) != decimal(request["triggerPrice"]) or
-                    order.get("triggerBy") != "MarkPrice" or
-                    order.get("triggerDirection") != request["triggerDirection"] or
-                    order.get("positionIdx") != 0 or order.get("timeInForce") != "GTC" or
-                    request.get("slOrderType") != "Market" or
-                    ("slOrderType" in order and order["slOrderType"] != "Market")):
-                self._fail("conditional_entry_terms_changed")
-        elif child["kind"] == "entry" and decimal(order.get("triggerPrice") or 0) != 0:
-            self._fail("unexpected_entry_trigger")
+        self._verify_entry_order_terms(child, order)
         executions = read_evidence_pages(self._call,"get_executions",category="linear",symbol="BTCUSDT",orderId=order["orderId"])
         qty = Decimal(0)
         for row in executions:
@@ -695,6 +706,7 @@ class ScenarioExecution:
             for child in own:
                 if child['kind'] == 'entry':
                     current = observed_orders.get(child['order_id'], {})
+                    self._verify_entry_order_terms(child, current)
                     if (current.get('orderStatus') != 'Untriggered'
                             or decimal(current.get('cumExecQty', -1)) != 0
                             or decimal(current.get('leavesQty', -1)) != decimal(child['request']['qty'])):

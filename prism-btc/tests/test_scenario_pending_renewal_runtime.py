@@ -327,7 +327,13 @@ def test_restart_retains_applied_lease_without_new_submission(tmp_path):
     assert e.writes == writes
 
 
-def test_executor_rejects_trigger_race_after_exact_child_query(tmp_path, monkeypatch):
+@pytest.mark.parametrize('field,value', [
+    ('orderStatus', 'New'), ('slTriggerBy', 'LastPrice'), ('slTriggerBy', None),
+    ('triggerBy', 'LastPrice'), ('orderLinkId', 'different'), ('side', 'Sell'),
+    ('orderType', 'Market'), ('reduceOnly', True), ('triggerDirection', 2),
+    ('positionIdx', 1), ('timeInForce', 'IOC'), ('slOrderType', 'Limit'),
+])
+def test_executor_rejects_trigger_race_after_exact_child_query(tmp_path, monkeypatch, field, value):
     r, b, e, _, _ = renewal_runtime(tmp_path)
     assert r.tick()['status'] == 'intent_pending'
     original = b._renew_pending
@@ -337,7 +343,7 @@ def test_executor_rejects_trigger_race_after_exact_child_query(tmp_path, monkeyp
         changed = [False]
         def capture_after_query():
             if not changed[0]:
-                e.orders[b.children()[0]['link_id']]['orderStatus'] = 'New'
+                e.orders[b.children()[0]['link_id']][field] = value
                 changed[0] = True
             return capture()
         with monkeypatch.context() as m:
