@@ -86,8 +86,10 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     renewal = bool(selected['raw_proposal'].get('pending_renewal'))
     actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"} or renewal
     original, fresh = deepcopy(original_context), deepcopy(fresh_context)
-    goal_context = deepcopy(original)
-    prepare_goal_source(snapshot, goal_context)
+    goal_context = original
+    if original.get('entry_contract_version') == 2:
+        goal_context = deepcopy(original)
+        prepare_goal_source(snapshot, goal_context)
     now = _number(fresh.get("now"))
     last_review_time = max(operation["value"] for operation in envelope["operations"]
                            if operation["kind"] == "clock")
