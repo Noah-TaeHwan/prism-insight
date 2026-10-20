@@ -68,6 +68,9 @@ Read calculation_field_units for projection.targets fields: gross_pnl is the
 before-cost USDT amount for that target's quantity, not whole-scenario profit;
 gross_reward_per_btc is USDT/BTC price distance, never total USDT reward. Keep
 quantity in BTC and reward/risk ratios dimensionless; do not recompute these.
+The same target-field units apply to projection.confirmed_remaining.targets and
+projection.hypothetical_all_fills.targets; keep their assumptions separate, never
+add these alternative projections together.
 Flat-entry gross target projections assume all proposed entries fill: a partial target is
 not whole-scenario profit, and unknown future fees/funding remain unknown.
 For holdings distinguish confirmed_remaining projections from hypothetical_all_fills

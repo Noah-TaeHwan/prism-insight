@@ -93,6 +93,29 @@ def test_units_are_supplied_only_with_calculations_in_real_two_phase_requests():
     assert all(len(call['user_prompt'].encode()) <= 100000 for call in calls)
 
 
+@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
+def test_nested_holding_target_units_preserve_separate_assumptions_and_hashes(side):
+    from live.scenario_calculated_review import SELECT_PROMPT
+    from tests.test_scenario_calculated_review import holding, holding_wire
+    ctx = holding(side)
+    ctx.update(positions=[dict(price=83000, quantity=.04)],
+               pending_entries=[dict(id='pending', price=83000, quantity=.06)])
+    receipt = calculate_candidate(holding_wire(ctx), ctx, candidate_id='c0')
+    original, digest = deepcopy(receipt), receipt_hash(receipt)
+    restored = restore_model_input(_model_payload(dict(valid=True, as_of_ms=1000000), ctx, {},
+        calculated_candidates=dict(candidates=[receipt])))
+    result = restored['calculated_candidates']['candidates'][0]['projection']
+    assert result['confirmed_remaining']['targets'][0]['quantity'] == .02
+    assert result['confirmed_remaining']['targets'][0]['gross_pnl'] == 20
+    assert result['hypothetical_all_fills']['targets'][0]['quantity'] == .05
+    assert result['hypothetical_all_fills']['targets'][0]['gross_pnl'] == 50
+    assert 'projection.confirmed_remaining.targets' in SELECT_PROMPT
+    assert 'projection.hypothetical_all_fills.targets' in SELECT_PROMPT
+    assert 'never\nadd these alternative projections together' in SELECT_PROMPT
+    assert restored['calculated_candidates']['candidates'][0] == original
+    assert receipt == original and receipt_hash(receipt) == digest
+
+
 def test_both_phases_deliver_new_relations_and_keep_snapshot_and_receipts_exact():
     ctx = context()
     ctx.update(now=NOW / 1000, input_captured_at=NOW / 1000, account_captured_at=NOW / 1000)
