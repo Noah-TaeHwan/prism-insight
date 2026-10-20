@@ -72,6 +72,8 @@ RUNTIME_EVENT_QUERIES = {
     "llm_scenario_notice_errors": "SELECT * FROM llm_scenario_notice_errors ORDER BY rowid",
     "llm_scenario_notice_positions": "SELECT * FROM llm_scenario_notice_positions ORDER BY rowid",
     "llm_scenario_outbox": "SELECT * FROM llm_scenario_outbox ORDER BY rowid",
+    "llm_scenario_pending_leases": "SELECT * FROM llm_scenario_pending_leases ORDER BY rowid",
+    "llm_scenario_pending_renewals": "SELECT * FROM llm_scenario_pending_renewals ORDER BY rowid",
     "llm_scenario_recovery_events": "SELECT * FROM llm_scenario_recovery_events ORDER BY rowid",
     "llm_scenario_review_events": "SELECT * FROM llm_scenario_review_events ORDER BY rowid",
     "llm_scenario_review_tapes": "SELECT * FROM llm_scenario_review_tapes ORDER BY rowid",

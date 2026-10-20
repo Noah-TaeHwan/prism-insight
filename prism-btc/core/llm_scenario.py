@@ -187,6 +187,8 @@ the caller must first reconcile cancellations before dropping pending risk.
                "action", "side", "confidence", "expires_at", "hard_stop", "entries",
                "take_profits", "partial_stops", "chase", "rationale", "leverage",
                "cancel_entry_ids", "stop_revision"}
+    if context.get('pending_renewal_version') == 1:
+        allowed.add('pending_renewal')
     if set(payload) - allowed:
         raise ScenarioValidationError("unknown scenario fields")
     p = deepcopy(payload)
@@ -208,6 +210,11 @@ the caller must first reconcile cancellations before dropping pending risk.
         if not 0 <= now - captured <= age or not now < expires <= now + 3600:
             raise ScenarioValidationError("stale input or invalid expiry")
         action = p["action"]
+        renewal = p.get('pending_renewal')
+        if renewal is None:
+            p.pop('pending_renewal', None)
+        elif action != 'WAIT':
+            raise ScenarioValidationError('pending renewal requires WAIT')
         if action not in ("WAIT", "OPEN", "ADJUST", "EXIT"):
             raise ScenarioValidationError("invalid action")
         active = context["scenario_id"] is not None
@@ -238,6 +245,11 @@ the caller must first reconcile cancellations before dropping pending risk.
                 raise ScenarioValidationError("WAIT/EXIT cannot change protection or side")
             if entries or tps or stops:
                 raise ScenarioValidationError("WAIT/EXIT cannot add orders")
+            if renewal is not None:
+                if cancellations:
+                    raise ScenarioValidationError('pending renewal cannot cancel')
+                from core.scenario_pending_renewal import compile_renewal
+                p['pending_renewal'], p['risk'] = compile_renewal(renewal, context)
             return p
         side = p["side"]
         if side not in ("LONG", "SHORT") or (active and side != context["side"]):

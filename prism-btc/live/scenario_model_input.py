@@ -165,7 +165,7 @@ def _wrapper_proposal(receipt):
     wrapper = receipt.get("raw_model_wrapper")
     if not isinstance(wrapper, dict):
         return None
-    if receipt.get("id") == "WAIT":
+    if receipt.get("id") in {'WAIT', 'WAIT_RENEWAL'}:
         return wrapper.get("wait_proposal")
     candidates = wrapper.get("candidates")
     if isinstance(candidates, list):
@@ -220,7 +220,10 @@ def _wrapper_locations(payload):
     if not isinstance(bundle, dict):
         return []
     candidates = bundle.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) > 2:
+    renewal_extra = (isinstance(candidates, list) and len(candidates) == 3
+                     and sum(isinstance(row, dict) and row.get('id') == 'WAIT_RENEWAL'
+                             for row in candidates) == 1)
+    if not isinstance(candidates, list) or (len(candidates) > 2 and not renewal_extra):
         return []
     return [("calculated_candidates.wait.raw_model_wrapper", bundle.get("wait"))] + [
         (f"calculated_candidates.candidates.{i}.raw_model_wrapper", receipt)
@@ -433,6 +436,9 @@ def project_model_input(payload):
         if proposal_paths:
             projected["model_input_projection"]["model_proposal_paths"] = proposal_paths
             projected["model_input_projection"]["meaning"] += " Each $model_proposal is the SHA256 of the base proposal in that receipt's raw_model_wrapper: WAIT uses wait_proposal; cN uses candidates[N]. If present, remove removed_fields then replace/add top-level overrides to obtain the exact restored_sha256 proposal (including host-sized quantity). Restore wrappers first, then these proposals before interpreting receipt hashes. No strategic values are changed."
+            if any(isinstance(r, dict) and r.get('id') == 'WAIT_RENEWAL'
+                   for _, r in _wrapper_locations(projected)):
+                projected['model_input_projection']['meaning'] += ' WAIT_RENEWAL also references original wait_proposal; host no-renewal fallback is separately labelled.'
         if value_paths:
             projected["model_input_projection"].update(receipt_value_definitions=value_definitions,
                                                      receipt_value_paths=value_paths)

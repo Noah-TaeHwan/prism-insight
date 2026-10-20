@@ -26,6 +26,7 @@ _OPTIONAL_STABLE = (
     "execution_price_policy", "conditional_entry_version",
     "review_contract_version", "recovery_hard_blocked", "unknown_intents",
     "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
+    'pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
 )
 
 
@@ -80,7 +81,8 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
         raise ValueError("review_guard_incomplete_review")
     result = outcome["result"]
     selected = result["selected"]
-    actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"}
+    renewal = bool(selected['raw_proposal'].get('pending_renewal'))
+    actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"} or renewal
     original, fresh = deepcopy(original_context), deepcopy(fresh_context)
     now = _number(fresh.get("now"))
     last_review_time = max(operation["value"] for operation in envelope["operations"]
@@ -125,15 +127,15 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
         validate_metadata(payload, fresh)
     payload["rationale"] = result["selection"]["rationale"]
     core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
-    if actionable:
+    if actionable and not renewal:
         _supplied_instrument_filters(core, fresh)
     validated = validate_execution_prices(core, fresh)
-    if research_mode != "legacy" and selected["id"] != "WAIT":
+    if research_mode != "legacy" and selected["id"] != "WAIT" and not renewal:
         from live.scenario_risk_allocation import validate_allocation_prices
         validate_allocation_prices(validated, selected["allocation_receipt"], fresh)
-    if actionable:
+    if actionable and not renewal:
         _supplied_instrument_filters(validated, fresh)
-    if core["action"] != "WAIT":
+    if core["action"] != "WAIT" or renewal:
         expected = selected["effective_plan"]
         if _meaningful(validated) != _meaningful(expected):
             raise ValueError("review_guard_effective_plan_changed")

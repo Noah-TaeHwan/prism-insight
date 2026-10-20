@@ -732,6 +732,35 @@ and use stop_revision only for a permitted restoration; no invented fields.
 """
 
 
+PENDING_WAIT_PROMPT = """
+Version-1 conditional waiting policy, overriding legacy never-extend-WAIT wording
+ONLY for a host-anchored original all-conditional OPEN batch. OPEN expires_at and
+recovery.entry_deadline still limit original submission/response authorization,
+not the separately approved host waiting lease. The initial lease ends at the next
+five-minute boundary plus at most 120 seconds; absolute cap is original creation
+plus one hour. No new order, repricing, resizing or risk-budget permission follows.
+When pending_renewal_offer is supplied and the original registered entry thesis is
+currently INTACT, a WAIT may explicitly choose pending_renewal={offer_id:<offered ID>}
+to reapprove the entire identical Untriggered, zero-fill reservation for the next
+five-minute review. Only a selected, freshly validated and durably APPLIED approval
+renews it. No offer means no renewal field/permission. If the nullable field exists,
+use null when not reapproving. Plain WAIT, silence, failed/stale/late responses, prior
+approval and favorable price movement never renew. Do not combine renewal with
+cancellation or a changed plan. Triggered/partial/unknown orders are ineligible;
+In calculated SELECT, WAIT_RENEWAL is the explicit original proposal; the separately
+labelled host WAIT fallback keeps the old deadline. Choose WAIT to decline renewal.
+DRAFT approval alone never renews, even when there are no other trade candidates.
+normal fill protection and original failure/EXIT rules always retain priority.
+Judge current structure and costs, not mere desire to wait longer. Do not relabel
+the original premise. State reapproval or non-reapproval and its reason briefly.
+Ask whether you would still place this exact reservation now within its original
+risk limits. Fresh observations are mandatory, but an untriggered condition is
+expected: another five minutes alone does not require a fired trigger or new price
+progress. Unchanged facts neither automatically approve nor automatically reject.
+The host alone computes the offered deadline and refuses late or repeated renewal.
+"""
+
+
 class ScenarioModelError(ValueError):
     """Sanitized model failure; never embeds response or account payload."""
 
@@ -895,6 +924,8 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
         raise ScenarioModelError("input_size")
     started = clock()
     system_prompt = SYSTEM_PROMPT + MA_STRUCTURE_PROMPT
+    if context.get('pending_wait_policy_version') == 1:
+        system_prompt += PENDING_WAIT_PROMPT
     if context.get("entry_contract_version") == 1:
         system_prompt += ENTRY_CONTRACT_PROMPT
     if flat_entry:

@@ -142,7 +142,13 @@ class ScenarioRuntime:
     def __init__(self, conn, broker, propose, snapshot, *, clock=time.time,
                  recovery_enabled=False, automatic_normalization_enabled=False,
                  calculated_review_enabled=False, calculated_review_propose=None,
-                 research_review_mode="legacy", entry_contract_enabled=False):
+                 research_review_mode="legacy", entry_contract_enabled=False, pending_renewal_enabled=False):
+        if type(pending_renewal_enabled) is not bool or (pending_renewal_enabled and not entry_contract_enabled):
+            raise ValueError('pending_renewal_requires_entry_contract')
+        self.pending_renewal_enabled = pending_renewal_enabled
+        if pending_renewal_enabled and (not calculated_review_enabled or research_review_mode not in {
+                'legacy', 'allocation-calculated', 'action-allocation-calculated-v1', 'economic-reject-calculated-v1'}):
+            raise ValueError('pending_renewal_requires_two_phase_review')
         if type(entry_contract_enabled) is not bool:
             raise ValueError("entry_contract_flag_must_be_bool")
         self.entry_contract_enabled = entry_contract_enabled
@@ -165,6 +171,8 @@ class ScenarioRuntime:
         self.calculated_review_enabled = calculated_review_enabled
         self.calculated_review_propose = calculated_review_propose
         with mutation_lock(conn):
+            from live.scenario_pending_renewal import initialize
+            initialize(conn)
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS llm_scenario_state (
                     id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
@@ -387,6 +395,9 @@ class ScenarioRuntime:
 
     def _context(self, state, *, observed_at=None):
         ctx = dict(self.broker.context())
+        # Renewal authority is constructed by this runtime, never broker metadata.
+        for key in ('pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait'):
+            ctx.pop(key, None)
         hard_risk_blocked = ctx.get("new_risk_blocked")
         for flag in ("legacy_fenced", "protection_ok", "new_risk_blocked"):
             if type(ctx.get(flag)) is not bool:
@@ -484,6 +495,21 @@ class ScenarioRuntime:
         ctx["new_risk_blocked"] = bool(ctx["new_risk_blocked"] or (
             state["breaker"].get("blocked") and not ctx.get("recovery_observing")
             and not ctx.get("recovery_normal_permission")))
+        if self.pending_renewal_enabled and not active:
+            ctx['pending_wait_policy_version'] = 1
+        elif (active and active.get('pending_wait_anchor')
+              and ctx.get('positions') == [] and ctx.get('pending_entries')):
+            from live.scenario_pending_renewal import load, offer
+            lease = load(self.conn, active)
+            ctx['pending_wait_policy_version'] = 1
+            if lease:
+                ctx['pending_wait'] = dict(lease_expires_at=lease['until'],
+                                          absolute_expires_at=lease['anchor']['hard_deadline'])
+                offered = (offer(self.conn, state, ctx, self.broker.children(active['scenario_id']),
+                                 self.clock() if observed_at is None else observed_at)
+                           if self.pending_renewal_enabled and self.calculated_review_enabled else None)
+                if offered:
+                    ctx.update(pending_renewal_version=1, pending_renewal_offer=offered)
         from core.scenario_stop_policy import build_stop_policy
         ctx.setdefault("stop_policy", build_stop_policy(active,
             hard_blocked=hard_risk_blocked,
@@ -865,7 +891,12 @@ class ScenarioRuntime:
                     validate_metadata(payload, fresh)
                     core_payload = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
                     validated = validate_execution_prices(core_payload, fresh)
-                if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids"):
+                if validated.get('pending_renewal') and (
+                        not self.pending_renewal_enabled or not self.calculated_review_enabled
+                        or review_envelope['outcome']['result']['selected']['id'] != 'WAIT_RENEWAL'
+                        or review_envelope['outcome']['result']['calls'] != 2):
+                    raise ValueError('pending_renewal_selected_two_phase_required')
+                if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids") and not validated.get('pending_renewal'):
                     if state["active"] and payload.get("thesis_assessment") is not None:
                         state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
                         state["active"]["last_thesis_assessment_at"] = ctx["now"]
@@ -892,6 +923,9 @@ class ScenarioRuntime:
                             commit_at if self.calculated_review_enabled else self.clock())
                         self.conn.execute("INSERT INTO llm_scenario_entry_contracts VALUES(?,?)",
                             (validated["scenario_id"], _json(state["active"]["entry_contract"])))
+                    from live.scenario_pending_renewal import create_anchor
+                    create_anchor(self.conn, state['active'], validated, fresh,
+                                  commit_at if self.calculated_review_enabled else self.clock())
                 receipt = self._apply_review(state["active"], payload, validated,
                                              ctx["review_memory"], input_id, slot,
                                              observed_at=commit_at if self.calculated_review_enabled else None)
@@ -924,6 +958,8 @@ class ScenarioRuntime:
                               "pending_entries": fresh["pending_entries"]},
                               scenario_id=validated["scenario_id"], intent_id=ident, decision_slot=slot)
                 if validated["action"] in {"OPEN","ADJUST"}:
+                    from live.scenario_pending_renewal import load
+                    waiting_lease = load(self.conn, state['active'])
                     entries=validated.get("entries",[])
                     quantity=sum(e["quantity"] for e in entries)
                     price=sum(e["price"]*e["quantity"] for e in entries)/quantity if quantity else None
@@ -932,7 +968,9 @@ class ScenarioRuntime:
                                   if held_quantity else None)
                     self._notice("plan:"+ident,dict(kind="PLAN",timestamp=self.clock(),side=validated["side"],
                         conditional_entries=[e for e in entries if e.get("trigger_price") is not None],
-                        reservation_expires_at=validated["expires_at"],
+                        reservation_expires_at=waiting_lease['until'] if waiting_lease else validated['expires_at'],
+                        submission_expires_at=validated['expires_at'] if waiting_lease else None,
+                        reservation_absolute_expires_at=waiting_lease['anchor']['hard_deadline'] if waiting_lease else None,
                         price=price,hard_stop=validated["hard_stop"],take_profits=validated.get("take_profits",[]),
                         plan_action=validated["action"],quantity=quantity,before_quantity=held_quantity,
                         before_hard_stop=fresh.get("previous_hard_stop"),reference_entry_price=held_average,

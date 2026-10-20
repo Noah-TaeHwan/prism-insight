@@ -667,11 +667,15 @@ def normal_permission(state, active, ctx):
                 and permit.get("stage") == 2 and hard_guards(state, ctx))
 
 
-def authorize_pending(state, active, now):
+def authorize_pending(state, active, now, *, waiting_deadline=None):
     permit = managed_permit(state, active)
     breaker = state.get("breaker", {})
     deadline = (active.get("expires_at") if permit and permit.get("policy_version") == 2
                 and permit.get("stage") == 2 else (permit or {}).get("entry_deadline"))
+    # Only the broker's verified existing-child lease may extend retention.
+    # authorize_entry never supplies this argument, preserving submission limits.
+    if waiting_deadline is not None:
+        deadline = waiting_deadline
     return bool(permit
                 and breaker.get("blocked") is True
                 and set(breaker.get("reasons", [])) == {"three_losses"}

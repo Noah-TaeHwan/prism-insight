@@ -12,7 +12,7 @@ import os
 from live.scenario_notice import render_notice
 from live.shared_entry_coordinator import mutation_lock
 
-PRIVATE = {"PLAN", "SUBMITTED", "PENDING", "HALTED", "RESOLVED", "MODEL_ERROR", "MODEL_RECOVERED"}
+PRIVATE = {"PLAN", "SUBMITTED", "PENDING", "HALTED", "RESOLVED", "MODEL_ERROR", "MODEL_RECOVERED", "RESERVATION_RENEWED"}
 
 
 def _schema(conn):

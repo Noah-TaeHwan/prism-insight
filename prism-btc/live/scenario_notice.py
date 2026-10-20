@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 KST = timezone(timedelta(hours=9))
 TITLES = {
     "PLAN": "📝 BTC 데모 매매 계획 · 주문 전",
+    'RESERVATION_RENEWED': '🕒 BTC 데모 기존 예약 유지 · 대기 마감 갱신',
     "SUBMITTED": "📨 BTC 데모 주문 접수 · 체결 미확정",
     "FILLED": "📌 BTC 데모 진입 체결",
     "PROTECTION": "🛡 BTC 데모 보호 변경 확인",
@@ -319,6 +320,15 @@ def render_notice(event: dict) -> str:
     at = _number(event.get("timestamp"))
     if at is None or _time(at) == "미확인":
         raise ValueError("event_timestamp_required")
+    if kind == 'RESERVATION_RENEWED':
+        deadline, hard = _number(event.get('reservation_expires_at')), _number(event.get('absolute_expires_at'))
+        if event.get('renewal_applied') is not True or deadline is None or hard is None or not at < deadline <= hard:
+            raise ValueError('reservation_renewal_evidence_required')
+        return '\n'.join([TITLES[kind], f"확인: {_time(at)}",
+            '재승인 당시 미발동·미체결인 기존 조건부 주문을 그대로 유지합니다.',
+            f"현재 대기 마감: {_time(deadline)} · 절대 대기 상한: {_time(hard)}",
+            '새 주문·추가 진입·체결 확인이 아닙니다. 다음 5분 판단의 명시적 재승인이 필요합니다.',
+            '마감 후 취소를 요청합니다. 취소 확인 전 늦은 체결은 가능하며 기존 보호는 유지됩니다.'])
     after = _position(event.get("position_after"), at)
     title = TITLES[kind]
     if kind == "CLOSED" and event.get("recovery_confirmation") is True:
@@ -399,6 +409,10 @@ def render_notice(event: dict) -> str:
                     if isinstance(row, dict):
                         lines.append(f"예약 조건: MarkPrice {_money(row.get('trigger_price'))} {direction} · 체결 한도 {_money(row.get('price'))}")
                 deadline = _number(event.get("reservation_expires_at"))
+                submission = _number(event.get('submission_expires_at'))
+                hard_cap = _number(event.get('reservation_absolute_expires_at'))
+                if submission is not None and hard_cap is not None:
+                    lines.append(f"최초 제출 권한 마감 {_time(submission)} · 절대 대기 상한 {_time(hard_cap)}")
                 if deadline is not None:
                     lines.append("예약 마감: " + _time(deadline) + " · 이후 취소 요청, 취소 확인 전 체결 가능")
             action = {"OPEN":"신규 포지션 구축 요청", "ADJUST":"기존 포지션 계획 수정 요청", "EXIT":"전량 청산 요청"}.get(event.get("plan_action"))

@@ -101,6 +101,7 @@ def _run_once(conn, broker, *, execute=False, protect_only=False,
         recovery_enabled=True,automatic_normalization_enabled=True,
         calculated_review_enabled=calculated_review,
         entry_contract_enabled=entry_contract_enabled,
+        pending_renewal_enabled=entry_contract_enabled and calculated_review,
         calculated_review_propose=operational_calculated_propose if calculated_review else None,
         research_review_mode=CALCULATED_REVIEW_MODE if calculated_review else "legacy")
     return runtime.tick()

@@ -17,6 +17,8 @@ import logging
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
+from live.scenario_pending_renewal import initialize as initialize_pending_leases
+
 
 TERMINAL = frozenset({"Filled", "Cancelled", "Rejected", "Deactivated", "PartiallyFilledCanceled"})
 LIVE = frozenset({"New", "PartiallyFilled", "Untriggered", "Triggered"})
@@ -50,6 +52,7 @@ class ScenarioExecution:
 
     def _init_execution(self, enabled):
         self.execution_enabled = enabled is True
+        initialize_pending_leases(self.conn)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS llm_scenario_children(
             link_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL, scenario_id TEXT NOT NULL,
             kind TEXT NOT NULL, local_id TEXT NOT NULL, request TEXT NOT NULL,
@@ -180,6 +183,32 @@ class ScenarioExecution:
             self._fail("order_precision_invalid")
         return text_number(v)
 
+    def _verify_entry_order_terms(self, child, order):
+        """Reuse exact entry identity/terms for queried and final account rows."""
+        if child['kind'] != 'entry':
+            return
+        request = child['request']
+        if (order.get('orderLinkId') != child['link_id'] or order.get('symbol') != 'BTCUSDT'
+                or order.get('side') != request['side'] or not order.get('orderId')
+                or (child.get('order_id') and order['orderId'] != child['order_id'])
+                or decimal(order.get('qty')) != decimal(request['qty'])):
+            self._fail('exact_order_identity_conflict')
+        if (decimal(order.get('price')) != decimal(request['price'])
+                or order.get('orderType') != 'Limit' or order.get('reduceOnly') is not False
+                or decimal(order.get('stopLoss')) != decimal(request['stopLoss'])
+                or order.get('slTriggerBy') != 'MarkPrice'):
+            self._fail('entry_order_terms_changed')
+        if request.get('triggerPrice') is not None:
+            if (decimal(order.get('triggerPrice')) != decimal(request['triggerPrice'])
+                    or order.get('triggerBy') != 'MarkPrice'
+                    or order.get('triggerDirection') != request['triggerDirection']
+                    or order.get('positionIdx') != 0 or order.get('timeInForce') != 'GTC'
+                    or request.get('slOrderType') != 'Market'
+                    or ('slOrderType' in order and order['slOrderType'] != 'Market')):
+                self._fail('conditional_entry_terms_changed')
+        elif decimal(order.get('triggerPrice') or 0) != 0:
+            self._fail('unexpected_entry_trigger')
+
     def _query_child(self, child):
         """Exact ID lookup plus exact cumulative execution reconciliation."""
         from live.scenario_broker import read_evidence_pages
@@ -211,22 +240,7 @@ class ScenarioExecution:
                     order.get("triggerBy")!="MarkPrice" or order.get("orderType")!="Market" or
                     order.get("reduceOnly") is not True):
                 self._fail("native_parent_identity_conflict")
-        if child["kind"]=="entry" and (
-                decimal(order.get("price"))!=decimal(request["price"]) or
-                order.get("orderType")!="Limit" or order.get("reduceOnly") is not False or
-                decimal(order.get("stopLoss"))!=decimal(request["stopLoss"]) or
-                order.get("slTriggerBy")!="MarkPrice"):
-            self._fail("entry_order_terms_changed")
-        if child["kind"] == "entry" and request.get("triggerPrice") is not None:
-            if (decimal(order.get("triggerPrice")) != decimal(request["triggerPrice"]) or
-                    order.get("triggerBy") != "MarkPrice" or
-                    order.get("triggerDirection") != request["triggerDirection"] or
-                    order.get("positionIdx") != 0 or order.get("timeInForce") != "GTC" or
-                    request.get("slOrderType") != "Market" or
-                    ("slOrderType" in order and order["slOrderType"] != "Market")):
-                self._fail("conditional_entry_terms_changed")
-        elif child["kind"] == "entry" and decimal(order.get("triggerPrice") or 0) != 0:
-            self._fail("unexpected_entry_trigger")
+        self._verify_entry_order_terms(child, order)
         executions = read_evidence_pages(self._call,"get_executions",category="linear",symbol="BTCUSDT",orderId=order["orderId"])
         qty = Decimal(0)
         for row in executions:
@@ -376,7 +390,8 @@ class ScenarioExecution:
                                        (child["intent_id"],)).fetchone()
             if not parent:
                 self._fail("conditional_parent_missing")
-            row["expires_at"] = json.loads(parent[0])["expires_at"]
+            from live.scenario_pending_renewal import effective_deadline
+            row['expires_at'] = effective_deadline(self.conn, self._active(), json.loads(parent[0]), child)
         return row
 
     def _conditional_invalidated(self, child, observed, active):
@@ -389,7 +404,8 @@ class ScenarioExecution:
             return True
         payload = json.loads(parent[0])
         mark, stop = decimal(observed["mark_price"]), decimal(active["hard_stop"])
-        return (self.clock() >= payload["expires_at"] or
+        from live.scenario_pending_renewal import effective_deadline
+        return (self.clock() >= effective_deadline(self.conn, active, payload, child) or
                 (active["side"] == "LONG" and mark <= stop) or
                 (active["side"] == "SHORT" and mark >= stop))
 
@@ -524,7 +540,7 @@ class ScenarioExecution:
             raise
         return fresh
 
-    def _preflight(self, payload, observed, instrument, children, *, stop_revision=False):
+    def _preflight(self, payload, observed, instrument, children, *, stop_revision=False, pending_renewal=False):
         from core.llm_scenario import risk_snapshot
         stop = decimal(payload["hard_stop"])
         self._aligned(stop,instrument["tick"])
@@ -586,10 +602,15 @@ class ScenarioExecution:
         from live.scenario_recovery import authorize_entry, managed_permit, risk_fraction
         fraction = risk_fraction(state, active["scenario_id"])
         if not stop_revision and (state.get("breaker", {}).get("blocked", False) or managed_permit(state, active) or fraction < .02):
-            allowed = authorize_entry(state, payload, dict(
+            authority_context = dict(
                 initial_equity=active["initial_equity"], new_risk_blocked=hard_blocked,
                 protection_ok=not size or self._verify_protection(observed, active["hard_stop"], side),
-                accounting_status="confirmed", legacy_fenced=observed["legacy_fenced"]), self.clock())
+                accounting_status='confirmed', legacy_fenced=observed['legacy_fenced'])
+            if pending_renewal:
+                from live.scenario_pending_renewal import retention_allowed
+                allowed = retention_allowed(state, active, authority_context)
+            else:
+                allowed = authorize_entry(state, payload, authority_context, self.clock())
             if not allowed:
                 self._fail("new_risk_halted")
         risk=risk_snapshot(initial_equity=active["initial_equity"],side=side,hard_stop=float(stop),
@@ -606,7 +627,7 @@ class ScenarioExecution:
         if not tier or decimal(tier[2])<10:
             self._fail("risk_tier_unverified")
         maintenance=decimal(tier[1])
-        for r in entries:
+        for r in entries + pending if pending_renewal else entries:
             distance=abs(decimal(r["price"])-stop)/decimal(r["price"])
             if Decimal(".1")-maintenance-Decimal(".002")<distance*2:
                 self._fail("liquidation_stop_buffer_insufficient")
@@ -620,6 +641,96 @@ class ScenarioExecution:
         if not 0<=self.clock()-observed["captured_at"]<=10:
             self._fail("pre_submit_snapshot_stale")
         return risk
+
+    def _renew_pending(self, payload, intent_id):
+        """Local-only lease apply; original exchange requests remain immutable."""
+        from live import scenario_pending_renewal as renewal
+        from live.scenario_entry_contract import contract_context
+        from core.scenario_pending_renewal import compile_renewal
+        previous = renewal.receipt(self.conn, intent_id)
+        if previous:
+            return previous
+        try:
+            now = self.clock()
+            state, active = self._recovery_state(), self._active()
+            grant = payload['pending_renewal']
+            if (not active or payload['action'] != 'WAIT' or payload.get('cancel_entry_ids')
+                    or not now < payload['expires_at'] or active['revision'] != payload['revision']):
+                self._fail('pending_renewal_stale_intent')
+            decisions = self.conn.execute(
+                "SELECT slot,context,proposal FROM llm_scenario_decisions WHERE json_extract(proposal,'$.action_id')=?",
+                (intent_id,)).fetchall()
+            if len(decisions) != 1 or not all(decisions[0]):
+                self._fail('pending_renewal_decision_missing')
+            decision_slot, context_body, proposal_body = decisions[0]
+            original_context, decision = json.loads(context_body), json.loads(proposal_body)
+            tape = self.conn.execute('SELECT body FROM llm_scenario_review_tapes WHERE slot=?', (decision_slot,)).fetchone()
+            outcome = json.loads(tape[0]).get('outcome', {}) if tape else {}
+            reviewed = outcome.get('result', {})
+            selected = reviewed.get('selected', {})
+            if (outcome.get('status') != 'COMPLETE' or reviewed.get('calls') != 2
+                    or selected.get('id') != 'WAIT_RENEWAL'
+                    or (selected.get('raw_proposal') or {}).get('pending_renewal') != {'offer_id': grant['offer_id']}
+                    or (selected.get('effective_plan') or {}).get('pending_renewal') != grant):
+                self._fail('pending_renewal_selected_review_missing')
+            assessment = decision.get('thesis_assessment') or {}
+            if (decision.get('pending_renewal') != {'offer_id': grant['offer_id']}
+                    or decision.get('action') != 'WAIT' or assessment.get('status') != 'INTACT'
+                    or assessment.get('contract_id') != grant['contract_id']
+                    or not 0 <= now - original_context['input_captured_at'] <= 120):
+                self._fail('pending_renewal_approval_unverified')
+            stored = self.conn.execute('SELECT body FROM llm_scenario_entry_contracts WHERE scenario_id=?',
+                                       (active['scenario_id'],)).fetchone()
+            if not stored or json.loads(stored[0]) != active.get('entry_contract'):
+                self._fail('pending_renewal_original_contract_unverified')
+            for child in self.children(active['scenario_id']):
+                self._query_child(child)
+            context = self.context()
+            if context['account_version'] != original_context.get('account_version'):
+                self._fail('pending_renewal_approved_account_changed')
+            context.update(contract_context(active, True))
+            context.update(now=self.clock(), scenario_id=active['scenario_id'], side=active['side'],
+                           pending_renewal_version=1)
+            own = self.children(active['scenario_id'])
+            offered = renewal.offer(self.conn, state, context, own, self.clock())
+            if offered != grant:
+                self._fail('pending_renewal_reservation_changed')
+            context['pending_renewal_offer'] = offered
+            _, risk = compile_renewal({'offer_id': offered['offer_id']}, context)
+            if risk != payload.get('risk'):
+                self._fail('pending_renewal_risk_changed')
+            observed = self.capture_account()
+            if observed['account_version'] != context['account_version']:
+                self._fail('pending_renewal_account_changed')
+            observed_orders = {row['orderId']: row for row in observed['open_orders']}
+            for child in own:
+                if child['kind'] == 'entry':
+                    current = observed_orders.get(child['order_id'], {})
+                    self._verify_entry_order_terms(child, current)
+                    if (current.get('orderStatus') != 'Untriggered'
+                            or decimal(current.get('cumExecQty', -1)) != 0
+                            or decimal(current.get('leavesQty', -1)) != decimal(child['request']['qty'])):
+                        self._fail('pending_renewal_latest_order_changed')
+            check = dict(scenario_id=active['scenario_id'], side=active['side'],
+                         hard_stop=active['hard_stop'], entries=[])
+            self._preflight(check, observed, self._instrument(), own, pending_renewal=True)
+            # Fresh price may have crossed a trigger after the last child read.
+            context.update(mark_price=observed['mark_price'], now=self.clock())
+            compile_renewal({'offer_id': offered['offer_id']}, context)
+            applied_at = self.clock()
+            if (not applied_at < payload['expires_at']
+                    or not 0 <= applied_at - original_context['input_captured_at'] <= 120
+                    or not 0 <= applied_at - observed['captured_at'] <= 10):
+                self._fail('pending_renewal_response_expired')
+            return renewal.apply(self.conn, active, grant, intent_id, applied_at, clock=self.clock,
+                approval_deadline=min(payload['expires_at'], original_context['input_captured_at'] + 120,
+                                      observed['captured_at'] + 10))
+        except Exception:
+            self.conn.rollback()
+            # No exchange mutation is performed by this path. Explicit rejection
+            # leaves the old lease untouched; no automatic approval or retry.
+            renewal.reject(self.conn, intent_id, 'FRESH_REAPPROVAL_REJECTED', self.clock())
+            return renewal.receipt(self.conn, intent_id)
 
     def execute(self,payload,intent_id):
         from live.shared_entry_coordinator import mutation_lock
@@ -686,6 +797,8 @@ class ScenarioExecution:
                 if c["kind"]=="entry" and (c["local_id"] in selected or c["order_id"] in selected):
                     self._cancel(c)
             if payload["action"]=="WAIT":
+                if payload.get('pending_renewal'):
+                    return self._renew_pending(payload, intent_id)
                 return
             if payload["action"]=="EXIT":
                 for c in self.children(active["scenario_id"]):
