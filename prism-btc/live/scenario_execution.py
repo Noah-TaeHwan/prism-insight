@@ -646,11 +646,21 @@ class ScenarioExecution:
                     or not now < payload['expires_at'] or active['revision'] != payload['revision']):
                 self._fail('pending_renewal_stale_intent')
             decisions = self.conn.execute(
-                "SELECT context,proposal FROM llm_scenario_decisions WHERE json_extract(proposal,'$.action_id')=?",
+                "SELECT slot,context,proposal FROM llm_scenario_decisions WHERE json_extract(proposal,'$.action_id')=?",
                 (intent_id,)).fetchall()
             if len(decisions) != 1 or not all(decisions[0]):
                 self._fail('pending_renewal_decision_missing')
-            original_context, decision = map(json.loads, decisions[0])
+            decision_slot, context_body, proposal_body = decisions[0]
+            original_context, decision = json.loads(context_body), json.loads(proposal_body)
+            tape = self.conn.execute('SELECT body FROM llm_scenario_review_tapes WHERE slot=?', (decision_slot,)).fetchone()
+            outcome = json.loads(tape[0]).get('outcome', {}) if tape else {}
+            reviewed = outcome.get('result', {})
+            selected = reviewed.get('selected', {})
+            if (outcome.get('status') != 'COMPLETE' or reviewed.get('calls') != 2
+                    or selected.get('id') != 'WAIT_RENEWAL'
+                    or (selected.get('raw_proposal') or {}).get('pending_renewal') != {'offer_id': grant['offer_id']}
+                    or (selected.get('effective_plan') or {}).get('pending_renewal') != grant):
+                self._fail('pending_renewal_selected_review_missing')
             assessment = decision.get('thesis_assessment') or {}
             if (decision.get('pending_renewal') != {'offer_id': grant['offer_id']}
                     or decision.get('action') != 'WAIT' or assessment.get('status') != 'INTACT'

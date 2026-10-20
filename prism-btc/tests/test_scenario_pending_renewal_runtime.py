@@ -398,6 +398,28 @@ def test_first_version_rejects_single_pass_enablement(tmp_path):
             entry_contract_enabled=True, pending_renewal_enabled=True)
 
 
+@pytest.mark.parametrize('calculated', [False, True])
+def test_disabled_restart_observes_old_lease_but_cannot_offer_or_commit_renewal(tmp_path, calculated):
+    r, b, e, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    before = load(r.conn, r.state()['active'])
+    restarted = ScenarioRuntime(r.conn, b, r.propose, r.snapshot, clock=r.clock,
+        calculated_review_enabled=calculated,
+        calculated_review_propose=r.calculated_review_propose if calculated else None,
+        research_review_mode=r.research_review_mode if calculated else 'legacy',
+        entry_contract_enabled=True, pending_renewal_enabled=False)
+    e.now += 301
+    state = restarted.state()
+    restarted._reconcile(state)
+    context = restarted._context(state)
+    assert context['pending_wait']['lease_expires_at'] == before['until']
+    assert 'pending_renewal_offer' not in context and 'pending_renewal_version' not in context
+    assert b.children()[0]['status'] == 'LIVE'
+    e.now = before['until']
+    b.reconcile()
+    assert b.children()[0]['status'] == 'TERMINAL'
+
+
 def test_mixed_initial_batch_has_no_version_one_anchor(tmp_path):
     r, b, _, _, _ = renewal_runtime(tmp_path, mixed_initial=True)
     assert r.tick()['status'] == 'intent_pending'

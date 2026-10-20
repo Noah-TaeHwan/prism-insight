@@ -228,6 +228,9 @@ def _manifest():
     # The immutable premise also grants a narrowly scoped automatic EXIT.
     execution['live/scenario_entry_contract.py'] = policy['live/scenario_entry_contract.py']
     execution_parity['live/scenario_entry_contract.py'] = judgment_parity['live/scenario_entry_contract.py']
+    for name in ('core/scenario_pending_renewal.py', 'live/scenario_pending_renewal.py'):
+        execution[name] = policy[name]
+        execution_parity[name] = judgment_parity[name]
     try:
         # Fixed absolute executable and literal read-only arguments; no user input.
         revision = subprocess.run(  # nosec B603

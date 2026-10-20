@@ -395,6 +395,9 @@ class ScenarioRuntime:
 
     def _context(self, state, *, observed_at=None):
         ctx = dict(self.broker.context())
+        # Renewal authority is constructed by this runtime, never broker metadata.
+        for key in ('pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait'):
+            ctx.pop(key, None)
         hard_risk_blocked = ctx.get("new_risk_blocked")
         for flag in ("legacy_fenced", "protection_ok", "new_risk_blocked"):
             if type(ctx.get(flag)) is not bool:
@@ -501,8 +504,9 @@ class ScenarioRuntime:
             if lease:
                 ctx['pending_wait'] = dict(lease_expires_at=lease['until'],
                                           absolute_expires_at=lease['anchor']['hard_deadline'])
-                offered = offer(self.conn, state, ctx, self.broker.children(active['scenario_id']),
-                                self.clock() if observed_at is None else observed_at)
+                offered = (offer(self.conn, state, ctx, self.broker.children(active['scenario_id']),
+                                 self.clock() if observed_at is None else observed_at)
+                           if self.pending_renewal_enabled and self.calculated_review_enabled else None)
                 if offered:
                     ctx.update(pending_renewal_version=1, pending_renewal_offer=offered)
         from core.scenario_stop_policy import build_stop_policy
@@ -886,6 +890,11 @@ class ScenarioRuntime:
                     validate_metadata(payload, fresh)
                     core_payload = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
                     validated = validate_execution_prices(core_payload, fresh)
+                if validated.get('pending_renewal') and (
+                        not self.pending_renewal_enabled or not self.calculated_review_enabled
+                        or review_envelope['outcome']['result']['selected']['id'] != 'WAIT_RENEWAL'
+                        or review_envelope['outcome']['result']['calls'] != 2):
+                    raise ValueError('pending_renewal_selected_two_phase_required')
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids") and not validated.get('pending_renewal'):
                     if state["active"] and payload.get("thesis_assessment") is not None:
                         state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
