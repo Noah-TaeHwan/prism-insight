@@ -64,3 +64,22 @@ def test_soft_block_is_not_confused_with_explicit_clear_hard_guard():
     assert compile_renewal(dict(offer_id='offer'), ctx)[1]['within_budget']
     ctx['recovery_hard_blocked'] = True
     with pytest.raises(ValueError): compile_renewal(dict(offer_id='offer'), ctx)
+
+
+def test_offline_replay_hash_covers_both_new_tables_without_ignoring_unknown_tables():
+    import sqlite3
+    from analysis.scenario_replay import _runtime_event_hash
+    from backtest.scenario_tape import TapeMismatch
+    from live.scenario_pending_renewal import initialize
+    conn = sqlite3.connect(':memory:')
+    initialize(conn)
+    empty = _runtime_event_hash(conn)
+    conn.execute('INSERT INTO llm_scenario_pending_leases VALUES(?,?)', ('s', '{"revision":0}'))
+    anchored = _runtime_event_hash(conn)
+    assert anchored != empty
+    conn.execute('INSERT INTO llm_scenario_pending_renewals VALUES(?,?)', ('renew', '{"status":"APPLIED"}'))
+    assert _runtime_event_hash(conn) != anchored
+    conn.execute('CREATE TABLE llm_scenario_unregistered(value TEXT)')
+    with pytest.raises(TapeMismatch, match='unknown_runtime_event_table'):
+        _runtime_event_hash(conn)
+    conn.close()
