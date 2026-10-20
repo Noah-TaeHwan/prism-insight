@@ -47,8 +47,13 @@ def entry_plan_reference(conn, active, child):
         total = sum(t["fraction"] for t in normalized)
         if total > 1 and not math.isclose(total, 1, rel_tol=1e-12, abs_tol=0):
             return {}
-        return dict(take_profits=normalized, take_profits_scope="entry_intent_plan",
-                    plan_action_id=child["intent_id"])
+        detail = dict(take_profits=normalized, take_profits_scope="entry_intent_plan",
+                      plan_action_id=child["intent_id"])
+        contract = active.get('entry_contract') or {}
+        if isinstance(contract, dict) and contract.get('version') == 2:
+            from live.scenario_entry_contract import valid_record
+            detail['entry_goal'] = contract.get('resolved_goal') if valid_record(contract, active['scenario_id']) else {'status': 'UNKNOWN'}
+        return detail
     except (sqlite3.Error, ValueError, TypeError):
         logging.getLogger(__name__).warning("NOTICE entry_plan_reference_unavailable")
         return {}  # Optional detail must never drop a confirmed fill.
@@ -117,6 +122,10 @@ def position_snapshot(active, children, observed, protected, pending, accounting
             snapshot.update(scenario_risk=risk["total_risk"], scenario_risk_includes_pending=True)
         except (ScenarioValidationError, KeyError, TypeError, ValueError):
             pass  # Missing optional accounting never becomes zero cost.
+    contract = active.get('entry_contract') or {}
+    if isinstance(contract, dict) and contract.get('version') == 2:
+        from live.scenario_entry_contract import valid_record
+        snapshot['entry_goal'] = contract.get('resolved_goal') if valid_record(contract, active['scenario_id']) else {'status': 'UNKNOWN'}
     return snapshot
 
 

@@ -16,23 +16,36 @@ def _object(properties):
     return dict(type="object", properties=properties, required=list(properties), additionalProperties=False)
 
 
-def entry_contract_schema():
+def entry_contract_schema(version=1):
     text = dict(type="string", minLength=1, maxLength=240)
-    return _object(dict(version=dict(type="integer", enum=[1]), regime=dict(type="string", enum=["TREND", "BREAKOUT", "RANGE"]),
+    schema = _object(dict(version=dict(type="integer", enum=[version]), regime=dict(type="string", enum=["TREND", "BREAKOUT", "RANGE"]),
         premise=text, expected_progress=text,
         explicit_failure=_object(dict(source=dict(type="string", enum=["MARK_PRICE"]),
             operator=dict(type="string", enum=["ge", "le"]), price=dict(type="number", exclusiveMinimum=0),
             minimum_observations=dict(type="integer", enum=[2, 3])))))
+    if version == 2:
+        from live.scenario_entry_goal import goal_schema
+        schema['properties'].pop('expected_progress')
+        schema['properties']['goal'] = goal_schema()
+        schema['required'] = list(schema['properties'])
+    return schema
 
 
 def _definition(value):
-    if not isinstance(value, dict) or set(value) != set(entry_contract_schema()["properties"]):
+    version = value.get('version') if isinstance(value, dict) else None
+    if type(version) is not int or version not in (1, 2):
         return False
+    if set(value) != set(entry_contract_schema(version)["properties"]):
+        return False
+    if version == 2:
+        from live.scenario_entry_goal import valid_goal
+        if not valid_goal(value['goal']):
+            return False
     failure = value.get("explicit_failure")
-    return (type(value.get("version")) is int and value["version"] == 1
+    return (type(value.get("version")) is int and value["version"] in (1, 2)
         and value.get("regime") in ("TREND", "BREAKOUT", "RANGE")
         and all(isinstance(value.get(k), str) and 1 <= len(value[k].strip()) <= 240
-                for k in ("premise", "expected_progress"))
+                for k in (("premise", "expected_progress") if version == 1 else ("premise",)))
         and isinstance(failure, dict) and set(failure) == {"source", "operator", "price", "minimum_observations"}
         and failure["source"] == "MARK_PRICE" and failure["operator"] in ("ge", "le")
         and _number(failure["price"]) and type(failure["minimum_observations"]) is int
@@ -44,31 +57,53 @@ def _digest(record):
                                      allow_nan=False).encode()).hexdigest()
 
 
-def bind_contract(definition, validated, registered_at):
+def bind_contract(definition, validated, registered_at, *, resolved_goal=None):
     if not _definition(definition) or not _number(registered_at) or validated.get("action") != "OPEN":
         raise ValueError("entry_contract_invalid_registration")
     # Execution-price normalization must not move the final entry across its
     # original failure boundary. Core execution metadata is irrelevant here.
     validate_metadata(dict(validated, entry_contract=definition, thesis_assessment=None),
-                      dict(entry_contract_version=1, scenario_id=None))
-    result = dict(version=1, definition=copy.deepcopy(definition), origin=dict(
+                      dict(entry_contract_version=definition['version'], scenario_id=None))
+    result = dict(version=definition['version'], definition=copy.deepcopy(definition), origin=dict(
         scenario_id=validated["scenario_id"], action_id=validated["action_id"],
         input_id=validated["input_id"], registered_at=registered_at))
+    if definition['version'] == 2:
+        from live.scenario_entry_goal import valid_resolved, validate_goal_plan
+        if (not valid_resolved(resolved_goal) or resolved_goal.get('goal') != definition['goal']
+                or resolved_goal.get('input_id') != validated['input_id']
+                or resolved_goal['snapshot_as_of_ms'] > registered_at * 1000):
+            raise ValueError('entry_goal_registration_missing')
+        validate_goal_plan(validated, resolved_goal)
+        result['resolved_goal'] = copy.deepcopy(resolved_goal)
     return dict(result, contract_id=_digest(result))
 
 
 def valid_record(record, scenario_id):
     try:
-        if (not isinstance(record, dict) or set(record) != {"version", "definition", "origin", "contract_id"}
-                or type(record["version"]) is not int or record["version"] != 1 or not _definition(record["definition"])):
+        if not isinstance(record, dict):
             return False
+        keys = {"version", "definition", "origin", "contract_id"}
+        if record.get('version') == 2:
+            keys.add('resolved_goal')
+        if (set(record) != keys or type(record["version"]) is not int
+                or record["version"] not in (1, 2) or not _definition(record["definition"])
+                or record['definition']['version'] != record['version']):
+            return False
+        if record['version'] == 2:
+            from live.scenario_entry_goal import valid_resolved
+            resolved = record['resolved_goal']
+            if (not valid_resolved(resolved) or resolved.get('goal') != record['definition']['goal']
+                    or resolved.get('input_id') != record['origin'].get('input_id')):
+                return False
         origin = record["origin"]
         if (not isinstance(origin, dict) or set(origin) != {"scenario_id", "action_id", "input_id", "registered_at"}
                 or origin["scenario_id"] != scenario_id or not _number(origin["registered_at"])
                 or any(not isinstance(origin[k], str) or not origin[k] for k in ("scenario_id", "action_id", "input_id"))):
             return False
+        if record['version'] == 2 and record['resolved_goal']['snapshot_as_of_ms'] > origin['registered_at'] * 1000:
+            return False
         return record["contract_id"] == _digest({k: v for k, v in record.items() if k != "contract_id"})
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, KeyError, AttributeError):
         return False
 
 
@@ -86,7 +121,7 @@ def contract_context(active, enabled):
         previous = dict(contract_id=prior["contract_id"], status=prior["status"], reason=prior["reason"],
             assessed_at=at if _number(at) and at >= record["origin"]["registered_at"] else None,
             source="HISTORICAL_MODEL_OPINION")
-    return dict(entry_contract_version=1, registered_entry_contract=copy.deepcopy(record) if valid else None,
+    return dict(entry_contract_version=record['version'] if valid else 1, registered_entry_contract=copy.deepcopy(record) if valid else None,
         previous_thesis_assessment=previous,
         entry_contract_status="REGISTERED" if valid else "CORRUPT" if record is not None else "LEGACY_UNKNOWN",
         entry_contract_failure_rule=dict(copy.deepcopy(record["definition"]["explicit_failure"]),
@@ -104,17 +139,20 @@ def assessment_schema(context):
 
 
 def validate_metadata(payload, context, allow_failed_wait_template=False):
-    if context.get("entry_contract_version") != 1:
+    if context.get("entry_contract_version") not in (1, 2):
         if "entry_contract" in payload or "thesis_assessment" in payload:
             raise ValueError("entry_contract_not_enabled")
         return
     if not {"entry_contract", "thesis_assessment"} <= payload.keys():
         raise ValueError("entry_contract_metadata_missing")
     definition, assessment = payload["entry_contract"], payload["thesis_assessment"]
+    if context.get('entry_goal_untrusted') and payload.get('action') in {'OPEN', 'ADJUST'} and (
+            payload.get('entries') or payload.get('take_profits')):
+        raise ValueError('entry_goal_untrusted_no_plan_replacement')
     if context.get("scenario_id") and context.get("entry_contract_status") in ("CORRUPT", "LEGACY_UNKNOWN") and payload.get("entries"):
         raise ValueError("entry_contract_corrupt_no_new_entries")
     if payload.get("action") == "OPEN":
-        if not _definition(definition):
+        if not _definition(definition) or definition['version'] != context['entry_contract_version']:
             raise ValueError("entry_contract_definition_invalid")
         failure = definition["explicit_failure"]
         entries, stop = payload.get("entries", []), payload.get("hard_stop")

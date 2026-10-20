@@ -685,13 +685,6 @@ pivots or proven support/resistance; missing candidates do not prove a clear pat
 Consider them alongside upper MAs when comparing near partial TP and runner
 extension, not as mandatory TP prices or reasons to shorten every target.
 Identical prices across points/frames are not independent reaction evidence.
-Check each TP against its cited reference (timeframe, MA, confirmed/forming phase and value),
-the stated before/beyond relationship, and the original premise and expected_progress
-when an entry contract is present. Compare every target separately: one target before
-a level does not put every target before it. Do not substitute a forming level for a
-cited confirmed level to make a target fit. A supported breakout-extension thesis remains
-allowed when consistent with the original purpose and evidence; this consistency check
-is not an automatic MA cap or a new exit trigger for existing holdings.
 Inspect 4h/12h/1d/1w MA10/35
 levels on each proposed entry-to-TP or current-mark-to-TP profit path. Supplied
 obstacles are sorted from CONTEXT_MARK_PRICE, not from the proposed entry;
@@ -856,6 +849,45 @@ truth of a qualitative judgment; all lifecycle and risk guards still apply.
 """
 
 
+def entry_contract_prompt(context):
+    if context.get('entry_contract_version') != 2:
+        return ENTRY_CONTRACT_PROMPT
+    return ENTRY_CONTRACT_PROMPT.replace('entry_contract_version=1', 'entry_contract_version=2').replace(
+        'version-1 entry_contract', 'version-2 entry_contract').replace(
+        'premise and expected_progress concisely (each 1..240 characters)',
+        'premise concisely (1..240 characters) and a structured goal, never expected_progress') + """
+Version 2 goal is authoritative original target intent, not unrestricted rationale.
+For v2, earlier expected_progress references mean goal/host canonical intent;
+never add that removed free-text field or substitute prose for the structured goal.
+Choose BOUNDED_BEFORE, REFERENCE_EXTENSION or NO_MA_BOUND. For the first two select
+only reference frame/phase/ma from supplied facts; never supply your own MA number.
+NO_MA_BOUND requires null reference. The host binds the frozen original value and
+source timestamps and renders the canonical goal. BOUNDED_BEFORE requires every
+entry and TP strictly before that reference (LONG below, SHORT above), including
+execution price adjustments. No automatic TP repair is performed. REFERENCE_EXTENSION
+may include nearer partial TPs and an unfixed runner; supporting market evidence is
+still your responsibility, not host-certified. Do not select NO_MA_BOUND to disguise
+a bounded thesis. Registered goal values never move with later MAs. ADJUST cannot
+replace or extend the original bound. Reaching it alone is not FAILED or EXIT.
+SL-only, partial stops, cancellation and EXIT retain existing protection rules.
+The host checks structured price consistency, not the truth of every prose claim.
+Before DRAFT submission, compare every TP and its stated before/beyond relationship
+with the goal's cited timeframe/MA/confirmed-forming phase and host-resolved value.
+One nearer TP does not put all targets before a level. Never swap a confirmed
+reference for a forming one to make a plan fit. In SELECT compare the immutable
+original canonical goal, rationale, raw/effective targets and host adjustments.
+For a clear unresolved new-entry contradiction choose another consistent candidate
+or WAIT only when selectable and allowed; FAILED/EXIT-only and protection retain priority.
+Do not repair the original contract by rewriting selection rationale. Supported
+REFERENCE_EXTENSION remains eligible on its own evidence, not an automatic MA cap.
+If user-payload response_contract uses $schema_value, expand it from the supplied
+model_input_projection.schema_value_definitions first; each $schema_object is
+[key_order_index,values], paired in order with schema_key_orders[index].
+These are exact duplicate
+output-schema definitions only; the API response_schema remains authoritative.
+"""
+
+
 def _unique_pairs(pairs):
     result = {}
     for key, value in pairs:
@@ -909,6 +941,8 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     # Do not recycle retired-timeframe narratives into new-policy judgments.
     # Preserve the original audit context and all structured order/risk evidence.
     model_context = dict(context)
+    model_context.pop('entry_goal_source', None)
+    model_context.pop('entry_goal_decision_slot', None)
     model_context["ma_structure"] = build_ma_structure_context(snapshot, context)
     flat_entry = context.get("scenario_id") is None and not context.get("positions") and not context.get("pending_entries")
     if flat_entry:
@@ -933,8 +967,8 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     system_prompt = SYSTEM_PROMPT + MA_STRUCTURE_PROMPT
     if context.get('pending_wait_policy_version') == 1:
         system_prompt += PENDING_WAIT_PROMPT
-    if context.get("entry_contract_version") == 1:
-        system_prompt += ENTRY_CONTRACT_PROMPT
+    if context.get("entry_contract_version") in (1, 2):
+        system_prompt += entry_contract_prompt(context)
     if flat_entry:
         system_prompt += FLAT_ENTRY_PROMPT
     from live.scenario_recovery import record_model_request, record_model_wire, record_model_error

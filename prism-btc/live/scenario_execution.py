@@ -18,6 +18,7 @@ import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 from live.scenario_pending_renewal import initialize as initialize_pending_leases
+from live.scenario_entry_goal import GoalConsistencyRejection, stored_goal, validate_goal_plan
 
 
 TERMINAL = frozenset({"Filled", "Cancelled", "Rejected", "Deactivated", "PartiallyFilledCanceled"})
@@ -540,7 +541,28 @@ class ScenarioExecution:
             raise
         return fresh
 
+    def _registered_goal(self, payload, active=None):
+        active = self._active() if active is None else active
+        contract = active.get('entry_contract') if active else None
+        table = self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='llm_scenario_entry_contracts'").fetchone()
+        stored = self.conn.execute('SELECT body FROM llm_scenario_entry_contracts WHERE scenario_id=?',
+                                  (payload['scenario_id'],)).fetchone() if table else None
+        stored_contract = json.loads(stored[0]) if stored else {}
+        if (isinstance(contract, dict) and contract.get('version') == 2) or stored_contract.get('version') == 2:
+            from live.scenario_entry_contract import valid_record
+            if not active or not valid_record(contract, active['scenario_id']) or stored_contract != contract:
+                self._fail('entry_goal_registered_record_mismatch')
+            return stored_goal(self.conn, contract)
+        return None
+
+    def _validate_registered_goal(self, payload, active=None):
+        if payload.get('action') not in {'OPEN', 'ADJUST'} or not (
+                payload.get('entries') or payload.get('take_profits')):
+            return  # Never gate EXIT/cancel/SL-only protection on optional goal history.
+        validate_goal_plan(payload, self._registered_goal(payload, active))
+
     def _preflight(self, payload, observed, instrument, children, *, stop_revision=False, pending_renewal=False):
+        self._validate_registered_goal(payload)
         from core.llm_scenario import risk_snapshot
         stop = decimal(payload["hard_stop"])
         self._aligned(stop,instrument["tick"])
@@ -683,6 +705,8 @@ class ScenarioExecution:
                                        (active['scenario_id'],)).fetchone()
             if not stored or json.loads(stored[0]) != active.get('entry_contract'):
                 self._fail('pending_renewal_original_contract_unverified')
+            if active['entry_contract'].get('version') == 2:
+                stored_goal(self.conn, active['entry_contract'])
             for child in self.children(active['scenario_id']):
                 self._query_child(child)
             context = self.context()
@@ -782,6 +806,7 @@ class ScenarioExecution:
                 observed=self._ensure_protection(observed,active["hard_stop"],active["side"])
             elif observed["legacy_fenced"]:
                 self._fail("legacy_exposure_or_unknown_order")
+            self._validate_registered_goal(payload, active)
             for c in own:
                 self._query_child(c)
             own=self.children(active["scenario_id"])
@@ -980,6 +1005,7 @@ class ScenarioExecution:
             latest=self._query_child(latest)
             if latest["status"]!="LIVE":
                 self._fail("chase_requires_live_remainder")
+            self._validate_registered_goal(dict(payload, entries=[dict(original, price=float(decimal(new_price)))]), active)
             cancelled=self._cancel(latest)
             quantity=decimal(latest["request"]["qty"])-decimal(cancelled["evidence"]["order"]["cumExecQty"])
             if quantity<=0:
@@ -1025,4 +1051,9 @@ class ScenarioExecution:
                 continue
             if abs(price/decimal(entry["price"])-1)*10000>decimal(plan["chase"]["max_bps"]):
                 continue
+            goal = self._registered_goal(plan, active)  # Source/auth failures remain UNKNOWN.
+            try:
+                validate_goal_plan(dict(plan, entries=[dict(entry, price=float(price))]), goal)
+            except GoalConsistencyRejection:
+                continue  # Known out-of-goal quote; no cancellation/write or UNKNOWN evidence.
             return self.chase(ident,entry["id"],price)

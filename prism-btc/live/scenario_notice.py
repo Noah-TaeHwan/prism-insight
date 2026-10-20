@@ -61,6 +61,17 @@ def _time(value):
         return "미확인"
 
 
+def _notice_goal(container):
+    if 'entry_goal' not in container:
+        return {}
+    value = container['entry_goal']
+    from live.scenario_entry_goal import valid_resolved
+    if valid_resolved(value):
+        return value
+    # Optional corrupt goal data must not drop a confirmed event or invent a runner.
+    return {'goal': {'mode': 'BOUNDED_BEFORE'}, 'canonical': '자료 미확인'}
+
+
 def _position(value, at=None):
     """A prior baseline can be old; the new observation must match this event."""
     if not isinstance(value, dict) or value.get("verified") is not True:
@@ -281,7 +292,13 @@ def _position_lines(event, after):
             remaining = 0 if math.isclose(qty, total, rel_tol=1e-12, abs_tol=0) else max(0, qty-total)
             if remaining > 1e-12:
                 protection = "SL 보호" if event.get("protection_confirmed") is True and stop is not None and stop > 0 else "SL 보호 미확인"
-                lines.append((f"익절 후 {remaining/qty*100:g}% 추세 추종" if targets else "남은 전량 추세 추종") + " · " + protection)
+                goal = _notice_goal(after)
+                bounded = (goal.get('goal') or {}).get('mode') == 'BOUNDED_BEFORE'
+                label = (f"익절 후 {remaining/qty*100:g}% 잔여 보호" if targets else "남은 전량 보호") if bounded else (
+                    f"익절 후 {remaining/qty*100:g}% 추세 추종" if targets else "남은 전량 추세 추종")
+                lines.append(label + " · " + protection)
+                if bounded:
+                    lines.append("원래 목표: " + str(goal.get('canonical', '미확인')))
     if missing:
         lines.append("⚠ 미확인: " + "·".join(missing))
     budget, initial = (_number(after.get(k)) for k in ("scenario_budget", "scenario_initial_equity"))
@@ -394,11 +411,16 @@ def render_notice(event: dict) -> str:
                 if len(targets) > 3:
                     lines.append(f"전체 {len(targets)}개 중 나머지 {len(targets)-3}개 상세 생략")
             elif targets == []:
-                lines.append("🎯 고정 TP 없는 계획 · 남은 전량 추세 추종")
+                goal = _notice_goal(event)
+                bounded = (goal.get('goal') or {}).get('mode') == 'BOUNDED_BEFORE'
+                lines.append("🎯 고정 TP 없는 계획 · 남은 전량 보호" if bounded else "🎯 고정 TP 없는 계획 · 남은 전량 추세 추종")
             if targets is not None and kind in {"FILLED", "PROTECTION"}:
                 lines.append("TP 설정 미확인 · 위 가격은 계획")
             if targets and total < 1:
-                lines.append(f"추세 추종 잔여 계획: {(1-total)*100:g}%")
+                bounded = (_notice_goal(event).get('goal') or {}).get('mode') == 'BOUNDED_BEFORE'
+                lines.append(f"{'보호할 잔여 계획' if bounded else '추세 추종 잔여 계획'}: {(1-total)*100:g}%")
+            if 'entry_goal' in event:
+                lines.append("원래 목표: " + _notice_goal(event)['canonical'])
         else:
             lines.append("🎯 TP 계획: 자료 미확인")
         if kind == "PLAN":

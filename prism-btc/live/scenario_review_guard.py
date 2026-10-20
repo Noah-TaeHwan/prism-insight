@@ -10,6 +10,7 @@ from live.scenario_calculated_review import (
 )
 from live.scenario_contract import validate_wire_proposal
 from live.scenario_entry_contract import strip_metadata, validate_metadata
+from live.scenario_entry_goal import prepare_goal_source, validate_goal_pair
 from live.scenario_runtime import snapshot_input_time
 
 
@@ -26,6 +27,7 @@ _OPTIONAL_STABLE = (
     "execution_price_policy", "conditional_entry_version",
     "review_contract_version", "recovery_hard_blocked", "unknown_intents",
     "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
+    "entry_goal_untrusted",
     'pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
 )
 
@@ -84,6 +86,8 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     renewal = bool(selected['raw_proposal'].get('pending_renewal'))
     actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"} or renewal
     original, fresh = deepcopy(original_context), deepcopy(fresh_context)
+    goal_context = deepcopy(original)
+    prepare_goal_source(snapshot, goal_context)
     now = _number(fresh.get("now"))
     last_review_time = max(operation["value"] for operation in envelope["operations"]
                            if operation["kind"] == "clock")
@@ -121,7 +125,7 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     # need not repeat it. Decode only against the original trusted contract;
     # fresh facts below still decide economic validity, never the model metadata.
     payload = validate_wire_proposal(selected["raw_proposal"], original)
-    if original.get("entry_contract_version") == 1:
+    if original.get("entry_contract_version") in (1, 2):
         # Samples may advance without replacing the original premise. A newly
         # confirmed failure still invalidates any non-EXIT reviewed action.
         validate_metadata(payload, fresh)
@@ -129,7 +133,9 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
     if actionable and not renewal:
         _supplied_instrument_filters(core, fresh)
+    validate_goal_pair(payload, None, goal_context)
     validated = validate_execution_prices(core, fresh)
+    validate_goal_pair(payload, validated, goal_context)
     if research_mode != "legacy" and selected["id"] != "WAIT" and not renewal:
         from live.scenario_risk_allocation import validate_allocation_prices
         validate_allocation_prices(validated, selected["allocation_receipt"], fresh)

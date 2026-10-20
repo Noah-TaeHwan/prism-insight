@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # Oct20: shared TP/thesis check and immutable-plan SELECT review; no gap addendum.
-    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "f79eabbe80e3e35a80f1157930b096676a749a30ff981f6fe5c8c5660770bcc3"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "330f44acf6460935fa0c4ce423f78895adc2a19ab7d3e74abede4e1cf4d5bb59"
+    # Deployed v1 policy preserved; structured-goal instructions are v2-only.
+    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "807979497ffd29fe97f57715bca0a9565156642fd19b5a5e87ca2de20b408316"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "5deed47582696aa4dedd565ebf93cfb5dc97ca3eca618bf3e52e09ea64dad2ff"

@@ -14,10 +14,10 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct20: per-target reference/original-thesis consistency, no automatic MA cap.
+    # Deployed v1 policy preserved; new structured-goal policy is v2-only.
     expected = {
         'SYSTEM_PROMPT': 'a3ecb16140fe1a7bfbd9d244213b8ce37b846db1a52ca705a07d9df2e317a1e4',
-        'MA_STRUCTURE_PROMPT': '160eceb46c1304464bc80ebac281a0fe32172e912941cb451da1c57c0dface75',
+        'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
         'FLAT_ENTRY_PROMPT': '15f323b7af2c2e0a790f1c12ea819244d8722c8d7214b43a57560d557f98f193',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
