@@ -547,10 +547,16 @@ class ScenarioExecution:
         table = self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='llm_scenario_entry_contracts'").fetchone()
         stored = self.conn.execute('SELECT body FROM llm_scenario_entry_contracts WHERE scenario_id=?',
                                   (payload['scenario_id'],)).fetchone() if table else None
-        stored_contract = json.loads(stored[0]) if stored else {}
-        if (isinstance(contract, dict) and contract.get('version') == 2) or stored_contract.get('version') == 2:
-            from live.scenario_entry_contract import valid_record
-            if not active or not valid_record(contract, active['scenario_id']) or stored_contract != contract:
+        from live.scenario_entry_contract import goal_record_marker, has_goal_contract, registered_contract
+        marked = 'host_entry_contract_id' in payload or has_goal_contract(self.conn, active)
+        try:
+            stored_contract = json.loads(stored[0]) if stored else {}
+        except (ValueError, TypeError):
+            if marked:
+                raise
+            return None
+        if marked or goal_record_marker(stored_contract):
+            if not active or stored_contract != contract or not registered_contract(self.conn, active):
                 self._fail('entry_goal_registered_record_mismatch')
             return stored_goal(self.conn, contract)
         return None
@@ -706,6 +712,9 @@ class ScenarioExecution:
             if not stored or json.loads(stored[0]) != active.get('entry_contract'):
                 self._fail('pending_renewal_original_contract_unverified')
             if active['entry_contract'].get('version') == 2:
+                from live.scenario_entry_contract import registered_contract
+                if not registered_contract(self.conn, active):
+                    self._fail('pending_renewal_original_contract_unverified')
                 stored_goal(self.conn, active['entry_contract'])
             for child in self.children(active['scenario_id']):
                 self._query_child(child)

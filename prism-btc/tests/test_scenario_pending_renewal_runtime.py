@@ -18,7 +18,7 @@ from tests.test_scenario_review_runtime import wire
 
 def renewal_runtime(tmp_path, *, reapprove=True, assessment='INTACT', before_select=None,
                     select_renewal=True, side='LONG', trade_alternatives=0, initial_risk_fraction=None,
-                    mixed_initial=False, goal_enabled=False):
+                    mixed_initial=False, goal_enabled=False, selection_reason='Explicit selected approval'):
     conn = sqlite3.connect(tmp_path / 'renewal.db')
     exchange = Exchange()
     original_place = exchange.place_order
@@ -85,7 +85,7 @@ def renewal_runtime(tmp_path, *, reapprove=True, assessment='INTACT', before_sel
             chosen = (next((row for row in bundle['candidates'] if row['id'] == 'WAIT_RENEWAL'), bundle['wait'])
                       if ctx['scenario_id'] and select_renewal else
                       bundle['wait'] if ctx['scenario_id'] else bundle['candidates'][0])
-            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale='Explicit selected approval')
+            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale=selection_reason)
             if before_select and ctx['scenario_id']:
                 before_select(broker, exchange)
         return SimpleNamespace(text=json.dumps(result))

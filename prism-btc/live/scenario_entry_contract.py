@@ -62,7 +62,8 @@ def bind_contract(definition, validated, registered_at, *, resolved_goal=None):
         raise ValueError("entry_contract_invalid_registration")
     # Execution-price normalization must not move the final entry across its
     # original failure boundary. Core execution metadata is irrelevant here.
-    validate_metadata(dict(validated, entry_contract=definition, thesis_assessment=None),
+    economic = {k: v for k, v in validated.items() if k != 'host_entry_contract_id'}
+    validate_metadata(dict(economic, entry_contract=definition, thesis_assessment=None),
                       dict(entry_contract_version=definition['version'], scenario_id=None))
     result = dict(version=definition['version'], definition=copy.deepcopy(definition), origin=dict(
         scenario_id=validated["scenario_id"], action_id=validated["action_id"],
@@ -75,6 +76,7 @@ def bind_contract(definition, validated, registered_at, *, resolved_goal=None):
             raise ValueError('entry_goal_registration_missing')
         validate_goal_plan(validated, resolved_goal)
         result['resolved_goal'] = copy.deepcopy(resolved_goal)
+        result['origin']['plan_sha256'] = _digest(economic)
     return dict(result, contract_id=_digest(result))
 
 
@@ -96,9 +98,15 @@ def valid_record(record, scenario_id):
                     or resolved.get('input_id') != record['origin'].get('input_id')):
                 return False
         origin = record["origin"]
-        if (not isinstance(origin, dict) or set(origin) != {"scenario_id", "action_id", "input_id", "registered_at"}
+        origin_keys = {"scenario_id", "action_id", "input_id", "registered_at"}
+        if record['version'] == 2:
+            origin_keys.add('plan_sha256')
+        if (not isinstance(origin, dict) or set(origin) != origin_keys
                 or origin["scenario_id"] != scenario_id or not _number(origin["registered_at"])
                 or any(not isinstance(origin[k], str) or not origin[k] for k in ("scenario_id", "action_id", "input_id"))):
+            return False
+        if record['version'] == 2 and (not isinstance(origin['plan_sha256'], str)
+                or len(origin['plan_sha256']) != 64 or any(c not in '0123456789abcdef' for c in origin['plan_sha256'])):
             return False
         if record['version'] == 2 and record['resolved_goal']['snapshot_as_of_ms'] > origin['registered_at'] * 1000:
             return False
@@ -129,6 +137,65 @@ def contract_context(active, enabled):
         entry_contract_observation=copy.deepcopy(active.get("entry_contract_observation")) if valid else None)
 
 
+def goal_record_marker(record):
+    origin = record.get('origin') if isinstance(record, dict) else None
+    return (isinstance(record, dict) and (record.get('version') == 2 or 'resolved_goal' in record)
+            or isinstance(origin, dict) and 'plan_sha256' in origin)
+
+
+def has_goal_contract(conn, active):
+    """A damaged version marker must not turn a v2 reservation into legacy."""
+    if not active:
+        return False
+    record = active.get('entry_contract')
+    origin = record.get('origin', {}) if isinstance(record, dict) else {}
+    if goal_record_marker(record):
+        return True
+    policy = active.get('stop_policy')
+    identifiers = [policy.get('initial_action_id') if isinstance(policy, dict) else None,
+                   origin.get('action_id') if isinstance(origin, dict) else None]
+    for ident in dict.fromkeys(i for i in identifiers if isinstance(i, str)):
+        row = conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=? AND scenario_id=?',
+                           (ident, active['scenario_id'])).fetchone()
+        if row:
+            try:
+                plan = json.loads(row[0])
+            except (ValueError, TypeError):
+                continue  # No positive v2 evidence; preserve the existing base-trust fence.
+            if isinstance(plan, dict) and 'host_entry_contract_id' in plan:
+                return True
+    return False
+
+
+def registered_contract(conn, active):
+    """Base failure-rule trust is independent of optional goal source retention."""
+    if not active or not valid_record(active.get('entry_contract'), active.get('scenario_id')):
+        return False
+    record = active['entry_contract']
+    row = conn.execute('SELECT body FROM llm_scenario_entry_contracts WHERE scenario_id=?',
+                       (active['scenario_id'],)).fetchone()
+    if not row or row[0] != json.dumps(record, sort_keys=True, allow_nan=False):
+        return False
+    original = conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=? AND scenario_id=?',
+                            (record['origin']['action_id'], active['scenario_id'])).fetchone()
+    if not original:
+        return False
+    try:
+        plan = json.loads(original[0])
+        if (plan.get('action') != 'OPEN' or plan.get('side') != active.get('side')
+                or plan.get('scenario_id') != active['scenario_id']
+                or plan.get('action_id') != record['origin']['action_id']
+                or plan.get('input_id') != record['origin']['input_id']):
+            return False
+        if record['version'] == 2 or 'host_entry_contract_id' in plan:
+            if record['version'] != 2 or plan.get('host_entry_contract_id') != record['contract_id']:
+                return False
+        return bind_contract(record['definition'], plan, record['origin']['registered_at'],
+                             resolved_goal=record.get('resolved_goal')) == record
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
 def assessment_schema(context):
     record = context.get("registered_entry_contract")
     if not valid_record(record, context.get("scenario_id")):
@@ -139,6 +206,8 @@ def assessment_schema(context):
 
 
 def validate_metadata(payload, context, allow_failed_wait_template=False):
+    if 'host_entry_contract_id' in payload:
+        raise ValueError('entry_contract_host_id_forbidden')
     if context.get("entry_contract_version") not in (1, 2):
         if "entry_contract" in payload or "thesis_assessment" in payload:
             raise ValueError("entry_contract_not_enabled")
@@ -182,7 +251,7 @@ def validate_metadata(payload, context, allow_failed_wait_template=False):
 
 
 def strip_metadata(payload):
-    return {k: v for k, v in payload.items() if k not in {"entry_contract", "thesis_assessment"}}
+    return {k: v for k, v in payload.items() if k not in {"entry_contract", "thesis_assessment", "host_entry_contract_id"}}
 
 
 def observe_contract(active, ctx, slot, now):

@@ -506,13 +506,16 @@ def test_ordinary_chase_respects_original_goal_before_cancel_and_submit(tmp_path
         goal=goal(), explicit_failure=dict(source='MARK_PRICE', operator='le' if side == 'LONG' else 'ge',
                                           price=99 if side == 'LONG' else 101, minimum_observations=2))
     record = bind_contract(definition, p, 1800000000, resolved_goal=resolve_goal(goal(), ctx))
+    p['host_entry_contract_id'] = record['contract_id']
+    b.conn.execute('UPDATE llm_scenario_intents SET payload=? WHERE id=?', (json.dumps(p), 'a1'))
     state['active']['entry_contract'] = record
     b.conn.execute('UPDATE llm_scenario_state SET body=?', (json.dumps(state),))
     b.conn.execute('CREATE TABLE llm_scenario_entry_contracts(scenario_id TEXT,body TEXT)')
-    b.conn.execute('INSERT INTO llm_scenario_entry_contracts VALUES(?,?)', ('s1', json.dumps(record)))
+    b.conn.execute('INSERT INTO llm_scenario_entry_contracts VALUES(?,?)', ('s1', json.dumps(record, sort_keys=True)))
     b.conn.execute('CREATE TABLE llm_scenario_decisions(slot INTEGER PRIMARY KEY,snapshot TEXT,context TEXT,proposal TEXT)')
     b.conn.execute('INSERT INTO llm_scenario_decisions VALUES(?,?,?,?)', (6000000, json.dumps(snap),
-        json.dumps(ctx), json.dumps(dict(p, entry_contract=definition, thesis_assessment=None))))
+        json.dumps(ctx), json.dumps(dict({k: v for k, v in p.items() if k != 'host_entry_contract_id'},
+                                        entry_contract=definition, thesis_assessment=None))))
     b.conn.commit()
     b.execute(p, 'a1')
     old = b.children()[0]['link_id']
@@ -550,3 +553,305 @@ def test_ordinary_chase_respects_original_goal_before_cancel_and_submit(tmp_path
         perform()
         assert e.orders[old]['orderStatus'] == 'Cancelled'
         assert float(b.children()[-1]['request']['price']) == price
+
+
+@pytest.mark.parametrize('damage', ['snapshot_missing', 'snapshot_changed', 'decision_missing'])
+@pytest.mark.parametrize('before_samples', [False, True])
+@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
+def test_goal_source_loss_does_not_disable_registered_numeric_failure_exit(tmp_path, damage, before_samples, side):
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    r, b, e, calls, _ = renewal_runtime(tmp_path, goal_enabled=True, side=side)
+    assert r.tick()['status'] == 'intent_pending'
+    original = r.state()['active']['entry_contract']
+    slot = original['resolved_goal']['decision_slot']
+    original_intent = r.conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=?',
+                                    (original['origin']['action_id'],)).fetchone()[0]
+    assert json.loads(original_intent)['host_entry_contract_id'] == original['contract_id']
+    child = b.children()[0]
+    e.now += 1
+    e.fill(child['link_id'], float(child['request']['qty']))
+    if side == 'SHORT':
+        # The shared minimal Exchange fixture is long-only; model Bybit's positive
+        # size + Sell side and Buy native SL explicitly for this short fill.
+        e.size, e.stop = str(abs(float(e.size))), '102'
+        e.orders['native'] = dict(orderId='native-id', orderLinkId='', symbol='BTCUSDT',
+            positionIdx=0, qty=e.size, parentOrderLinkId=child['link_id'], createdTime=str(int(e.now * 1000)),
+            side='Buy', reduceOnly=True, stopOrderType='StopLoss', orderType='Market',
+            triggerBy='MarkPrice', triggerPrice=e.stop, orderStatus='Untriggered', cumExecQty='0', leavesQty=e.size)
+        positions = e.get_positions
+        def short_position(**kwargs):
+            result = positions(**kwargs)
+            result['result']['list'][0]['side'] = 'Sell'
+            return result
+        e.get_positions = short_position
+    original_ticker = e.get_tickers
+    def below_failure(**kwargs):
+        result = original_ticker(**kwargs)
+        mark = '98.5' if side == 'LONG' else '101.5'
+        result['result']['list'][0].update(markPrice=mark, lastPrice=mark)
+        return result
+    e.get_tickers = below_failure
+    def lose_source():
+        if damage == 'snapshot_missing':
+            r.conn.execute('UPDATE llm_scenario_decisions SET snapshot=NULL WHERE slot=?', (slot,))
+        elif damage == 'decision_missing':
+            r.conn.execute('DELETE FROM llm_scenario_decisions WHERE slot=?', (slot,))
+        else:
+            snap = json.loads(r.conn.execute('SELECT snapshot FROM llm_scenario_decisions WHERE slot=?', (slot,)).fetchone()[0])
+            snap['timeframes']['4h']['ma_path']['confirmed_points'][0]['ma35'] += 1
+            r.conn.execute('UPDATE llm_scenario_decisions SET snapshot=? WHERE slot=?', (json.dumps(snap), slot))
+        r.conn.commit()
+    if before_samples:
+        lose_source()
+    for at in (1800000301, 1800000601):
+        e.now = at
+        state = r.state()
+        r._reconcile(state)
+        ctx = r._context(state)
+        r._save(state)
+    assert state['active']['entry_contract_observation']['status'] == 'FAILED'
+    if not before_samples:
+        lose_source()
+    ctx = r._context(state)
+    assert ctx['entry_contract_status'] == 'REGISTERED' and ctx['entry_goal_untrusted'] is True
+    assert r._entry_contract_registered(state['active']) and not r._entry_goal_registered(state['active'])
+    outcome = r._entry_contract_exit(state, ctx, int(e.now // 300))
+    assert outcome['status'] == 'intent_pending', outcome
+    assert any(c['kind'] == 'exit' and c['request']['reduceOnly'] for c in b.children())
+    assert len(calls) == 2  # Only the initial OPEN review, no new model to protect.
+    assert r.conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=?',
+        (original['origin']['action_id'],)).fetchone()[0] == original_intent
+    assert r.state()['active']['entry_contract'] == original
+
+
+@pytest.mark.parametrize('version', [None, 1, 2])
+def test_host_registration_id_cannot_be_supplied_by_model(version):
+    from live.scenario_contract import validate_wire_proposal
+    from tests.test_scenario_calculated_review import context as base_context, wire
+    ctx = base_context()
+    if version:
+        ctx['entry_contract_version'] = version
+    raw = wire(ctx)
+    if version:
+        raw.update(entry_contract=None, thesis_assessment=None)
+    raw['host_entry_contract_id'] = 'forged'
+    with pytest.raises(ValueError, match='unknown_fields'):
+        validate_wire_proposal(raw, ctx)
+
+
+@pytest.mark.parametrize('change', ['id_missing', 'id_wrong', 'price', 'quantity', 'risk', 'rationale'])
+def test_v2_original_intent_values_are_pinned_independently_of_goal_source(tmp_path, change):
+    from live.scenario_entry_contract import _digest
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    r, _, _, _, _ = renewal_runtime(tmp_path, goal_enabled=True)
+    assert r.tick()['status'] == 'intent_pending'
+    active = r.state()['active']
+    record = active['entry_contract']
+    plan = json.loads(r.conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=?',
+                                    (record['origin']['action_id'],)).fetchone()[0])
+    assert plan['host_entry_contract_id'] == record['contract_id']
+    assert _digest({k: v for k, v in plan.items() if k != 'host_entry_contract_id'}) == record['origin']['plan_sha256']
+    r.conn.execute('DELETE FROM llm_scenario_decisions')
+    assert r._entry_contract_registered(active) and not r._entry_goal_registered(active)
+    if change == 'id_missing':
+        plan.pop('host_entry_contract_id')
+    elif change == 'id_wrong':
+        plan['host_entry_contract_id'] = 'f' * 64
+    elif change == 'price':
+        plan['entries'][0]['price'] += .1  # Still within original bound.
+    elif change == 'quantity':
+        plan['entries'][0]['quantity'] /= 2
+    elif change == 'risk':
+        plan['risk']['total_risk'] += .1
+    else:
+        plan['rationale'] += ' changed'
+    r.conn.execute('UPDATE llm_scenario_intents SET payload=? WHERE id=?',
+                   (json.dumps(plan), record['origin']['action_id']))
+    assert not r._entry_contract_registered(active)
+
+
+def test_host_link_preserves_fresh_economic_receipt_and_final_lease_hash(tmp_path):
+    from live.scenario_entry_contract import _digest
+    from live.scenario_calculated_review import receipt_hash
+    from live.scenario_pending_renewal import load, digest
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    r, _, _, _, _ = renewal_runtime(tmp_path, goal_enabled=True, selection_reason='명시적 원래 계획 승인')
+    assert r.tick()['status'] == 'intent_pending'
+    active = r.state()['active']
+    record = active['entry_contract']
+    payload = json.loads(r.conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=?',
+        (record['origin']['action_id'],)).fetchone()[0])
+    economic = {k: v for k, v in payload.items() if k != 'host_entry_contract_id'}
+    event = json.loads(r.conn.execute("SELECT body FROM llm_scenario_review_events "
+        "WHERE body LIKE '%FINAL_FRESH_REVIEW_RECEIPT%'").fetchone()[0])
+    assert receipt_hash(economic) == event['receipt']['validated_sha256']
+    assert _digest(economic) == record['origin']['plan_sha256']
+    assert receipt_hash(economic) != _digest(economic)  # Unicode vs ASCII JSON encoding is intentional.
+    assert load(r.conn, active)['anchor']['original_payload_sha256'] == digest(payload)
+
+
+@pytest.mark.parametrize('damage', ['version_only', 'valid_v1_replacement'])
+def test_original_open_host_pin_prevents_goal_version_downgrade(tmp_path, damage):
+    from live.scenario_entry_contract import bind_contract, has_goal_contract, valid_record
+    from tests.test_scenario_execution import persist
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    r, b, e, _, _ = renewal_runtime(tmp_path, goal_enabled=True)
+    assert r.tick()['status'] == 'intent_pending'
+    child = b.children()[0]
+    e.now += 1
+    e.fill(child['link_id'], float(child['request']['qty']))
+    state = r.state()
+    r._reconcile(state)
+    record = deepcopy(state['active']['entry_contract'])
+    original = json.loads(r.conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=?',
+        (record['origin']['action_id'],)).fetchone()[0])
+    if damage == 'version_only':
+        record['version'] = 1
+    else:
+        definition = deepcopy(record['definition'])
+        definition.pop('goal')
+        definition.update(version=1, expected_progress='forged unbounded legacy progress')
+        plan = {k: v for k, v in original.items() if k != 'host_entry_contract_id'}
+        plan['entry_contract'] = definition
+        record = bind_contract(definition, plan, record['origin']['registered_at'])
+        assert valid_record(record, state['active']['scenario_id'])
+        assert 'resolved_goal' not in record and 'plan_sha256' not in record['origin']
+    state['active']['entry_contract'] = record
+    r.conn.execute('UPDATE llm_scenario_entry_contracts SET body=? WHERE scenario_id=?',
+                   (json.dumps(record, sort_keys=True, allow_nan=False), state['active']['scenario_id']))
+    r._save(state)
+    assert has_goal_contract(r.conn, state['active'])
+    ctx = r._context(state)
+    assert ctx['entry_contract_status'] == 'CORRUPT' and ctx['entry_goal_untrusted'] is True
+    assert not r._entry_contract_registered(state['active'])
+    payload = persist(b, scenario_id=state['active']['scenario_id'], action='ADJUST',
+        action_id='downgrade-target', entries=[], take_profits=[dict(id='bad', price=130, fraction=1)],
+        chase=dict(max_bps=0, max_reprices=0))
+    writes = deepcopy(e.writes)
+    with pytest.raises(ValueError, match='entry_goal_registered_record_mismatch'):
+        b._execute(payload, payload['action_id'])
+    assert e.writes == writes
+    assert not any(c['kind'] == 'tp' and float(c['request']['price']) == 130 for c in b.children())
+    assert json.loads(r.conn.execute('SELECT payload FROM llm_scenario_intents WHERE id=?',
+        (original['action_id'],)).fetchone()[0]) == original
+
+
+def test_corrupt_legacy_without_positive_goal_evidence_keeps_existing_scope(tmp_path):
+    from live.scenario_entry_contract import has_goal_contract
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    r, b, _, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    state = r.state()
+    ident = state['active']['entry_contract']['origin']['action_id']
+    r.conn.execute('UPDATE llm_scenario_intents SET payload=? WHERE id=?', ('broken JSON', ident))
+    assert not has_goal_contract(r.conn, state['active'])
+    # Existing malformed-intent handling remains strict; this is not a new v2
+    # classification and is not repaired or silently accepted by goal helpers.
+    with pytest.raises(json.JSONDecodeError):
+        r._context(state)
+    assert not r._entry_contract_registered(state['active'])
+    assert b._registered_goal(dict(scenario_id=state['active']['scenario_id'])) is None
+
+
+@pytest.mark.parametrize('when', ['before_offer', 'after_commit'])
+def test_goal_source_loss_cannot_renew_but_keeps_original_lease(tmp_path, when):
+    from live.scenario_pending_renewal import load, receipt
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    r, b, e, _, contexts = renewal_runtime(tmp_path, goal_enabled=True)
+    assert r.tick()['status'] == 'intent_pending'
+    old = deepcopy(load(r.conn, r.state()['active']))
+    slot = r.state()['active']['entry_contract']['resolved_goal']['decision_slot']
+    def damage():
+        r.conn.execute('UPDATE llm_scenario_decisions SET snapshot=NULL WHERE slot=?', (slot,))
+        r.conn.commit()
+    if when == 'before_offer':
+        damage()
+    else:
+        execute = b.execute
+        def after_commit(payload, ident):
+            if payload.get('pending_renewal'):
+                damage()
+            return execute(payload, ident)
+        b.execute = after_commit
+    e.now += 301
+    outcome = r.tick()
+    assert load(r.conn, r.state()['active']) == old
+    if when == 'before_offer':
+        assert outcome['status'] == 'wait'
+        assert contexts[-1]['entry_contract_status'] == 'REGISTERED'
+        assert contexts[-1]['entry_goal_untrusted'] is True
+        assert 'pending_renewal_offer' not in contexts[-1]
+    else:
+        ident = r.conn.execute("SELECT id FROM llm_scenario_intents WHERE json_extract(payload,'$.action')='WAIT'").fetchone()[0]
+        assert receipt(r.conn, ident)['status'] == 'REJECTED'
+
+
+@pytest.mark.parametrize('action', ['EXIT', 'SL_ONLY', 'CANCEL_WAIT', 'TP_ADJUST'])
+def test_source_loss_after_selection_does_not_reject_goal_independent_protection(tmp_path, action):
+    from analysis.scenario_review_tape import record_review
+    from live.scenario_calculated_review import research_review
+    from live.scenario_model_input import restore_model_input
+    from live.scenario_preview import response_contract
+    from live.scenario_review_guard import guard_review
+    from tests.test_scenario_pending_renewal_runtime import renewal_runtime
+    from tests.test_scenario_review_runtime import wire
+    r, b, e, _, _ = renewal_runtime(tmp_path, goal_enabled=True)
+    assert r.tick()['status'] == 'intent_pending'
+    source_slot = r.state()['active']['entry_contract']['resolved_goal']['decision_slot']
+    if action != 'CANCEL_WAIT':
+        e.now += 1
+        child = b.children()[0]
+        e.fill(child['link_id'], float(child['request']['qty']))
+    e.now = 1800000301
+    state = r.state()
+    r._reconcile(state)
+    ctx = r._context(state)
+    r._save(state)
+    ctx.update(input_id='protect-selection', input_captured_at=e.now, now=e.now, max_input_age_seconds=120)
+    snap = dict(valid=True, as_of_ms=e.now * 1000)
+    calls = []
+    def proposal(kind):
+        raw = wire(ctx, kind)
+        raw.update(entry_contract=None, thesis_assessment=dict(
+            contract_id=ctx['registered_entry_contract']['contract_id'], status='INTACT', reason='original'))
+        if ctx.get('pending_renewal_version') == 1:
+            raw['pending_renewal'] = None
+        if kind == 'ADJUST':
+            raw.update(side='LONG', hard_stop=99, chase=dict(max_bps=0, max_reprices=0),
+                take_profits=[dict(id='tp', price=105, fraction=.5)] if action == 'TP_ADJUST' else [])
+        if action == 'CANCEL_WAIT':
+            raw['cancel_entry_ids'] = [ctx['pending_entries'][0]['id']]
+        return raw
+    def generate(**request):
+        calls.append(request)
+        if 'wait_proposal' in request['response_schema']['properties']:
+            answer = dict(wait_proposal=proposal('WAIT'), candidates=[] if action == 'CANCEL_WAIT' else [
+                proposal('EXIT' if action == 'EXIT' else 'ADJUST')], no_candidate_reason='protect')
+        else:
+            bundle = restore_model_input(json.loads(request['user_prompt']))['calculated_candidates']
+            chosen = bundle['candidates'][0]
+            assert chosen['eligible'], chosen
+            answer = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale='protect')
+        return SimpleNamespace(text=json.dumps(answer))
+    mode = 'economic-reject-calculated-v1'
+    contract = response_contract(ctx)
+    envelope = record_review(partial(research_review, research_mode=mode), snap, ctx, contract,
+        generate=generate, record=lambda _: None, clock=lambda: e.now)
+    assert envelope['outcome']['status'] == 'COMPLETE', envelope['outcome']
+    r.conn.execute('UPDATE llm_scenario_decisions SET snapshot=NULL WHERE slot=?', (source_slot,))
+    r.conn.commit()
+    e.now += 1
+    fresh = r._context(r.state())
+    fresh.update(input_id=ctx['input_id'], input_captured_at=ctx['input_captured_at'],
+                 max_input_age_seconds=120, now=e.now)
+    assert fresh['entry_contract_status'] == 'REGISTERED' and fresh['entry_goal_untrusted'] is True
+    if action == 'TP_ADJUST':
+        with pytest.raises(ValueError, match='entry_goal_untrusted'):
+            guard_review(snap, ctx, contract, envelope, fresh, research_mode=mode)
+    else:
+        checked = guard_review(snap, ctx, contract, envelope, fresh, research_mode=mode)
+        assert checked['validated']['action'] == ('WAIT' if action == 'CANCEL_WAIT' else 'ADJUST' if action == 'SL_ONLY' else 'EXIT')
+        assert not checked['validated'].get('pending_renewal')
+        if action == 'CANCEL_WAIT':
+            assert 'pending_renewal_version' not in fresh and 'pending_renewal_offer' not in fresh
+            assert checked['validated']['cancel_entry_ids'] == [ctx['pending_entries'][0]['id']]

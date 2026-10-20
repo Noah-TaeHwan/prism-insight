@@ -950,10 +950,10 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
         model_context["current_primary_frame_facts"] = _current_primary_frame_facts(snapshot)
     if isinstance(context.get("current_plan"), dict):
         model_context["current_plan"] = {key: value for key, value in context["current_plan"].items()
-                                         if key != "rationale"}
+                                         if key not in {"rationale", "host_entry_contract_id"}}
     for field in ("recent_waits", "recent_actions"):
         if isinstance(context.get(field), list):
-            model_context[field] = [{key: value for key, value in row.items() if key != "rationale"}
+            model_context[field] = [{key: value for key, value in row.items() if key not in {"rationale", "host_entry_contract_id"}}
                                     if isinstance(row, dict) else row for row in context[field]]
     payload = {"market_snapshot": snapshot, "contract_context": model_context,
                "response_contract": response_contract}

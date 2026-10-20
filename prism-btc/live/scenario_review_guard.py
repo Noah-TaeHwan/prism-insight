@@ -86,6 +86,11 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     renewal = bool(selected['raw_proposal'].get('pending_renewal'))
     actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"} or renewal
     original, fresh = deepcopy(original_context), deepcopy(fresh_context)
+    selected_plan = selected['raw_proposal']
+    goal_independent = (original.get('entry_contract_version') == 2 and not renewal
+        and (selected_plan['action'] in {'WAIT', 'EXIT'}
+             or (selected_plan['action'] == 'ADJUST' and not selected_plan.get('entries')
+                 and not selected_plan.get('take_profits'))))
     goal_context = original
     if original.get('entry_contract_version') == 2:
         goal_context = deepcopy(original)
@@ -108,6 +113,11 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
                 or (original[key] != fresh[key] and (actionable or key != "new_risk_blocked"))):
             raise ValueError("review_guard_context_changed:" + key)
     for key in _OPTIONAL_STABLE:
+        if goal_independent and key == 'entry_goal_untrusted':
+            continue
+        if (goal_independent and fresh.get('entry_goal_untrusted') is True
+                and key in {'pending_renewal_version', 'pending_renewal_offer'} and key not in fresh):
+            continue  # A disappearing unused offer grants no new authority.
         if not actionable and key in {"recovery_hard_blocked", "stop_policy"}:
             continue
         if (key in original) != (key in fresh) or original.get(key) != fresh.get(key):
@@ -133,6 +143,8 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
         validate_metadata(payload, fresh)
     payload["rationale"] = result["selection"]["rationale"]
     core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
+    if core.get('pending_renewal') is None:
+        core.pop('pending_renewal', None)
     if actionable and not renewal:
         _supplied_instrument_filters(core, fresh)
     validate_goal_pair(payload, None, goal_context)

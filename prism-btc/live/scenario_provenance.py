@@ -213,7 +213,7 @@ def _manifest():
         else:
             context_name = '_context' if 'runtime' in name else 'context'
             execution_names = ({'_tick', '_reconcile', '_context', '_enabled', '_valid_open_entry', '_apply_review',
-                                '_entry_contract_exit', '_entry_contract_registered'} if 'runtime' in name else
+                                '_entry_contract_exit', '_entry_contract_registered', '_entry_goal_registered'} if 'runtime' in name else
                 {'_accounting', '_funding_schedule', 'capture_financial_evidence',
                  '_risk_accounting', '_daily', 'reconcile', 'capture_account'})
             selected_names = {context_name} | execution_names

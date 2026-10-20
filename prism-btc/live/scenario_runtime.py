@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import sqlite3
 import time
 import uuid
 from contextlib import ExitStack, contextmanager
@@ -449,13 +450,16 @@ class ScenarioRuntime:
                     saved_contract = json.loads(registered[0]) if registered else {}
                 except (ValueError, TypeError):
                     saved_contract = None
-                current_contract = active.get('entry_contract')
-                if ((isinstance(current_contract, dict) and current_contract.get('version') == 2)
-                        or not isinstance(saved_contract, dict) or saved_contract.get('version') == 2):
+                from live.scenario_entry_contract import goal_record_marker, has_goal_contract
+                if (has_goal_contract(self.conn, active)
+                        or goal_record_marker(saved_contract)):
                     ctx['entry_goal_untrusted'] = True
             else:
                 observe_contract(active, ctx, int(observed_now // 300), observed_now)
                 ctx.update(contract_context(active, True))
+                if (active and (active.get('entry_contract') or {}).get('version') == 2
+                        and not self._entry_goal_registered(active)):
+                    ctx['entry_goal_untrusted'] = True
         if self.entry_goal_enabled and not active:
             ctx['entry_contract_version'] = 2
         if active:
@@ -530,7 +534,8 @@ class ScenarioRuntime:
                                           absolute_expires_at=lease['anchor']['hard_deadline'])
                 offered = (offer(self.conn, state, ctx, self.broker.children(active['scenario_id']),
                                  self.clock() if observed_at is None else observed_at)
-                           if self.pending_renewal_enabled and self.calculated_review_enabled else None)
+                           if self.pending_renewal_enabled and self.calculated_review_enabled
+                           and not ctx.get('entry_goal_untrusted') else None)
                 if offered:
                     ctx.update(pending_renewal_version=1, pending_renewal_offer=offered)
         from core.scenario_stop_policy import build_stop_policy
@@ -555,31 +560,18 @@ class ScenarioRuntime:
 
     def _entry_contract_registered(self, active):
         """The original insert-only registration is independent of mutable state."""
-        if not active or not valid_record(active.get("entry_contract"), active.get("scenario_id")):
-            return False
-        row = self.conn.execute("SELECT body FROM llm_scenario_entry_contracts WHERE scenario_id=?",
-                                (active["scenario_id"],)).fetchone()
-        if row is None or row[0] != _json(active["entry_contract"]):
-            return False
-        record = active["entry_contract"]
-        original = self.conn.execute("SELECT payload FROM llm_scenario_intents WHERE id=? AND scenario_id=?",
-            (record["origin"]["action_id"], active["scenario_id"])).fetchone()
-        if original is None:
+        from live.scenario_entry_contract import registered_contract
+        return registered_contract(self.conn, active)
+
+    def _entry_goal_registered(self, active):
+        if not self._entry_contract_registered(active):
             return False
         try:
-            plan = json.loads(original[0])
-            if (plan.get("action") != "OPEN" or plan.get("side") != active.get("side")
-                    or plan.get("scenario_id") != active["scenario_id"]
-                    or plan.get("action_id") != record["origin"]["action_id"]
-                    or plan.get("input_id") != record["origin"]["input_id"]):
-                return False
-            resolved = None
-            if record['version'] == 2:
+            if active['entry_contract']['version'] == 2:
                 from live.scenario_entry_goal import stored_goal
-                resolved = stored_goal(self.conn, record)
-            return bind_contract(record["definition"], plan, record["origin"]["registered_at"],
-                                 resolved_goal=resolved) == record
-        except (ValueError, TypeError, KeyError, AttributeError):
+                stored_goal(self.conn, active['entry_contract'])
+            return True
+        except (ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
             return False
 
     def _entry_contract_exit(self, state, ctx, slot):
@@ -960,6 +952,8 @@ class ScenarioRuntime:
                             resolved_goal=plan_goal(payload, ctx))
                         self.conn.execute("INSERT INTO llm_scenario_entry_contracts VALUES(?,?)",
                             (validated["scenario_id"], _json(state["active"]["entry_contract"])))
+                        if state['active']['entry_contract']['version'] == 2:
+                            validated = dict(validated, host_entry_contract_id=state['active']['entry_contract']['contract_id'])
                     from live.scenario_pending_renewal import create_anchor
                     create_anchor(self.conn, state['active'], validated, fresh,
                                   commit_at if self.calculated_review_enabled else self.clock())

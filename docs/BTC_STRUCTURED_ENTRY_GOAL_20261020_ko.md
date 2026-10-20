@@ -45,6 +45,24 @@
 - projection/replay/notice: 손실 없는 복원·기존 해시·보유/잔여 알림 보존.
 - 테스트: 위 반례와 전체 오프라인 suite. 부모는 실제 모델·서버·배포를 담당한다.
 
+## 원래 실패 규칙과 목표 근거의 신뢰 분리
+
+목표의 부가 snapshot/decision이 누락되어도 온전한 원래 실패 규칙의 관측과
+자동 FAILED EXIT를 막지 않는다. 신규 v2에는 원래 validated OPEN 전체에서
+`host_entry_contract_id` 한 필드만 제외한 compact·정렬 키·ASCII JSON의
+`origin.plan_sha256`을 계약에 먼저 고정하고, 그 계약 ID를 원 OPEN에 host-only로
+붙인다. 이후 intent·lease anchor를 한 트랜잭션으로 저장하므로 순환 hash가 없다.
+모델은 이 host-only 필드를 보낼 수 없고 v1 payload/hash에는 추가하지 않는다.
+
+등록 record와 원 OPEN의 양방향 pin은 기본 실패 규칙 신뢰에 사용한다.
+별도 목표 source 검증 실패는 `entry_goal_untrusted`로 표시하여 새 entry/TP와
+예약 재승인만 차단한다. source가 commit 이후 사라져도 executor가 재검사한다.
+반면 원 record·definition·hash·원 OPEN의 ID/가격/수량/위험/설명 변조는 기존
+untrusted fence를 유지한다. 단순 WAIT·취소·SL-only·EXIT는 목표 source에 의존하지 않는다.
+버전 표시만 v1으로 바꾸어도 원 OPEN의 host pin이 남아 있으면 v2 검증을 우회할 수
+없다. 이 검사는 v2 표시·목표 record·원 계획 hash·host pin이라는 양성 근거가 있을
+때만 적용하며, 그런 근거가 없는 손상 v1을 새 목표 계약으로 추정하지 않는다.
+
 ## 입력 예산 보완
 
 부모의 최대 보존 DRAFT 재조립에서 v2 입력이 99,989B로 한도에 접근했다.

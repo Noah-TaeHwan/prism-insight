@@ -176,6 +176,8 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
         from live.scenario_entry_contract import validate_metadata
         validate_metadata(payload, context, allow_failed_wait_template=_allow_failed_wait_template)
     if payload.get('pending_renewal') is not None:
+        if context.get('entry_goal_untrusted') is True:
+            raise ValueError('pending_renewal_goal_source_untrusted')
         assessment = payload.get('thesis_assessment') or {}
         if (payload['action'] != 'WAIT' or payload['cancel_entry_ids']
                 or context.get('entry_contract_version') not in (1, 2)

@@ -157,6 +157,7 @@ def offer(conn, state, context, children, now):
             or int(now // 300) <= body['last_slot'] or context.get('positions') != []
             or not retention_allowed(state, active, context)
             or context.get('entry_contract_status') != 'REGISTERED'
+            or context.get('entry_goal_untrusted') is True
             or (context.get('entry_contract_observation') or {}).get('status') == 'FAILED'
             or active.get('entry_contract_model_failure')):
         return None
