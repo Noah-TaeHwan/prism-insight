@@ -586,8 +586,12 @@ MA_STRUCTURE_PROMPT = """
 MA structure review applies to flat, pending and holding contexts; all earlier
 host safety, accounting, lifecycle and protection restrictions retain priority.
 Use ma_structure.primary own-time close/MA points and numeric transitions, not current
-MAs projected onto older candles. MA order, price position, price movement and
-MA movement are different facts: a stationary price can change band position
+MAs projected onto older candles. Read close_vs_ma10/close_vs_ma35 as that point's
+own-time CLOSE relative to each MA, not the LEVEL relative to current Mark.
+Use phase=CONFIRMED/FORMING with the point's timestamp; forming ABOVE is not a
+confirmed breakout. BETWEEN alone does not specify which MA is above the close.
+MA order, price position, price movement and MA movement are different facts:
+a stationary price can change band position
 because the MAs moved. Do not label that a price breakout or a successful retest.
 When primary frames differ, name each frame's actual position; do not collapse
 BETWEEN and BELOW into a collective claim that price is below both MAs on all frames.

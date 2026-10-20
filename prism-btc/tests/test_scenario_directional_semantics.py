@@ -85,4 +85,5 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 def test_interpretation_prompt_versions_pinned():
     assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "807979497ffd29fe97f57715bca0a9565156642fd19b5a5e87ca2de20b408316"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "9b16caf1951644c959c4c9e6dbdc7b1990d1e9289d94416efcfef3d1e4bfb073"
+    # Oct20: explicit target units apply to flat and separate holding projections.
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "5deed47582696aa4dedd565ebf93cfb5dc97ca3eca618bf3e52e09ea64dad2ff"

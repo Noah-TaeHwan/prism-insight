@@ -64,6 +64,13 @@ prices, quantities, expiry or confidence; revised plans require a new research
 run, not an extra call here. Interpret trend, support/resistance, fill plausibility
 and supplied host calculations. Do not invent net profit or recompute supplied
 arithmetic. Risk reserves are NOT observed per-side fees or guaranteed losses.
+Read calculation_field_units for projection.targets fields: gross_pnl is the
+before-cost USDT amount for that target's quantity, not whole-scenario profit;
+gross_reward_per_btc is USDT/BTC price distance, never total USDT reward. Keep
+quantity in BTC and reward/risk ratios dimensionless; do not recompute these.
+The same target-field units apply to projection.confirmed_remaining.targets and
+projection.hypothetical_all_fills.targets; keep their assumptions separate, never
+add these alternative projections together.
 Flat-entry gross target projections assume all proposed entries fill: a partial target is
 not whole-scenario profit, and unknown future fees/funding remain unknown.
 For holdings distinguish confirmed_remaining projections from hypothetical_all_fills
@@ -382,6 +389,11 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
                    response_contract=response_contract)
     if calculated_candidates is not None:
         payload["calculated_candidates"] = calculated_candidates
+        # Model-only labels: do not change hash-bound numerical receipts or tapes.
+        payload["calculation_field_units"] = {"projection.targets": {
+            "quantity": "BTC", "gross_pnl": "USDT_FOR_THIS_TARGET_QUANTITY_BEFORE_COSTS",
+            "gross_reward_per_btc": "USDT_PER_BTC_NOT_TOTAL_PNL",
+            "gross_reward_to_reserved_risk_ratio": "DIMENSIONLESS_NOT_USDT"}}
     return project_position_flow_input(payload)[0]
 
 

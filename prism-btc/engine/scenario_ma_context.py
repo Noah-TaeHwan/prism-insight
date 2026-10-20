@@ -35,6 +35,9 @@ def _point(source, duration, as_of, confirmed):
     fast, slow, close = values["ma10"], values["ma35"], values["close"]
     return {**values, "open_time_ms": start, "as_of_ms": observed,
             "is_confirmed": confirmed, "price_basis": "LAST_TRADE_OHLC_SMA",
+            "phase": "CONFIRMED" if confirmed else "FORMING",
+            "close_vs_ma10": "ABOVE" if close > fast else "BELOW" if close < fast else "EQUAL",
+            "close_vs_ma35": "ABOVE" if close > slow else "BELOW" if close < slow else "EQUAL",
             "price_position": _position(close, fast, slow),
             "ma_order": "BULLISH" if fast > slow else "BEARISH" if fast < slow else "EQUAL",
             "absolute_gap_price": abs(fast - slow)}
