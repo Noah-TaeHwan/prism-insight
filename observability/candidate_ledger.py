@@ -192,8 +192,12 @@ def build_rows(trigger_candidates: Mapping[str, pd.DataFrame], final_result: Map
 
 
 def record(rows: Iterable[Mapping[str, Any]] | None, *, market: str, trade_date, mode: str,
-           market_regime: str | None = None, db_path=None, log: logging.Logger | None = None) -> int:
-    """Upsert capture rows; a re-run replaces capture fields and resets outcomes. Fail-open."""
+           market_regime: str | None = None, db_path=None, log: logging.Logger | None = None,
+           keep_existing: bool = False) -> int:
+    """Upsert capture rows; a re-run replaces capture fields and resets outcomes. Fail-open.
+
+    ``keep_existing``: insert new keys only and leave existing rows (and their outcomes) untouched.
+    """
     target = log or logger
     if not rows or not enabled():
         return 0
@@ -209,7 +213,8 @@ def record(rows: Iterable[Mapping[str, Any]] | None, *, market: str, trade_date,
         # Column names come from the module constants; values are bound parameters.
         sql = (f"INSERT INTO candidate_ledger ({', '.join(columns)}) "  # nosec B608  # nosemgrep
                f"VALUES ({', '.join('?' * len(columns))}) "
-               f"ON CONFLICT({', '.join(_KEY)}) DO UPDATE SET {updates}")
+               + (f"ON CONFLICT({', '.join(_KEY)}) DO NOTHING" if keep_existing
+                  else f"ON CONFLICT({', '.join(_KEY)}) DO UPDATE SET {updates}"))
         values = []
         for row in rows:
             merged = {**row, "market": str(market).upper(), "trade_date": day, "mode": str(mode),
@@ -371,28 +376,112 @@ def _basis(bars: pd.DataFrame, anchor_date: str, captured_close, captured_volume
 
 # --- outcome pass ------------------------------------------------------------
 
+# Positions are followed from the day trades carry a decision trace (#981/#983).
+POSITION_SINCE = "2026-10-08"
+_POSITION_TABLES = {"KR": ("stock_holdings", "trading_history"), "US": ("us_stock_holdings", "us_trading_history")}
+
+
+def _trade_trace(market, decision_id):
+    return hashlib.sha256(f"trade-trace|{market}|{decision_id}".encode()).hexdigest()[:32] if decision_id else None
+
+
+def _scenario(raw):
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def position_rows(market: str, *, main_db=None, since: str = POSITION_SINCE) -> dict:
+    """{mode: rows} for real positions: the entry (base = buy price) and the exit (base = sell price,
+    to measure what the stock did after we sold). Read-only on the main tracking DB."""
+    market = str(market).upper()
+    holdings, history = _POSITION_TABLES[market]
+    path = Path(main_db or os.getenv("STOCK_TRACKING_DB") or ROOT / "stock_tracking_db.sqlite")
+    out = {"position_entry": [], "position_exit": []}
+    if not path.exists():
+        return out
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+    connection.row_factory = sqlite3.Row
+    try:
+        # Table names come from the constant above, values are bound parameters.
+        sold = connection.execute(
+            f"SELECT id, ticker, company_name, buy_price, buy_date, sell_price, sell_date, profit_rate, "  # nosec B608  # nosemgrep
+            f"holding_days, scenario, trigger_type, exit_kind FROM {history} WHERE buy_date >= ?", (since,)).fetchall()
+        held = connection.execute(
+            f"SELECT id, ticker, company_name, buy_price, buy_date, scenario, trigger_type "  # nosec B608  # nosemgrep
+            f"FROM {holdings} WHERE buy_date >= ?", (since,)).fetchall()
+    finally:
+        connection.close()
+    for kind, rows in (("sold", sold), ("held", held)):
+        for row in rows:
+            scenario = _scenario(row["scenario"])
+            decision = str(scenario.get("_decision_id") or "").strip() or None
+            base = {"trace_id": _trade_trace(market, decision), "decision_id": decision,
+                    "position_ref": f"{history if kind == 'sold' else holdings}:{row['id']}"}
+            out["position_entry"].append({
+                "trade_date": str(row["buy_date"])[:10], "trigger_type": str(row["trigger_type"] or "unknown"),
+                "ticker": str(row["ticker"]), "name": row["company_name"], "close": _number(row["buy_price"]),
+                "selected": 1, "features_json": json.dumps(base, ensure_ascii=False, sort_keys=True)})
+            if kind == "sold" and row["sell_date"]:
+                rule = scenario.get("exit_rule") or row["exit_kind"] or "unknown"
+                out["position_exit"].append({
+                    "trade_date": str(row["sell_date"])[:10], "trigger_type": str(rule), "ticker": str(row["ticker"]),
+                    "name": row["company_name"], "close": _number(row["sell_price"]), "selected": 1,
+                    "features_json": json.dumps({**base, "exit_kind": row["exit_kind"], "exit_rule": scenario.get("exit_rule"),
+                                                 "profit_rate": _number(row["profit_rate"]),
+                                                 "holding_days": row["holding_days"],
+                                                 "buy_price": _number(row["buy_price"]),
+                                                 "entry_trigger": row["trigger_type"]},
+                                                ensure_ascii=False, sort_keys=True)})
+    return out
+
+
+def sync_positions(market: str, *, main_db=None, db_path=None, log: logging.Logger | None = None) -> int:
+    """Queue new real entries and exits for the outcome pass (existing rows keep their outcomes)."""
+    target = log or logger
+    try:
+        count = 0
+        for mode, rows in position_rows(market, main_db=main_db).items():
+            by_day = {}
+            for row in rows:
+                by_day.setdefault(row.pop("trade_date"), []).append(row)
+            for day, day_rows in by_day.items():
+                count += record(day_rows, market=market, trade_date=day, mode=mode, db_path=db_path, log=target,
+                                keep_existing=True)
+        return count
+    except Exception as exc:  # noqa: BLE001 - observation only
+        target.warning("[CANDIDATE_LEDGER] position sync unavailable: %s: %s", type(exc).__name__, exc)
+        return 0
+
+
 _EMIT_COLUMNS = ("trade_date", "mode", "trigger_type", "ticker", "name", "close", "selected", "market_regime",
                  "anchor_date", "outcome_basis", "outcome_status", "sessions_observed", "evaluated_through")
 
 
 def _emit_final(row) -> bool:
-    """One ClickStack event when a row with a decision trace reaches its final outcome. Fail-open.
+    """One ClickStack event when a row reaches its final outcome. Fail-open.
 
-    Only rows that carry ``trace_id`` in features_json (re-entry signals and near misses today) are sent,
-    so the outcome lands on the decision's own trace next to the signal it measures.
+    Rows with a decision trace (re-entry signals, real entries and exits) land on that trace; screening
+    rows without one get a stable per-row trace (``trace_scope``) and carry the row key for joins.
     """
     try:
         features = json.loads(row.get("features_json") or "{}")
+        key = "|".join(str(row.get(c)) for c in _KEY)
         trace_id = features.get("trace_id")
-        if not trace_id:
-            return False
+        scope = "decision" if trace_id else "ledger_row"
+        trace_id = trace_id or hashlib.sha256(f"candidate-ledger|{key}".encode()).hexdigest()[:32]
         from observability.events import emit_event
         attrs = {c: row.get(c) for c in _EMIT_COLUMNS}
         attrs["ledger_mode"] = attrs.pop("mode")       # "mode" is the event's own OBSERVATION marker
         attrs.update({c: row.get(c) for c, _ in _DESCRIPTOR_COLUMNS + _OUTCOME_COLUMNS})
         attrs.update(event_ref=features.get("event_ref"), watch_ref=features.get("watch_ref"),
-                     reason=features.get("reason"), horizon_sessions=HORIZON_SESSIONS)
-        key = "|".join(str(row.get(c)) for c in _KEY)
+                     reason=features.get("reason"), horizon_sessions=HORIZON_SESSIONS, trace_scope=scope,
+                     decision_id=features.get("decision_id"), position_ref=features.get("position_ref"),
+                     exit_kind=features.get("exit_kind"), exit_rule=features.get("exit_rule"),
+                     realized_profit_rate=features.get("profit_rate"), rank_in_trigger=row.get("rank_in_trigger"),
+                     selected_trigger=row.get("selected_trigger"), final_score=row.get("final_score"))
         return emit_event("candidate.forward_outcome", service="prism-candidate-ledger", market=row.get("market"),
                           ticker=row.get("ticker"), trace_id=trace_id,
                           event_id=hashlib.sha256(f"forward-outcome|{key}".encode()).hexdigest()[:32],
@@ -444,6 +533,8 @@ def update_candidate_outcomes(market: str, *, db_path=None, fetch_bars=None, tod
     try:
         with connection:
             ensure_schema(connection)
+        if db_path is None or os.getenv("STOCK_TRACKING_DB"):
+            stats["positions_queued"] = sync_positions(market, db_path=path, log=target)
         tickers = [row["ticker"] for row in connection.execute(
             "SELECT ticker, MIN(COALESCE(last_attempt_at, '')) AS attempted, MIN(anchor_date) AS first "
             "FROM candidate_ledger WHERE market=? AND COALESCE(outcome_status, 'PENDING') IN (?, ?) "

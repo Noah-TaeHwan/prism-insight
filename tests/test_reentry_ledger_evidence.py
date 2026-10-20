@@ -139,11 +139,74 @@ def test_final_outcome_lands_on_the_decision_trace_once(tmp_path, monkeypatch):
     frame = _frame(45)
     stats = CL.update_candidate_outcomes("US", db_path=db, fetch_bars=lambda t, s, e: frame, today="2026-03-31",
                                          sleep_sec=0)
-    assert stats["complete"] == 2 and stats.get("emitted") == 1
-    (name, kw), = sent
-    assert name == "candidate.forward_outcome" and kw["trace_id"] == "t" * 32 and kw["ticker"] == "AAA"
+    assert stats["complete"] == 2 and stats.get("emitted") == 2
+    by_ticker = {kw["ticker"]: kw for name, kw in sent if name == "candidate.forward_outcome"}
+    kw = by_ticker["AAA"]
+    assert kw["trace_id"] == "t" * 32 and kw["attributes"]["trace_scope"] == "decision"
+    screening = by_ticker["BBB"]                       # no decision trace: a stable per-row trace
+    assert screening["attributes"]["trace_scope"] == "ledger_row" and len(screening["trace_id"]) == 32
     attrs = kw["attributes"]
     assert attrs["mode"] == "OBSERVATION" and attrs["ledger_mode"] == "reentry_v3_signal" and attrs["event_ref"] == "e1" and attrs["mfe_pct"] is not None
     assert attrs["mfe_10s"] is not None and attrs["outcome_status"] == "COMPLETE"
     CL.update_candidate_outcomes("US", db_path=db, fetch_bars=lambda t, s, e: frame, today="2026-04-30", sleep_sec=0)
-    assert len(sent) == 1                                               # complete rows are never re-sent
+    assert len(sent) == 2                                               # complete rows are never re-sent
+
+
+def _main_db(path):
+    conn = sqlite3.connect(path)
+    for table in ("trading_history", "us_trading_history"):
+        conn.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, account_key TEXT, ticker TEXT, company_name TEXT, "
+                     "buy_price REAL, buy_date TEXT, sell_price REAL, sell_date TEXT, profit_rate REAL, "
+                     "holding_days INTEGER, scenario TEXT, trigger_type TEXT, trigger_mode TEXT, sector TEXT, "
+                     "exit_kind TEXT)")
+    for table in ("stock_holdings", "us_stock_holdings"):
+        conn.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, account_key TEXT, ticker TEXT, company_name TEXT, "
+                     "buy_price REAL, buy_date TEXT, current_price REAL, scenario TEXT, trigger_type TEXT)")
+    conn.execute("INSERT INTO us_trading_history VALUES (1,'a','NVDA','Nvidia',200,'2026-10-13 23:50:00',190,"
+                 "'2026-10-15 23:00:00',-5,2,?,'Volume Surge','m','Tech','stop')",
+                 (json.dumps({"_decision_id": "d-nvda"}),))
+    conn.execute("INSERT INTO us_trading_history VALUES (2,'b','NVDA','Nvidia',200,'2026-10-13 23:50:00',190,"
+                 "'2026-10-15 23:00:00',-5,2,?,'Volume Surge','m','Tech','stop')",
+                 (json.dumps({"_decision_id": "d-nvda"}),))           # second account: same position
+    conn.execute("INSERT INTO us_trading_history VALUES (3,'a','OLD','Old',10,'2026-09-01 23:50:00',11,"
+                 "'2026-09-05 23:00:00',10,4,'{}','x','m','x','ai')")   # before the trace linkage
+    conn.execute("INSERT INTO us_stock_holdings VALUES (9,'a','LLY','Lilly',900,'2026-10-15 23:37:42',910,?,'Gap Up')",
+                 (json.dumps({"_decision_id": "d-lly"}),))
+    conn.commit()
+    conn.close()
+
+
+def test_real_entries_and_exits_are_followed_on_the_position_trace(tmp_path):
+    main, ledger = tmp_path / "main.sqlite", tmp_path / "ledger.sqlite"
+    _main_db(main)
+    rows = CL.position_rows("US", main_db=main)
+    assert sorted(r["ticker"] for r in rows["position_entry"]) == ["LLY", "NVDA", "NVDA"]
+    exit_row, = {r["ticker"]: r for r in rows["position_exit"]}.values()
+    assert exit_row["trigger_type"] == "stop" and exit_row["close"] == 190 and exit_row["trade_date"] == "2026-10-15"
+    features = json.loads(exit_row["features_json"])
+    assert features["trace_id"] == CL._trade_trace("US", "d-nvda") and features["profit_rate"] == -5
+    assert CL.sync_positions("US", main_db=main, db_path=ledger) == 5          # 3 entries + 2 exits offered
+    got = sqlite3.connect(ledger).execute(
+        "SELECT mode, ticker, trade_date, close FROM candidate_ledger ORDER BY mode, ticker").fetchall()
+    assert got == [("position_entry", "LLY", "2026-10-15", 900.0), ("position_entry", "NVDA", "2026-10-13", 200.0),
+                   ("position_exit", "NVDA", "2026-10-15", 190.0)]                # accounts collapse to one row
+    conn = sqlite3.connect(ledger)
+    conn.execute("UPDATE candidate_ledger SET outcome_status='COMPLETE', mfe_pct=12.0")
+    conn.commit()
+    conn.close()
+    CL.sync_positions("US", main_db=main, db_path=ledger)                      # a later sync keeps outcomes
+    assert sqlite3.connect(ledger).execute(
+        "SELECT COUNT(*) FROM candidate_ledger WHERE outcome_status='COMPLETE' AND mfe_pct=12.0").fetchone()[0] == 3
+
+
+def test_the_exit_rule_from_the_sell_side_wins_over_the_guessed_kind(tmp_path):
+    main = tmp_path / "main.sqlite"
+    _main_db(main)
+    conn = sqlite3.connect(main)
+    conn.execute("UPDATE us_trading_history SET scenario=? WHERE id=1",
+                 (json.dumps({"_decision_id": "d-nvda", "exit_rule": "TIER2_TRAIL"}),))
+    conn.execute("DELETE FROM us_trading_history WHERE id=2")
+    conn.commit()
+    conn.close()
+    (row,) = CL.position_rows("US", main_db=main)["position_exit"]
+    assert row["trigger_type"] == "TIER2_TRAIL"
