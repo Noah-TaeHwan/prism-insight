@@ -852,10 +852,11 @@ truth of a qualitative judgment; all lifecycle and risk guards still apply.
 def entry_contract_prompt(context):
     if context.get('entry_contract_version') != 2:
         return ENTRY_CONTRACT_PROMPT
-    return ENTRY_CONTRACT_PROMPT.replace('entry_contract_version=1', 'entry_contract_version=2').replace(
+    # Assemble model instructions, never a database query.
+    return ''.join((ENTRY_CONTRACT_PROMPT.replace('entry_contract_version=1', 'entry_contract_version=2').replace(
         'version-1 entry_contract', 'version-2 entry_contract').replace(
         'premise and expected_progress concisely (each 1..240 characters)',
-        'premise concisely (1..240 characters) and a structured goal, never expected_progress') + """
+        'premise concisely (1..240 characters) and a structured goal, never expected_progress'), """
 Version 2 goal is authoritative original target intent, not unrestricted rationale.
 For v2, earlier expected_progress references mean goal/host canonical intent;
 never add that removed free-text field or substitute prose for the structured goal.
@@ -885,7 +886,7 @@ model_input_projection.schema_value_definitions first; each $schema_object is
 [key_order_index,values], paired in order with schema_key_orders[index].
 These are exact duplicate
 output-schema definitions only; the API response_schema remains authoritative.
-"""
+"""))
 
 
 def _unique_pairs(pairs):
