@@ -380,6 +380,13 @@ def plan(market, decision_day, records, items, journal, now):
     return to_submit, skipped
 
 
+def _error_reason(prefix, error):
+    """`error:ModuleNotFoundError: No module named 'x'` - the type alone hid a system fault (10/19~21)."""
+    from prism_core.log_redaction import redact
+    message = " ".join(str(error).split())[:160]
+    return f"{prefix}:{type(error).__name__}" + (f": {redact(message)}" if message else "")
+
+
 def outcome_status(outcome):
     if outcome.get("bought"):
         return "BOUGHT_RECONCILED" if outcome.get("reconciled") else "BOUGHT"
@@ -424,7 +431,7 @@ def process(state, market, decision_day, records, items, journal_path, executor,
             outcomes = executor(market, entries) or {}
         except Exception as error:
             logger.exception("[REENTRY_V3_LIVE][%s] executor failed", market)
-            reason = "timeout" if "Timeout" in type(error).__name__ else f"executor_error:{type(error).__name__}"
+            reason = "timeout" if "Timeout" in type(error).__name__ else _error_reason("executor_error", error)
             outcomes = {e["key"]: {"bought": False, "reason": reason} for e in entries}
     results = []
     for entry in entries:
@@ -637,7 +644,13 @@ def subprocess_executor(market, entries):
     lines = [line for line in done.stdout.splitlines() if line.startswith("{")]
     if not lines:
         raise RuntimeError(f"entry subprocess returned nothing: {done.stderr[-300:]}")
-    return json.loads(lines[-1]).get("outcomes") or {}
+    outcomes = json.loads(lines[-1]).get("outcomes") or {}
+    if done.returncode or any(outcome_status(o) == "ERROR" for o in outcomes.values()):
+        # The child's traceback is only in its stderr: keep it in this run's log (10/19~21 it was dropped).
+        from prism_core.log_redaction import redact
+        logger.warning("[REENTRY_V3_LIVE][%s] entry subprocess rc=%s stderr tail:\n%s",
+                       market, done.returncode, redact(done.stderr[-3000:]))
+    return outcomes
 
 
 async def enter_with_agent(agent, market, entry, *, now=None):
@@ -674,4 +687,4 @@ async def enter_with_agent(agent, market, entry, *, now=None):
                 "account_refs": [r for o in bought for r in (o.get("account_refs") or [])]}
     except Exception as error:
         logger.exception("[REENTRY_V3_LIVE][%s] entry failed for %s", market, ticker)
-        return {"bought": False, "reason": f"error:{type(error).__name__}"}
+        return {"bought": False, "reason": _error_reason("error", error)}
