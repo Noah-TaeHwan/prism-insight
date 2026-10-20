@@ -685,6 +685,13 @@ pivots or proven support/resistance; missing candidates do not prove a clear pat
 Consider them alongside upper MAs when comparing near partial TP and runner
 extension, not as mandatory TP prices or reasons to shorten every target.
 Identical prices across points/frames are not independent reaction evidence.
+Check each TP against its cited reference (timeframe, MA, confirmed/forming phase and value),
+the stated before/beyond relationship, and the original premise and expected_progress
+when an entry contract is present. Compare every target separately: one target before
+a level does not put every target before it. Do not substitute a forming level for a
+cited confirmed level to make a target fit. A supported breakout-extension thesis remains
+allowed when consistent with the original purpose and evidence; this consistency check
+is not an automatic MA cap or a new exit trigger for existing holdings.
 Inspect 4h/12h/1d/1w MA10/35
 levels on each proposed entry-to-TP or current-mark-to-TP profit path. Supplied
 obstacles are sorted from CONTEXT_MARK_PRICE, not from the proposed entry;

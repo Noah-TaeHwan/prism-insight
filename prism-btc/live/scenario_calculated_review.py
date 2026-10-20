@@ -45,6 +45,15 @@ Economic objections alone must submit a candidate for host calculation, not use
 an empty list to bypass calculation. First recovery observation stays WAIT only,
 with empty candidates. Candidate submission is not an order or permission
 to trade. Unknown real fees never authorize invented net-reward arithmetic.
+Apply the shared TP/reference/thesis consistency check before submitting each candidate.
+When supplied own-time paths support examining MA10-to-MA35 gap traversal, put
+one concrete sentence evaluating that bounded opportunity or its specific exclusion
+in existing candidate rationale or no_candidate_reason. When candidates is empty,
+put that sentence in no_candidate_reason, not only wait_proposal.rationale.
+A later MA35 breakout is not a substitute for this review. Distinguish CURRENT Mark,
+proposed entry and forming close: if remaining room is already exhausted, say so.
+Weak evidence can still justify no candidate; economic objections follow the host
+calculation rule above. This review does not require a candidate or a new closed bar.
 For an active scenario keep its side and original risk budget. ADJUST entries are
 incremental only; exit targets are the complete replacement protection. Existing
 confirmed positions already reflect prior partial exits; never restore sold lots.
@@ -62,7 +71,13 @@ from the schema enum. Each host token binds a candidate ID (or WAIT) and its ful
 receipt hash; never construct a token or copy a separate hash field. Never rewrite
 prices, quantities, expiry or confidence; revised plans require a new research
 run, not an extra call here. Interpret trend, support/resistance, fill plausibility
-and supplied host calculations. Do not invent net profit or recompute supplied
+and supplied host calculations. Apply the shared TP/reference/thesis consistency check to the immutable original
+contract and rationale, effective targets and disclosed host price adjustments.
+For a new-entry candidate with a clear unresolved contradiction choose another consistent candidate or WAIT
+only when selectable and allowed; existing FAILED/EXIT-only and holding protection rules retain priority.
+Do not repair the original contract by rewriting selection rationale.
+Review gap traversal and a later MA35 breakout as distinct opportunities, not substitutes.
+Do not invent net profit or recompute supplied
 arithmetic. Risk reserves are NOT observed per-side fees or guaranteed losses.
 Read calculation_field_units for projection.targets fields: gross_pnl is the
 before-cost USDT amount for that target's quantity, not whole-scenario profit;
