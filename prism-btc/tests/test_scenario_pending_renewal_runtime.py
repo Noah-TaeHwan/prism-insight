@@ -475,3 +475,40 @@ def test_executor_rechecks_input_age_after_slow_preflight(tmp_path, monkeypatch)
     assert e.now < 1800000420
     assert load(r.conn, r.state()['active'])['revision'] == 0
     assert json.loads(r.conn.execute('SELECT body FROM llm_scenario_pending_renewals').fetchone()[0])['status'] == 'REJECTED'
+
+
+@pytest.mark.parametrize('fill_all', [False, True])
+def test_holding_has_no_waiting_policy_metadata_but_remaining_order_keeps_lease(tmp_path, fill_all):
+    r, b, e, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    before = load(r.conn, r.state()['active'])
+    child = b.children()[0]
+    e.now += 1
+    e.fill(child['link_id'], float(child['request']['qty']) if fill_all else .001)
+    state = r.state()
+    r._reconcile(state)
+    context = r._context(state)
+    assert context['positions']
+    for field in ('pending_wait_policy_version', 'pending_wait', 'pending_renewal_version', 'pending_renewal_offer'):
+        assert field not in context
+    assert load(r.conn, r.state()['active']) == before
+    if not fill_all:
+        assert context['pending_entries'][0]['expires_at'] == before['until']
+    assert b._verify_protection(b.capture_account(), 98, 'LONG') is True
+
+
+def test_zero_fill_metadata_retains_exact_host_offer(tmp_path):
+    from live.scenario_pending_renewal import offer
+    r, b, e, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    e.now += 301
+    state = r.state()
+    r._reconcile(state)
+    context = r._context(state)
+    lease = load(r.conn, state['active'])
+    assert context['positions'] == [] and context['pending_entries']
+    assert context['pending_wait_policy_version'] == context['pending_renewal_version'] == 1
+    assert context['pending_wait'] == dict(lease_expires_at=lease['until'],
+        absolute_expires_at=lease['anchor']['hard_deadline'])
+    assert context['pending_renewal_offer'] == offer(r.conn, state, context,
+                                                   b.children(state['active']['scenario_id']), e.now)

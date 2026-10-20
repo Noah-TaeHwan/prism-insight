@@ -17,6 +17,8 @@ import logging
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
+from live.scenario_pending_renewal import initialize as initialize_pending_leases
+
 
 TERMINAL = frozenset({"Filled", "Cancelled", "Rejected", "Deactivated", "PartiallyFilledCanceled"})
 LIVE = frozenset({"New", "PartiallyFilled", "Untriggered", "Triggered"})
@@ -50,8 +52,7 @@ class ScenarioExecution:
 
     def _init_execution(self, enabled):
         self.execution_enabled = enabled is True
-        from live.scenario_pending_renewal import initialize
-        initialize(self.conn)
+        initialize_pending_leases(self.conn)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS llm_scenario_children(
             link_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL, scenario_id TEXT NOT NULL,
             kind TEXT NOT NULL, local_id TEXT NOT NULL, request TEXT NOT NULL,

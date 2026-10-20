@@ -497,7 +497,8 @@ class ScenarioRuntime:
             and not ctx.get("recovery_normal_permission")))
         if self.pending_renewal_enabled and not active:
             ctx['pending_wait_policy_version'] = 1
-        elif active and active.get('pending_wait_anchor'):
+        elif (active and active.get('pending_wait_anchor')
+              and ctx.get('positions') == [] and ctx.get('pending_entries')):
             from live.scenario_pending_renewal import load, offer
             lease = load(self.conn, active)
             ctx['pending_wait_policy_version'] = 1
