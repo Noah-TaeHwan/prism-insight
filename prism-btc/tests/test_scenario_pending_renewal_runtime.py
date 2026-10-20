@@ -18,7 +18,7 @@ from tests.test_scenario_review_runtime import wire
 
 def renewal_runtime(tmp_path, *, reapprove=True, assessment='INTACT', before_select=None,
                     select_renewal=True, side='LONG', trade_alternatives=0, initial_risk_fraction=None,
-                    mixed_initial=False):
+                    mixed_initial=False, goal_enabled=False, selection_reason='Explicit selected approval'):
     conn = sqlite3.connect(tmp_path / 'renewal.db')
     exchange = Exchange()
     original_place = exchange.place_order
@@ -58,6 +58,10 @@ def renewal_runtime(tmp_path, *, reapprove=True, assessment='INTACT', before_sel
             if mixed_initial:
                 result['entries'][0]['allocation_fraction'] = .5
                 result['entries'].append(dict(id='ordinary', price=100, trigger_price=None, allocation_fraction=.5))
+            if ctx.get('entry_contract_version') == 2:
+                result['entry_contract'].pop('expected_progress')
+                result['entry_contract'].update(version=2, goal=dict(mode='BOUNDED_BEFORE',
+                    reference=dict(frame='4h', phase='confirmed', ma='ma35')))
         else:
             result['entry_contract'] = None
         record = ctx.get('registered_entry_contract')
@@ -81,7 +85,7 @@ def renewal_runtime(tmp_path, *, reapprove=True, assessment='INTACT', before_sel
             chosen = (next((row for row in bundle['candidates'] if row['id'] == 'WAIT_RENEWAL'), bundle['wait'])
                       if ctx['scenario_id'] and select_renewal else
                       bundle['wait'] if ctx['scenario_id'] else bundle['candidates'][0])
-            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale='Explicit selected approval')
+            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale=selection_reason)
             if before_select and ctx['scenario_id']:
                 before_select(broker, exchange)
         return SimpleNamespace(text=json.dumps(result))
@@ -97,7 +101,17 @@ def renewal_runtime(tmp_path, *, reapprove=True, assessment='INTACT', before_sel
         lambda: dict(valid=True, as_of_ms=exchange.now * 1000), clock=lambda: exchange.now,
         calculated_review_enabled=True, calculated_review_propose=propose,
         research_review_mode='economic-reject-calculated-v1', entry_contract_enabled=True,
-        pending_renewal_enabled=True)
+        pending_renewal_enabled=True, entry_goal_enabled=goal_enabled)
+    if goal_enabled:
+        from engine.scenario_snapshot import TIMEFRAME_MS, candle_start
+        def market():
+            at = exchange.now * 1000
+            start = candle_start(at, TIMEFRAME_MS['4h'])
+            p = dict(open_time_ms=start - TIMEFRAME_MS['4h'], open=100, high=101,
+                     low=99, close=100, ma10=100, ma35=106 if side == 'LONG' else 94)
+            return dict(valid=True, as_of_ms=at, timeframes={'4h': {'ma_path': dict(
+                version=1, confirmed_points=[p], forming_point=None)}})
+        runtime.snapshot = market
     return runtime, broker, exchange, calls, contexts
 
 

@@ -279,6 +279,38 @@ def test_request_has_no_tools_no_keys_and_exact_model_tier(monkeypatch):
     assert call(open_url).text=='{}'
 
 
+@pytest.mark.parametrize('effort', ['high', 'xhigh'])
+def test_same_model_supports_only_approved_high_and_xhigh_payload(monkeypatch, effort):
+    from live.scenario_llm import EFFORT
+    assert EFFORT == 'high'  # Adapter capability does not change operating policy.
+    monkeypatch.delenv('PRISM_BTC_SCENARIO_OAUTH_URL', raising=False)
+    calls = []
+    def opener(request, timeout):
+        calls.append(json.loads(request.data))
+        assert 0 < timeout <= 75
+        return Response(result())
+    response = generate_scenario(system_prompt='same', user_prompt='same',
+        model='gpt-6-luna', reasoning_effort=effort, fast_tier=True, timeout=75,
+        response_schema={'type': 'object'}, open_url=opener, retry_transport=False)
+    assert response.text == '{}' and len(calls) == 1
+    assert calls[0]['reasoning'] == {'effort': effort}
+    assert calls[0]['model'] == 'gpt-6-luna' and calls[0]['service_tier'] == 'priority'
+    assert calls[0]['tools'] == [] and calls[0]['tool_choice'] == 'none'
+
+
+@pytest.mark.parametrize('override', [
+    {'reasoning_effort': 'medium'}, {'reasoning_effort': 'max'},
+    {'model': 'other'}, {'fast_tier': False}, {'mcp_profile': 'tools'},
+])
+def test_extra_effort_does_not_widen_other_model_authority(override):
+    arguments = dict(system_prompt='same', user_prompt='same', model='gpt-6-luna',
+        reasoning_effort='xhigh', fast_tier=True, timeout=75, mcp_profile=None,
+        response_schema={'type': 'object'}, open_url=lambda *_a, **_kw: pytest.fail('network'))
+    arguments.update(override)
+    with pytest.raises(ValueError, match='scenario_model_policy'):
+        generate_scenario(**arguments)
+
+
 def test_tool_output_and_wrong_model_rejected(monkeypatch):
     monkeypatch.delenv('PRISM_BTC_SCENARIO_OAUTH_URL',raising=False)
     for r in [result([dict(type='function_call',name='place_order')]),

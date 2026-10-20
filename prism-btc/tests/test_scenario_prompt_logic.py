@@ -14,7 +14,7 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # Oct20 follow-up: explicit own-time per-MA relations and confirmed/forming phase.
+    # Deployed v1 policy preserved; new structured-goal policy is v2-only.
     expected = {
         'SYSTEM_PROMPT': 'a3ecb16140fe1a7bfbd9d244213b8ce37b846db1a52ca705a07d9df2e317a1e4',
         'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',

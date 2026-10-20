@@ -8,6 +8,123 @@ def _json(value, *, sort_keys=False):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=sort_keys)
 
 
+def _has_schema_marker(value):
+    if isinstance(value, dict):
+        return '$schema_value' in value or '$schema_object' in value or any(_has_schema_marker(v) for v in value.values())
+    return isinstance(value, list) and any(_has_schema_marker(v) for v in value)
+
+
+def _factor_goal_schema(payload):
+    """v2 user-payload schema duplicates only; never change the API schema."""
+    if payload.get('contract_context', {}).get('entry_contract_version') != 2:
+        return False
+    schema = payload.get('response_contract')
+    if not isinstance(schema, dict):
+        return False
+    counts = {}
+
+    def count(value):
+        if isinstance(value, dict):
+            encoded = _json(value)
+            if len(encoded) >= 100:
+                counts[encoded] = counts.get(encoded, 0) + 1
+            for v in value.values():
+                count(v)
+        elif isinstance(value, list):
+            for v in value:
+                count(v)
+    count(schema)
+    definitions = {}
+    key_orders = []
+
+    def object_row(value, transform):
+        keys = list(value)
+        if keys not in key_orders:
+            key_orders.append(keys)
+        return {'$schema_object': [key_orders.index(keys), [transform(v) for v in value.values()]]}
+
+    def ordered(value):
+        if isinstance(value, dict):
+            return object_row(value, ordered)
+        if isinstance(value, list):
+            return [ordered(v) for v in value]
+        return value
+
+    def factor(value):
+        if isinstance(value, dict):
+            encoded = _json(value)
+            occurrences = counts.get(encoded, 0)
+            if occurrences > 1 and len(encoded) * (occurrences - 1) > 170 + 90 * occurrences:
+                key = hashlib.sha256(encoded.encode()).hexdigest()
+                definitions[key] = ordered(value)
+                return {'$schema_value': key}
+            return object_row(value, factor)
+        if isinstance(value, list):
+            return [factor(v) for v in value]
+        return value
+    replacement = factor(schema)
+    if not definitions:
+        return False
+    metadata = deepcopy(payload.get('model_input_projection', {}))
+    base_version = metadata.get('version', 0)
+    metadata.update(version=6, base_projection_version=base_version,
+        schema_value_definitions=definitions,
+        schema_key_orders=key_orders,
+        response_contract_sha256=hashlib.sha256(_json(schema).encode()).hexdigest())
+    metadata['meaning'] = metadata.get('meaning', '') + (
+        ' In response_contract only, each $schema_object is [key_order_index,values]; pair the '
+        'schema_key_orders[index] keys with values in order to form one exact JSON object. '
+        'Expand $schema_value from schema_value_definitions, '
+        'then decode these objects before reading the output contract; API response schema is unchanged.')
+    if len(_json(replacement)) + len(_json(metadata)) >= len(_json(schema)) + len(_json(payload.get('model_input_projection', {}))):
+        return False
+    payload['response_contract'] = replacement
+    payload['model_input_projection'] = metadata
+    return True
+
+
+def _restore_goal_schema(payload, metadata):
+    if payload.get('contract_context', {}).get('entry_contract_version') != 2:
+        raise ValueError('schema_projection_requires_goal_v2')
+    definitions = metadata.get('schema_value_definitions')
+    if not isinstance(definitions, dict) or not definitions:
+        raise ValueError('invalid_schema_value_definitions')
+    orders = metadata.get('schema_key_orders')
+    if (not isinstance(orders, list) or not orders or any(
+            not isinstance(keys, list) or any(not isinstance(k, str) for k in keys)
+            or len(set(keys)) != len(keys) for keys in orders)):
+        raise ValueError('invalid_schema_key_orders')
+    used = set()
+
+    def expand(value, *, allow_reference=True):
+        if isinstance(value, dict):
+            if '$schema_value' in value:
+                key = value['$schema_value']
+                if not allow_reference or set(value) != {'$schema_value'} or not isinstance(key, str) or key not in definitions:
+                    raise ValueError('invalid_schema_value_reference')
+                used.add(key)
+                return expand(definitions[key], allow_reference=False)
+            if set(value) != {'$schema_object'} or not isinstance(value['$schema_object'], list):
+                raise ValueError('invalid_schema_object')
+            rows = value['$schema_object']
+            if (len(rows) != 2 or type(rows[0]) is not int or not 0 <= rows[0] < len(orders)
+                    or not isinstance(rows[1], list) or len(rows[1]) != len(orders[rows[0]])):
+                raise ValueError('invalid_schema_object')
+            return {k: expand(v, allow_reference=allow_reference) for k, v in zip(orders[rows[0]], rows[1])}
+        if isinstance(value, list):
+            return [expand(v, allow_reference=allow_reference) for v in value]
+        return value
+    for key, value in definitions.items():
+        if not isinstance(value, dict) or hashlib.sha256(_json(expand(value, allow_reference=False)).encode()).hexdigest() != key:
+            raise ValueError('schema_value_hash_mismatch')
+    schema = expand(payload.get('response_contract'))
+    if used != set(definitions) or hashlib.sha256(_json(schema).encode()).hexdigest() != metadata.get('response_contract_sha256'):
+        raise ValueError('restored_schema_hash_mismatch')
+    payload['response_contract'] = schema
+    if _has_schema_marker(payload):
+        raise ValueError('unregistered_schema_value')
+
+
 def _definition_rows(payload, name):
     snapshot = payload.get("market_snapshot")
     frames = snapshot.get("timeframes", {}) if isinstance(snapshot, dict) else None
@@ -119,11 +236,12 @@ def _restore_recovery_changes(original, metadata):
 
 
 def _receipt_locations(payload):
+    goal_fields = ('resolved_goal', 'goal_evidence') if payload.get('contract_context', {}).get('entry_contract_version') == 2 else ()
     for path, receipt in _wrapper_locations(payload):
         if isinstance(receipt, dict):
             for field in ("allocation_receipt", "cost_semantics", "effective_per_entry_risk",
                           "raw_per_entry_risk", "raw_risk", "pricing_basis", "projection",
-                          "effective_plan", "raw_proposal"):
+                          "effective_plan", "raw_proposal") + goal_fields:
                 if field in receipt:
                     yield path.rsplit(".", 1)[0] + "." + field, receipt, field
 
@@ -301,7 +419,7 @@ def project_model_input(payload):
     projected = deepcopy(payload)
     if ("model_input_projection" in payload or _has_table_marker(payload)
             or _has_wrapper_marker(payload) or _has_proposal_marker(payload) or _has_receipt_marker(payload)
-            or _has_recovery_marker(payload)):
+            or _has_recovery_marker(payload) or _has_schema_marker(payload)):
         raise ValueError("reserved_projection_field")
     references, definitions, paths = [], {}, []
     recovery = projected.get("contract_context", {}).get("recovery")
@@ -446,6 +564,8 @@ def project_model_input(payload):
         if recovery_change_path:
             projected["model_input_projection"]["recovery_changed_evidence_path"] = recovery_change_path
             projected["model_input_projection"]["meaning"] += " After expanding tables and numeric_market-v1 current, $recovery_changes baseline-current-v1 provides host-computed ordered changed paths in key_order; prepend path_prefix to each key when present. Do NOT calculate which paths changed. For each full path, read changed_evidence[path]={before:baseline[path],now:current[path]}. Preserve source numeric types. restored_sha256 verifies insertion-order compact UTF-8 JSON of reconstructed changes. No changed facts are omitted."
+    if _factor_goal_schema(projected):
+        paths.append('response_contract')
     encoded = _json(projected)
     if len(encoded.encode()) >= len(original.encode()):
         projected, encoded, paths = deepcopy(payload), original, []
@@ -465,6 +585,21 @@ def restore_model_input(payload):
     """Deterministic reconstruction for audit/tests; no network or model calls."""
     original = deepcopy(payload)
     metadata = original.pop("model_input_projection", None)
+    if isinstance(metadata, dict) and metadata.get('version') == 6:
+        if type(metadata['version']) is not int:
+            raise ValueError('unknown_projection_version')
+        _restore_goal_schema(original, metadata)
+        base_version = metadata.get('base_projection_version')
+        if type(base_version) is not int or base_version not in (0, 1, 2, 3, 4, 5):
+            raise ValueError('invalid_base_projection_version')
+        for key in ('base_projection_version', 'schema_value_definitions', 'schema_key_orders', 'response_contract_sha256'):
+            metadata.pop(key, None)
+        if base_version == 0:
+            metadata = None
+        else:
+            metadata['version'] = base_version
+    elif _has_schema_marker(original):
+        raise ValueError('unregistered_schema_value')
     if metadata is None:
         if _has_recovery_marker(original):
             raise ValueError("unregistered_recovery_change")

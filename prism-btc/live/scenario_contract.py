@@ -89,9 +89,9 @@ def response_schema(context):
             "invalidation": {"type": "string"}}), {"type": "null"}]}
         if recovery.get("phase") == "OBSERVING" and recovery.get("first_observation") is True:
             properties["action"]["enum"] = ["WAIT"]
-    if context.get("entry_contract_version") == 1:
+    if context.get("entry_contract_version") in (1, 2):
         from live.scenario_entry_contract import assessment_schema, entry_contract_schema
-        properties["entry_contract"] = {"anyOf": [entry_contract_schema(), {"type": "null"}]}
+        properties["entry_contract"] = {"anyOf": [entry_contract_schema(context['entry_contract_version']), {"type": "null"}]}
         properties["thesis_assessment"] = assessment_schema(context)
     if context.get('pending_renewal_version') == 1:
         properties['pending_renewal'] = {'anyOf': [_object({'offer_id': {
@@ -172,13 +172,15 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
         raise ValueError("response_identity_mismatch")
     if not _matches(payload, schema):
         raise ValueError("response_contract_mismatch")
-    if context.get("entry_contract_version") == 1:
+    if context.get("entry_contract_version") in (1, 2):
         from live.scenario_entry_contract import validate_metadata
         validate_metadata(payload, context, allow_failed_wait_template=_allow_failed_wait_template)
     if payload.get('pending_renewal') is not None:
+        if context.get('entry_goal_untrusted') is True:
+            raise ValueError('pending_renewal_goal_source_untrusted')
         assessment = payload.get('thesis_assessment') or {}
         if (payload['action'] != 'WAIT' or payload['cancel_entry_ids']
-                or context.get('entry_contract_version') != 1
+                or context.get('entry_contract_version') not in (1, 2)
                 or assessment.get('status') != 'INTACT'
                 or assessment.get('contract_id') != context['pending_renewal_offer']['contract_id']):
             raise ValueError('pending_renewal_requires_intact_original_thesis')

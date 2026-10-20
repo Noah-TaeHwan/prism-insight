@@ -10,6 +10,7 @@ from live.scenario_calculated_review import (
 )
 from live.scenario_contract import validate_wire_proposal
 from live.scenario_entry_contract import strip_metadata, validate_metadata
+from live.scenario_entry_goal import prepare_goal_source, validate_goal_pair
 from live.scenario_runtime import snapshot_input_time
 
 
@@ -26,6 +27,7 @@ _OPTIONAL_STABLE = (
     "execution_price_policy", "conditional_entry_version",
     "review_contract_version", "recovery_hard_blocked", "unknown_intents",
     "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
+    "entry_goal_untrusted",
     'pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
 )
 
@@ -84,6 +86,15 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     renewal = bool(selected['raw_proposal'].get('pending_renewal'))
     actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"} or renewal
     original, fresh = deepcopy(original_context), deepcopy(fresh_context)
+    selected_plan = selected['raw_proposal']
+    goal_independent = (original.get('entry_contract_version') == 2 and not renewal
+        and (selected_plan['action'] in {'WAIT', 'EXIT'}
+             or (selected_plan['action'] == 'ADJUST' and not selected_plan.get('entries')
+                 and not selected_plan.get('take_profits'))))
+    goal_context = original
+    if original.get('entry_contract_version') == 2:
+        goal_context = deepcopy(original)
+        prepare_goal_source(snapshot, goal_context)
     now = _number(fresh.get("now"))
     last_review_time = max(operation["value"] for operation in envelope["operations"]
                            if operation["kind"] == "clock")
@@ -102,6 +113,11 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
                 or (original[key] != fresh[key] and (actionable or key != "new_risk_blocked"))):
             raise ValueError("review_guard_context_changed:" + key)
     for key in _OPTIONAL_STABLE:
+        if goal_independent and key == 'entry_goal_untrusted':
+            continue
+        if (goal_independent and fresh.get('entry_goal_untrusted') is True
+                and key in {'pending_renewal_version', 'pending_renewal_offer'} and key not in fresh):
+            continue  # A disappearing unused offer grants no new authority.
         if not actionable and key in {"recovery_hard_blocked", "stop_policy"}:
             continue
         if (key in original) != (key in fresh) or original.get(key) != fresh.get(key):
@@ -121,15 +137,19 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     # need not repeat it. Decode only against the original trusted contract;
     # fresh facts below still decide economic validity, never the model metadata.
     payload = validate_wire_proposal(selected["raw_proposal"], original)
-    if original.get("entry_contract_version") == 1:
+    if original.get("entry_contract_version") in (1, 2):
         # Samples may advance without replacing the original premise. A newly
         # confirmed failure still invalidates any non-EXIT reviewed action.
         validate_metadata(payload, fresh)
     payload["rationale"] = result["selection"]["rationale"]
     core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
+    if core.get('pending_renewal') is None:
+        core.pop('pending_renewal', None)
     if actionable and not renewal:
         _supplied_instrument_filters(core, fresh)
+    validate_goal_pair(payload, None, goal_context)
     validated = validate_execution_prices(core, fresh)
+    validate_goal_pair(payload, validated, goal_context)
     if research_mode != "legacy" and selected["id"] != "WAIT" and not renewal:
         from live.scenario_risk_allocation import validate_allocation_prices
         validate_allocation_prices(validated, selected["allocation_receipt"], fresh)

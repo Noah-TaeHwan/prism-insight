@@ -37,10 +37,10 @@ def review_policy_binding(*, research_mode="legacy"):
     from live import (scenario_calculated_review, scenario_review_adapter,
                       scenario_review_guard, scenario_llm, scenario_contract,
                       scenario_model_input, scenario_preview, scenario_runtime,
-                      scenario_entry_contract, scenario_position_flow, scenario_pending_renewal)
+                      scenario_entry_contract, scenario_position_flow, scenario_pending_renewal, scenario_entry_goal)
     from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
     from core import scenario_pending_renewal as pending_renewal_core
-    from engine import scenario_ma_context
+    from engine import scenario_ma_context, scenario_snapshot
 
     root = Path(__file__).resolve().parents[1]
     modules = {
@@ -59,8 +59,10 @@ def review_policy_binding(*, research_mode="legacy"):
         'core/scenario_pending_renewal.py': pending_renewal_core,
         'live/scenario_pending_renewal.py': scenario_pending_renewal,
         'engine/scenario_ma_context.py': scenario_ma_context,
+        'engine/scenario_snapshot.py': scenario_snapshot,
         'live/scenario_runtime.py': scenario_runtime,
         'live/scenario_entry_contract.py': scenario_entry_contract,
+        'live/scenario_entry_goal.py': scenario_entry_goal,
         'live/scenario_position_flow.py': scenario_position_flow,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
@@ -184,6 +186,7 @@ def _manifest():
                     'live/scenario_fee_projection.py',
                     'live/scenario_entry_thesis.py',
                     'live/scenario_entry_contract.py',
+                    'live/scenario_entry_goal.py',
                     'live/scenario_position_flow.py', 'live/scenario_pending_renewal.py',
                     'core/scenario_pending_renewal.py',
                     'live/scenario_model_input.py',
@@ -210,7 +213,7 @@ def _manifest():
         else:
             context_name = '_context' if 'runtime' in name else 'context'
             execution_names = ({'_tick', '_reconcile', '_context', '_enabled', '_valid_open_entry', '_apply_review',
-                                '_entry_contract_exit', '_entry_contract_registered'} if 'runtime' in name else
+                                '_entry_contract_exit', '_entry_contract_registered', '_entry_goal_registered'} if 'runtime' in name else
                 {'_accounting', '_funding_schedule', 'capture_financial_evidence',
                  '_risk_accounting', '_daily', 'reconcile', 'capture_account'})
             selected_names = {context_name} | execution_names
@@ -228,7 +231,8 @@ def _manifest():
     # The immutable premise also grants a narrowly scoped automatic EXIT.
     execution['live/scenario_entry_contract.py'] = policy['live/scenario_entry_contract.py']
     execution_parity['live/scenario_entry_contract.py'] = judgment_parity['live/scenario_entry_contract.py']
-    for name in ('core/scenario_pending_renewal.py', 'live/scenario_pending_renewal.py'):
+    for name in ('core/scenario_pending_renewal.py', 'live/scenario_pending_renewal.py', 'live/scenario_entry_goal.py',
+                 'engine/scenario_ma_context.py', 'engine/scenario_snapshot.py'):
         execution[name] = policy[name]
         execution_parity[name] = judgment_parity[name]
     try:

@@ -16,6 +16,7 @@ from engine.scenario_ma_context import build_ma_structure_context
 from live import scenario_llm
 from live.scenario_contract import _matches, _object, response_schema, validate_wire_proposal
 from live.scenario_entry_contract import strip_metadata
+from live.scenario_entry_goal import GoalConsistencyRejection, prepare_goal_source, validate_goal_pair
 from live.scenario_position_flow import project_position_flow_input
 from live.scenario_runtime import snapshot_input_time
 
@@ -338,7 +339,14 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
                                             "estimated_cost_rate", "slippage_bps")})
         receipt["raw_per_entry_risk"] = _entry_risk_components(core, context)
         _supplied_instrument_filters(core, context)
+        if context.get('entry_contract_version') == 2:
+            # Goal-only rejection must not hide malformed/unauthorized core plans.
+            validate_scenario(core, context)
+        validate_goal_pair(normalized, None, context)
         effective = preview_execution_prices(core,context,original_input_now=original_now)
+        goal = validate_goal_pair(normalized, effective, context)
+        if goal is not None:
+            receipt['resolved_goal'] = goal
         quotes=context.get("limit_price_quotes")
         receipt["pricing_basis"]=dict(kind="ORIGINAL_INPUT_HYPOTHETICAL",
             original_input_now=original_now,quote_captured_at=quotes.get("captured_at") if isinstance(quotes,dict) else None,
@@ -348,17 +356,22 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
             effective_per_entry_risk=_entry_risk_components(effective, context),
             projection=_holding_projection(effective, context) if context.get("scenario_id") is not None
                 else _gross_projection(effective, context), eligible=True)
-    except ScenarioValidationError as exc:
+    except GoalConsistencyRejection as exc:
         if strict:
+            raise
+        receipt.update(rejection=str(exc), rejection_type='PREAUTHORITY_PLAN_CONSISTENCY',
+                       goal_evidence=exc.evidence)
+    except ScenarioValidationError as exc:
+        if strict or (context.get('entry_contract_version') == 2 and not isinstance(exc, EconomicProposalRejection)):
             raise
         receipt["rejection"] = str(exc)
     except ValueError as exc:
-        if strict:
+        if strict or context.get('entry_contract_version') == 2:
             raise
         # Local wire/calculator validators emit fixed codes, not input values.
         receipt["rejection"] = str(exc)
     except (KeyError, TypeError, ArithmeticError):
-        if strict:
+        if strict or context.get('entry_contract_version') == 2:
             raise
         receipt["rejection"] = "wire_economic_or_calculation_invalid"
     receipt["receipt_sha256"] = receipt_hash(receipt)
@@ -367,6 +380,8 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
 
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
     model_context = deepcopy(context)
+    model_context.pop('entry_goal_source', None)
+    model_context.pop('entry_goal_decision_slot', None)
     recovery = context.get("recovery") or {}
     # Interpretation-only copy. Do not alter source context, receipt hashes or
     # authorization; missing/non-boolean metadata remains explicitly unknown.
@@ -380,10 +395,10 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
         model_context["current_primary_frame_facts"] = scenario_llm._current_primary_frame_facts(snapshot)
     if isinstance(context.get("current_plan"), dict):
         model_context["current_plan"] = {key: value for key, value in context["current_plan"].items()
-                                         if key != "rationale"}
+                                         if key not in {"rationale", "host_entry_contract_id"}}
     for field in ("recent_waits", "recent_actions"):
         if isinstance(context.get(field), list):
-            model_context[field] = [{key: value for key, value in row.items() if key != "rationale"}
+            model_context[field] = [{key: value for key, value in row.items() if key not in {"rationale", "host_entry_contract_id"}}
                 if isinstance(row, dict) else row for row in context[field]]
     payload = dict(market_snapshot=snapshot, contract_context=model_context,
                    response_contract=response_contract)
@@ -428,6 +443,8 @@ def calculate_allocation_candidate(raw, context, *, candidate_id, original_input
         if receipt["eligible"]:
             validate_allocation_prices(receipt["effective_plan"], allocation, context)
     except (ScenarioValidationError, ValueError) as exc:
+        if context.get('entry_contract_version') == 2 and not isinstance(exc, EconomicProposalRejection):
+            raise
         if "receipt" not in locals():
             receipt = dict(id=candidate_id, raw_allocation_proposal=original,
                 raw_allocation_sha256=receipt_hash(original), execution_authorized=False)
@@ -501,6 +518,9 @@ def calculate_economic_candidate(raw, context, *, candidate_id, original_input_n
             original_input_now=original_input_now, strict=True)
         receipt.update(calculated)
         validate_allocation_prices(receipt["effective_plan"], allocation, context)
+    except GoalConsistencyRejection as exc:
+        receipt.update(eligible=False, rejection=str(exc),
+            rejection_type='PREAUTHORITY_PLAN_CONSISTENCY', goal_evidence=exc.evidence)
     except EconomicProposalRejection as exc:
         try:
             validate_scenario(core, context)
@@ -525,10 +545,10 @@ def _action_allocation_branches(context, actions=None):
         branch = deepcopy(base)
         props = branch["properties"]
         props["action"]["enum"] = [action]
-        if context.get("entry_contract_version") == 1:
+        if context.get("entry_contract_version") in (1, 2):
             if action == "OPEN":
                 from live.scenario_entry_contract import entry_contract_schema
-                props["entry_contract"] = entry_contract_schema()
+                props["entry_contract"] = entry_contract_schema(context['entry_contract_version'])
             else:
                 props["entry_contract"] = {"type": "null"}
         if action in {"WAIT", "EXIT"}:
@@ -599,11 +619,14 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         raise ValueError("production_wire_capture_forbidden")
     if not callable(generate) or not callable(record):
         raise ValueError("explicit_research_dependencies_required")
+    if context.get('entry_contract_version') == 2 and 'single' in research_mode:
+        raise ValueError('entry_goal_requires_two_phase_review')
     _check_lifecycle_context(context)
     started = clock()
     original = receipt_hash(dict(snapshot=snapshot, context=context,
                                  response_contract=response_contract))
     frozen_snapshot, frozen_context, contract = deepcopy((snapshot, context, response_contract))
+    prepare_goal_source(frozen_snapshot, frozen_context)
 
     def fresh():
         now = clock()
@@ -626,8 +649,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
     if context.get('pending_wait_policy_version') == 1:
         base += scenario_llm.PENDING_WAIT_PROMPT
-    if context.get("entry_contract_version") == 1:
-        base += scenario_llm.ENTRY_CONTRACT_PROMPT
+    if context.get("entry_contract_version") in (1, 2):
+        base += scenario_llm.entry_contract_prompt(context)
     if context.get("scenario_id") is None:
         base += scenario_llm.FLAT_ENTRY_PROMPT
     allocation = research_mode != "legacy"
@@ -762,7 +785,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
             raise ValueError("research_selected_expired")
         return deepcopy(result)
     draft_prompt = DRAFT_PROMPT
-    if context.get("entry_contract_version") == 1:
+    if context.get("entry_contract_version") in (1, 2):
         draft_prompt += "\nEntry-contract exception: FAILED wait_proposal is a nonexecutable template, not a fallback. All draft assessments must match exactly; supply valid EXIT candidates only when FAILED.\n"
     if allocation:
         draft_prompt = draft_prompt.replace("SL, TP, quantities and fractions yourself", "SL, TP, confidence and entry allocation_fraction yourself") + ALLOCATION_SINGLE_PROMPT
@@ -774,7 +797,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     now_context = dict(frozen_context, now=fresh())
     wait_wire = draft["wait_proposal"]
     failed_template = False
-    if context.get("entry_contract_version") == 1:
+    if context.get("entry_contract_version") in (1, 2):
         assessment = wait_wire.get("thesis_assessment")
         if any(candidate.get("thesis_assessment") != assessment for candidate in draft["candidates"]):
             raise ValueError("research_entry_assessment_conflict")
@@ -824,7 +847,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
                   qualitative_reason_truth="NOT_MECHANICALLY_VERIFIED")
     bundle_sha = receipt_hash(bundle)
     record(deepcopy(dict(kind="CALCULATED_CANDIDATES", body=bundle, sha256=bundle_sha)))
-    if economic_reject and receipts and not any(r["eligible"] for r in receipts):
+    if economic_reject and receipts and all(
+            not r["eligible"] and r.get('rejection_type') == 'PREAUTHORITY_ECONOMIC' for r in receipts):
         return rejected_result(bundle)
     if receipts:
         choices = {f"{r['id']}:{r['receipt_sha256']}": r
