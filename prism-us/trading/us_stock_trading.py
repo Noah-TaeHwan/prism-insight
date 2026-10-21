@@ -2104,6 +2104,53 @@ class USStockTrading:
             logger.warning(f"Error during unfilled-order inquiry: {str(e)}")
             return out
 
+    # Same CCNL contract as prism_core/oneil_broker.py; raw broker text, parsed strictly downstream.
+    _DAILY_EXECUTION_FIELDS = ("ord_dt", "ord_tmd", "odno", "orgn_odno", "sll_buy_dvsn_cd", "pdno",
+                               "ft_ord_qty", "ft_ord_unpr3", "ft_ccld_qty", "ft_ccld_unpr3", "ft_ccld_amt3",
+                               "nccs_qty", "rvse_cncl_dvsn", "prcs_stat_name", "tr_crcy_cd", "ovrs_excg_cd")
+
+    def get_daily_executions_checked(self, start_date: str, end_date: str) -> tuple[bool, List[Dict[str, Any]]]:
+        """Read-only overseas order/execution inquiry (주문체결내역, TTTS3035R), every page.
+
+        Returns (authoritative, rows); a failed call, a malformed row or a stalled page sets
+        authoritative False, never "no orders".
+        """
+        api_url = "/uapi/overseas-stock/v1/trading/inquire-ccnl"
+        tr_id = "TTTS3035R" if self.mode == "real" else "VTTS3035R"
+        params = {
+            "CANO": self.trenv.my_acct, "ACNT_PRDT_CD": self.trenv.my_prod,
+            "PDNO": "%" if self.mode == "real" else "", "ORD_STRT_DT": start_date, "ORD_END_DT": end_date,
+            "SLL_BUY_DVSN": "00", "CCLD_NCCS_DVSN": "00",
+            "OVRS_EXCG_CD": "NASD" if self.mode == "real" else "", "SORT_SQN": "DS",
+            "ORD_DT": "", "ORD_GNO_BRNO": "", "ODNO": "", "CTX_AREA_FK200": "", "CTX_AREA_NK200": "",
+        }
+        rows: List[Dict[str, Any]] = []
+        seen = set()
+        try:
+            for page in range(20):
+                res = self._request(api_url, tr_id, params, request_cont="N" if page else "")
+                if not res.isOK():
+                    logger.warning("Overseas execution inquiry failed: %s", res.getErrorCode())
+                    return False, rows
+                body = res.getBody()
+                output = getattr(body, "output", None)
+                if not isinstance(output, list) or any(not isinstance(row, dict) for row in output):
+                    return False, rows
+                rows.extend({key: row.get(key) for key in self._DAILY_EXECUTION_FIELDS} for row in output)
+                cont = str(getattr(res.getHeader(), "tr_cont", "") or "").strip().upper()
+                if cont not in {"M", "F"}:
+                    return True, rows
+                keys = (str(getattr(body, "ctx_area_fk200", "") or "").strip(),
+                        str(getattr(body, "ctx_area_nk200", "") or "").strip())
+                if keys in seen or not any(keys):
+                    return False, rows
+                seen.add(keys)
+                params.update(CTX_AREA_FK200=keys[0], CTX_AREA_NK200=keys[1])
+            return False, rows
+        except Exception as e:
+            logger.warning("Error during overseas execution inquiry: %s", type(e).__name__)
+            return False, rows
+
 
 class MultiAccountUSStockTrading:
     """Fan out trading orders to all configured US accounts for the current mode."""

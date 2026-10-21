@@ -176,6 +176,19 @@ One `trace_id` reads a decision end to end. Read it with `tools/clickstack_query
   (`mode=reentry_v3_signal|reentry_v3_near_miss`). The weekly outcome pass emits
   `candidate.forward_outcome` (MFE/MAE over 5/10/20/30 sessions, `hit_50`, 7/14/30 returns,
   descriptors) on the same trace once the row is final.
+- **Broker fill confirmation (2026-10-21)**: `tools/reconcile_fills.py --market KR|US`
+  runs after the close. It reads each BUY in `order_intents`/`broker_orders` for that
+  market-local day (read-only), queries the sending account's daily executions (KR
+  TTTC0081R, US TTTS3035R; inquiry only), and appends `entry.fill_reconciled` on the
+  trade trace. Micro-split adds use the entry decision's trace, found through
+  `positions.entry_intent_id`. The event carries `fill_status` CONFIRMED / PARTIAL /
+  NOT_FILLED / MISSING, filled and ordered quantity, average fill price, `fill_vs_limit_pct`
+  and `match_basis` (order number, amend chain, or a unique symbol/quantity/time match).
+  It also carries a `fill_provenance` that the evidence packet reads (NOT_FILLED →
+  CANCELLED, MISSING → UNKNOWN). A failed or ambiguous inquiry stays MISSING. KIS gives
+  no per-execution time, so `confirmed_fill_at` stays null.
+  `runtime/fill_reconciliation_state.json` prevents a final status from being emitted
+  twice. Suggested cron (KST): `10 16 * * 1-5 … --market KR`, `10 7 * * 2-6 … --market US`.
 - **BTC**: `btc.scenario.*` share `sha256("scenario:<id>")`. A `decision_input` joins the
   scenario trace when its run touched exactly one scenario (`scenario_inferred=true`).
 - Not linked by design: `broker.order_request` (HTTP layer; join by ticker, time and

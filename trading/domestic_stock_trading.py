@@ -248,10 +248,10 @@ class DomesticStockTrading:
             account_key=self.account_key,
         )
 
-    def _request(self, api_url: str, tr_id: str, params: Dict[str, Any], **kwargs):
+    def _request(self, api_url: str, tr_id: str, params: Dict[str, Any], *, request_cont: str = "", **kwargs):
         with ka.get_trading_env_lock():
             self._activate_account()
-            return ka._url_fetch(api_url, tr_id, "", params, **kwargs)
+            return ka._url_fetch(api_url, tr_id, request_cont, params, **kwargs)
 
     def get_current_price(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """
@@ -2146,6 +2146,57 @@ class DomesticStockTrading:
         except Exception as e:
             logger.warning(f"Error during revisable-order inquiry: {str(e)}")
             return False, out
+
+    # Raw daily-execution fields kept as broker text; the reconciler parses them strictly so a
+    # blank number stays unknown instead of becoming 0.
+    _DAILY_EXECUTION_FIELDS = ("ord_dt", "ord_tmd", "odno", "orgn_odno", "sll_buy_dvsn_cd", "pdno",
+                               "ord_qty", "ord_unpr", "avg_prvs", "tot_ccld_qty", "tot_ccld_amt",
+                               "rmn_qty", "rjct_qty", "cncl_yn")
+
+    def get_daily_executions_checked(self, start_date: str, end_date: str,
+                                     side: str = "02") -> tuple[bool, List[Dict[str, Any]]]:
+        """Read-only daily order/execution inquiry (주식일별주문체결조회), every page.
+
+        TR: real TTTC0081R (last 3 months), demo VTTC0081R. ``side`` 00 all / 01 sell /
+        02 buy. Returns (authoritative, rows); a failed call, a malformed row or a
+        stalled page sets authoritative False, never "no orders".
+        """
+        api_url = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+        tr_id = "TTTC0081R" if self.mode == "real" else "VTTC0081R"
+        params = {
+            "CANO": self.trenv.my_acct, "ACNT_PRDT_CD": self.trenv.my_prod,
+            "INQR_STRT_DT": start_date, "INQR_END_DT": end_date, "SLL_BUY_DVSN_CD": side,
+            "INQR_DVSN": "00", "PDNO": "", "CCLD_DVSN": "00", "INQR_DVSN_3": "00",
+            "ORD_GNO_BRNO": "", "ODNO": "", "INQR_DVSN_1": "",
+            "EXCG_ID_DVSN_CD": "ALL" if self.mode == "real" else "KRX",
+            "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+        }
+        rows: List[Dict[str, Any]] = []
+        seen = set()
+        try:
+            for page in range(20):
+                res = self._request(api_url, tr_id, params, request_cont="N" if page else "")
+                if not res.isOK():
+                    logger.warning("Daily-execution inquiry failed: %s", res.getErrorCode())
+                    return False, rows
+                body = res.getBody()
+                output = getattr(body, "output1", None)
+                if not isinstance(output, list) or any(not isinstance(row, dict) for row in output):
+                    return False, rows
+                rows.extend({key: row.get(key) for key in self._DAILY_EXECUTION_FIELDS} for row in output)
+                cont = str(getattr(res.getHeader(), "tr_cont", "") or "").strip().upper()
+                if cont not in {"M", "F"}:
+                    return True, rows
+                keys = (str(getattr(body, "ctx_area_fk100", "") or "").strip(),
+                        str(getattr(body, "ctx_area_nk100", "") or "").strip())
+                if keys in seen or not any(keys):
+                    return False, rows
+                seen.add(keys)
+                params.update(CTX_AREA_FK100=keys[0], CTX_AREA_NK100=keys[1])
+            return False, rows
+        except Exception as e:
+            logger.warning("Error during daily-execution inquiry: %s", type(e).__name__)
+            return False, rows
 
 
 class MultiAccountDomesticStockTrading:
