@@ -211,10 +211,10 @@ def record(rows: Iterable[Mapping[str, Any]] | None, *, market: str, trade_date,
                             + [f"{c}=NULL" for c in reset if c != "anchor_date"]
                             + ["outcome_status='PENDING'"])
         # Column names come from the module constants; values are bound parameters.
+        conflict = "DO NOTHING" if keep_existing else f"DO UPDATE SET {updates}"  # nosec B608  # nosemgrep
         sql = (f"INSERT INTO candidate_ledger ({', '.join(columns)}) "  # nosec B608  # nosemgrep
                f"VALUES ({', '.join('?' * len(columns))}) "
-               + (f"ON CONFLICT({', '.join(_KEY)}) DO NOTHING" if keep_existing
-                  else f"ON CONFLICT({', '.join(_KEY)}) DO UPDATE SET {updates}"))
+               f"ON CONFLICT({', '.join(_KEY)}) {conflict}")
         values = []
         for row in rows:
             merged = {**row, "market": str(market).upper(), "trade_date": day, "mode": str(mode),
