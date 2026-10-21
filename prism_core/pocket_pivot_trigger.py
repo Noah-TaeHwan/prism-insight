@@ -128,7 +128,7 @@ def evaluate(*, market: str, batch_trade_date: str, signal_date: str, universe: 
     budget = _env_number("POCKET_PIVOT_BUDGET_SECONDS", DEFAULT_BUDGET_SECONDS)
     ordered = list(universe.sort_values("Amount", ascending=False, kind="mergesort").index)
     started = clock()
-    statuses = {"PASS": 0, "FAIL": 0, "MISSING": 0}
+    statuses = dict.fromkeys(("PASS", "FAIL", "MISSING"), 0)
     reasons: dict[str, int] = {}
     evaluated: dict[str, dict] = {}
     rs_raw: dict[str, float | None] = {}
