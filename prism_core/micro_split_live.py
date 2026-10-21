@@ -111,6 +111,12 @@ def entry_record(*, plan, unit_amount, market, entered_at, tilt=None):
                        "price": str(_dec(plan["entry_reference"])), "at": entered_at}]}
     if tilt:
         block["conviction_tilt"] = dict(tilt)
+    # Why the first size is what it is (observation only; the plan hash above freezes the same values).
+    setup = plan.get("setup") or {}
+    block["sizing"] = {k: (str(v) if v is not None else None) for k, v in (
+        ("atr14", setup.get("atr14")), ("stop_proxy", plan.get("stop_proxy")),
+        ("initial_stop", plan.get("initial_stop")), ("risk_limit", plan.get("risk_limit")),
+        ("initial_nominal", plan.get("initial_nominal")))}
     return block
 
 
@@ -224,7 +230,8 @@ def attach_buy_add_plan(scenario, *, market, ticker, raw, logger=None):
             raw, market=market, source="BUY", created_at=created, valid_for=add_plan.buy_valid_for(market, created),
             allocation=block["allocation"], last_step=block["allocation"], rebase=rebase)
     add_plan.store(block, plan, issues, raw=raw, source="BUY", created_at=created)
-    _emit_planned(market=market, ticker=ticker, position_id=None, block=block, plan=plan, issues=issues)
+    _emit_planned(market=market, ticker=ticker, position_id=None, block=block, plan=plan, issues=issues,
+                  decision_id=scenario.get("_decision_id"))
     if logger:
         logger.warning("[MICRO_SPLIT][%s] %s add_plan source=BUY status=%s scenarios=%s dropped=%s", market, ticker,
                        (plan or {}).get("status", "INVALID"), [s["id"] for s in (plan or {}).get("scenarios", [])],
@@ -232,12 +239,14 @@ def attach_buy_add_plan(scenario, *, market, ticker, raw, logger=None):
     return plan
 
 
-def _emit_planned(*, market, ticker, position_id, block, plan, issues):
+def _emit_planned(*, market, ticker, position_id, block, plan, issues, decision_id=None):
     try:
         from observability.events import emit_event
+        from prism_core.trace_ids import trade_trace
         scenarios = (plan or {}).get("scenarios", [])
         emit_event("micro_split.add_planned", service=f"prism-{str(market).lower()}-micro-split",
-                   market=str(market).upper(), ticker=ticker, position_id=position_id,
+                   market=str(market).upper(), ticker=ticker, position_id=position_id, decision_id=decision_id,
+                   trace_id=trade_trace(market, decision_id=decision_id, position_id=position_id, ticker=ticker),
                    attributes={"slot_allocation": float(block["allocation"]), "plan_hash": (plan or {}).get("plan_hash"),
                                "plan_status": (plan or {}).get("status", "INVALID"),
                                "plan_source": (plan or {}).get("source"), "valid_for": (plan or {}).get("valid_for"),
@@ -384,7 +393,7 @@ def apply_review(agent, *, market, row_id, ticker, decision, now=None, logger=No
         agent.conn.rollback()
         raise
     _emit_planned(market=market, ticker=ticker, position_id=f"legacy:{market}:{row_id}", block=block, plan=plan,
-                  issues=issues)
+                  issues=issues, decision_id=scenario.get("_decision_id"))
     status = (plan or {}).get("status", "INVALID")
     if logger:
         logger.warning("[MICRO_SPLIT][%s] %s row=%s add_plan source=REVIEW status=%s valid_for=%s dropped=%s", market,
@@ -580,8 +589,11 @@ async def execute_add(agent, *, market, campaign, decision, now, chat_id=None):
         if fields:
             await publish_add_signal(ticker=campaign["symbol"], price=price, fields=fields,
                                      company_name=row.get("company_name") or campaign["symbol"])
+    from prism_core.trace_ids import decision_of, trade_trace
+    _decision = (campaign.get("plan") or {}).get("source_decision_ref") or decision_of(row.get("scenario"))
     emit_event("micro_split.add_executed", service=f"prism-{market.lower()}-micro-split", market=market,
-               ticker=campaign["symbol"], position_id=campaign["position_id"],
+               ticker=campaign["symbol"], position_id=campaign["position_id"], decision_id=_decision,
+               trace_id=trade_trace(market, decision_id=_decision, position_id=campaign["position_id"]),
                attributes={"campaign_id": campaign["campaign_id"], "slot_allocation": after,
                            "scenario_id": meta["scenario_id"], "scenario_type": meta.get("scenario_type"),
                            "lens": meta.get("lens"), "plan_hash": meta["plan_hash"],

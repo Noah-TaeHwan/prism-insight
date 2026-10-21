@@ -47,10 +47,14 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-def _emit(event_type, *, market, ticker, row_id, attributes, severity="INFO"):
+def _emit(event_type, *, market, ticker, row_id, attributes, severity="INFO", stock=None):
     from observability.events import emit_event
+    from prism_core.trace_ids import decision_of, trade_trace
+    position = f"legacy:{str(market).upper()}:{row_id}" if row_id is not None else None
+    decision = decision_of((stock or {}).get("scenario"))     # the position's trace (observation only)
     emit_event(event_type, service=f"prism-{str(market).lower()}-runner-hold", market=str(market).upper(),
-               ticker=ticker, position_id=f"legacy:{str(market).upper()}:{row_id}" if row_id is not None else None,
+               ticker=ticker, position_id=position, decision_id=decision,
+               trace_id=trade_trace(market, decision_id=decision, position_id=position, ticker=ticker),
                attributes=attributes, severity=severity)
 
 
@@ -295,17 +299,17 @@ async def review_holding(agent, market, stock, *, logger=None, now=None):
     if written["excluded"]:
         log.warning("[RUNNER_HOLD][%s] %s spike excluded reason=%s session=%s gain=%s ext=%s", market, ticker,
                     block.get("reason"), block.get("session"), block.get("gain_pct"), block.get("ma50_extension"))
-        _emit("runner.spike_excluded", market=market, ticker=ticker, row_id=row_id, attributes=detail)
+        _emit("runner.spike_excluded", market=market, ticker=ticker, row_id=row_id, stock=stock, attributes=detail)
     if written["detected"]:
         log.warning("[RUNNER_HOLD][%s] %s runner detected session=%s gain=%s hold_until=%s", market, ticker,
                     block.get("session"), block.get("gain_pct"), block.get("hold_until"))
-        _emit("runner.detected", market=market, ticker=ticker, row_id=row_id, attributes=detail)
+        _emit("runner.detected", market=market, ticker=ticker, row_id=row_id, stock=stock, attributes=detail)
     if written["stop_set"] is not None:
         before, after = written["stop_set"]
         event = "runner.stop_raised" if after > before else "runner.stop_reset_to_entry"
         log.warning("[RUNNER_HOLD][%s] %s stop %s -> %s (initial entry; runner rule replaces trailing)", market,
                     ticker, before, after)
-        _emit(event, market=market, ticker=ticker, row_id=row_id,
+        _emit(event, market=market, ticker=ticker, row_id=row_id, stock=stock,
               attributes={"stop_loss": after, "previous_stop_loss": before, "entry_ref": block.get("entry_ref"),
                           "current_price": R._num(stock.get("current_price"))})
     forced = view["phase"] is not None and bool(view["exit"])
@@ -318,7 +322,7 @@ async def review_holding(agent, market, stock, *, logger=None, now=None):
         language = "en" if market == "US" else "ko"
         reason = R.exit_reason(view, market, language)
         log.warning("[RUNNER_HOLD][%s] %s runner exit code=%s", market, ticker, view["exit"])
-        _emit("runner.exit_forced", market=market, ticker=ticker, row_id=row_id,
+        _emit("runner.exit_forced", market=market, ticker=ticker, row_id=row_id, stock=stock,
               attributes={"code": view["exit"], "phase": view["phase"],
                           **{k: view["exit_facts"].get(k) for k in ("date", "close", "ma50", "ma20", "peak_date",
                                                                     "peak_close", "stock_from_peak_pct",
@@ -385,7 +389,7 @@ def _block(market, stock, reason, code, source, log, view=None):
     view = view or {}
     log.warning("[RUNNER_HOLD] blocked sell reason=%s source=%s market=%s ticker=%s price=%s detail=%s", code, source,
                 market, ticker, stock.get("current_price"), " ".join(str(reason or "").split())[:200])
-    _emit("runner.sell_blocked", market=market, ticker=ticker, row_id=stock.get("id"),
+    _emit("runner.sell_blocked", market=market, ticker=ticker, row_id=stock.get("id"), stock=stock,
           attributes={"code": code, "source": source, "sell_reason": str(reason or "")[:300],
                       "phase": view.get("phase"), **_price_facts(stock, view.get("record"))})
 
@@ -427,7 +431,7 @@ def guard_decision(agent, market, stock, decision, *, logger=None):
         log.warning("[RUNNER_HOLD] stop_adjust_ignored market=%s ticker=%s new_stop_loss=%s new_target_price=%s "
                     "(runner stop/target are system-managed)", market, stock.get("ticker"),
                     adjustment.get("new_stop_loss"), adjustment.get("new_target_price"))
-        _emit("runner.stop_adjust_ignored", market=market, ticker=stock.get("ticker"), row_id=stock.get("id"),
+        _emit("runner.stop_adjust_ignored", market=market, ticker=stock.get("ticker"), row_id=stock.get("id"), stock=stock,
               attributes={"new_stop_loss": adjustment.get("new_stop_loss"),
                           "new_target_price": adjustment.get("new_target_price"),
                           "reason": str(adjustment.get("reason") or "")[:200]})
