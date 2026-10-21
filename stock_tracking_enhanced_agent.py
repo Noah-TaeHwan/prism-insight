@@ -660,6 +660,7 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                     # first when the AI itself rejected — so the displayed reason
                     # matches the rationale in the same message.
                     reason_parts = []
+                    _ai_entered = decision == "Enter"     # before a low score flips it to Skip
 
                     if decision != "Enter":
                         reason_parts.append(f"AI 판단: {decision}")
@@ -685,6 +686,11 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                         )
 
                     reason = " / ".join(reason_parts) if reason_parts else "기타"
+                    from prism_core.skip_reasons import decision_fields as _skip_fields
+                    _skip_detail = _skip_fields(
+                        ai_entry=_ai_entered,
+                        score_below_min=effective_score < min_score and not rebound_pilot,
+                        sector_blocked=not sector_diverse, gate=_buy_gate)
                     from messaging.korean_trading_message import hold_reason_display, stored_skip_reason
                     display_reason = hold_reason_display(reason, scenario)
 
@@ -750,7 +756,8 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                         decision=decision,
                         skip_reason=stored_skip_reason(reason, scenario),
                         scenario=scenario,
-                        sector=sector
+                        sector=sector,
+                        skip_detail=_skip_detail,
                     )
 
                     continue

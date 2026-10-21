@@ -25,16 +25,39 @@ def enabled():
     return os.getenv("DECISION_INPUT_SHADOW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def capture_frame(agent, ticker, frame, *, market):
+SNAPSHOT_BARS = 270     # the trend frame's own length (~400 calendar days): MA200 and the 52-week high
+
+
+def capture_frame(agent, ticker, frame, *, market, index_frame=None):
     if not enabled():
         return
     try:
         if not hasattr(agent, "_decision_input_bars"):
             agent._decision_input_bars = {}
-        agent._decision_input_bars[ticker] = {"market": market, "bars": bars_from_frame(frame),
-                                              "captured_at": datetime.now(timezone.utc).isoformat()}
+        entry = {"market": market, "bars": bars_from_frame(frame),
+                 "captured_at": datetime.now(timezone.utc).isoformat()}
+        try:   # ledger-only history for prism_core.decision_snapshot (never a prompt input)
+            entry["history"] = bars_from_frame(frame, limit=SNAPSHOT_BARS)
+            entry["index"] = bars_from_frame(index_frame, limit=SNAPSHOT_BARS) if index_frame is not None else []
+        except Exception:  # noqa: BLE001
+            entry["history"], entry["index"] = None, []
+        agent._decision_input_bars[ticker] = entry
     except Exception:  # noqa: BLE001 - optional capture must never fail a decision
         return
+
+
+def _snapshot(captured, *, market, now, current_price):
+    """decision_snapshot_v1 on completed bars only (today's forming bar excluded)."""
+    from zoneinfo import ZoneInfo
+    from prism_core.decision_input_features import SESSIONS
+    from prism_core.decision_snapshot import snapshot
+    history = (captured or {}).get("history")
+    if not history:
+        return {"contract": "decision_snapshot_v1", "status": "MISSING", "missing": {"history": "not_captured"}}
+    today = now.astimezone(ZoneInfo(SESSIONS[market][0])).date().isoformat()
+    completed = [b for b in history if b["date"] < today]
+    index = [b for b in (captured.get("index") or []) if b["date"] < today]
+    return snapshot(completed, price=current_price, bench=index or None)
 
 
 def peer_valuation_summary(packet):
@@ -136,12 +159,20 @@ def emit_decision_inputs(agent, *, market, ticker, decision_id, scenario, curren
             result["earnings"] = {"status": "NOT_COLLECTED", "reason": "kr_earnings_calendar_not_in_v1"}
         result["prompt_flags"] = (shown or {}).get("flags")
         result["sector_comovement"] = {"status": "NOT_COLLECTED", "reason": "deferred_v2"}
+        try:
+            result["snapshot"] = _snapshot(captured if captured and captured.get("market") == market else None,
+                                           market=market, now=now, current_price=current_price)
+        except Exception as error:  # noqa: BLE001
+            result["snapshot"] = {"status": "MISSING", "missing": {"error": type(error).__name__}}
         payload = {"mode": "SHADOW", "trading_impact": "none",
                    "prompt_impact": "facts_block_included" if shown else "none",
                    "contract_version": CONTRACT_VERSION, "decision": decision, "source": source, **result}
         event_id = hashlib.sha256(f"{CONTRACT_VERSION}|{market}|{decision_id}".encode()).hexdigest()[:32]
+        # Same trace as the decision's candidate.evaluated (observability.trading_context), so a trade
+        # review shows the inputs on the decision's timeline (they were on their own trace until 10/21).
+        trace_id = hashlib.sha256(f"trade-trace|{str(market).upper()}|{str(decision_id).strip()}".encode()).hexdigest()[:32]
         emit_event("decision_inputs.shadow_captured", service="prism-" + market.lower() + "-decision-inputs-shadow",
-                   event_id=event_id, market=market, ticker=ticker, decision_id=str(decision_id),
+                   event_id=event_id, market=market, ticker=ticker, decision_id=str(decision_id), trace_id=trace_id,
                    attributes=payload, event_time=now)
         return payload
     except Exception:  # noqa: BLE001 - observation never changes a decision
