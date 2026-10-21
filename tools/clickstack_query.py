@@ -92,13 +92,17 @@ KEY_FIELDS = (
     "status", "reason_code", "confirmed_fill_price", "buy_price", "sell_price", "current_price",
     "profit_rate_pct", "profit_rate", "holding_days", "stop_loss", "target_price", "should_sell",
     "sell_reason", "exit_reason", "reason", "rationale", "mode", "target_pct",
+    # re-entry signals / near misses / forward outcomes (decision_snapshot_v1, candidate ledger)
+    "trigger", "decision_price", "level", "dist_level_pct", "rr", "rr_floor", "dist_ma50_pct",
+    "ma50_slope_10d_pct", "rs_60d_pctp", "max_gain_pct", "max_loss_pct", "ledger_mode", "mfe_10s", "mae_10s",
+    "mfe_pct", "mae_pct",
 )
 
 
 def _flatten(attrs: dict) -> dict:
     flat: dict = {}
     for key, value in attrs.items():
-        if isinstance(value, dict) and key in ("decision_context", "fill_provenance", "exit_context"):
+        if isinstance(value, dict) and key in ("decision_context", "fill_provenance", "exit_context", "snapshot"):
             for sub, inner in value.items():
                 flat.setdefault(sub, inner)
         elif not isinstance(value, (dict, list)):

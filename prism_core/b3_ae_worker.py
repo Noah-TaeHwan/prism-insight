@@ -50,6 +50,14 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _trace(market, campaign):
+    """decision_id/trace_id of the position, so add events join the trade's trace (observation only)."""
+    from prism_core.trace_ids import trade_trace
+    decision = (campaign.get("plan") or {}).get("source_decision_ref") or None
+    return {"decision_id": decision,
+            "trace_id": trade_trace(market, decision_id=decision, position_id=campaign.get("position_id"))}
+
+
 def _identity(plan, position_id):
     return dict(symbol=plan["symbol"], position_id=position_id,
                 source_decision_ref=plan["source_decision_ref"],
@@ -194,7 +202,7 @@ class B3AeWorker:
                 self._announced.add(key)
                 self.store.record_event(cid, current, "add_plan.invalidated", attributes)
                 emit_event("micro_split.add_plan_invalidated", service=service, market=self.market, ticker=symbol,
-                           position_id=campaign["position_id"], attributes=attributes)
+                           position_id=campaign["position_id"], **_trace(self.market, campaign), attributes=attributes)
             return out
         if decision["action"] != "ADD":
             out["reasons"] = decision.get("reasons")
@@ -215,7 +223,7 @@ class B3AeWorker:
                           initial_stop=state["initial_stop"])
         self.store.record_event(cid, current, "add_plan.qualified", attributes)
         emit_event("micro_split.add_plan_qualified", service=service, market=self.market, ticker=symbol,
-                   position_id=campaign["position_id"], attributes=attributes)
+                   position_id=campaign["position_id"], **_trace(self.market, campaign), attributes=attributes)
         live = self.providers["live_add"](campaign, dict(target_allocation=decision["target_allocation"],
                                                          price=decision["limit_price"], bar_end=decision["key"],
                                                          add_plan=meta), current)
@@ -244,7 +252,8 @@ class B3AeWorker:
                         initial_stop=state["initial_stop"], price=price)
             self.store.record_event(cid, now, "add_plan.rail_blocked", data)
             emit_event("micro_split.add_blocked", service=f"prism-{self.market.lower()}-micro-split",
-                       market=self.market, ticker=symbol, position_id=campaign["position_id"], attributes=data)
+                       market=self.market, ticker=symbol, position_id=campaign["position_id"],
+                       **_trace(self.market, campaign), attributes=data)
 
     def once(self):
         now = self.clock()

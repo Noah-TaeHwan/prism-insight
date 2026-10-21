@@ -992,7 +992,7 @@ class StockTrackingAgent:
             from observability.trend_research import cache_snapshot
             cache_snapshot(self, ticker, df, locals().get("idf"), market="KR", source="existing_adjusted_kr_trend_frames")
             from observability.decision_inputs import capture_frame
-            capture_frame(self, ticker, df, market="KR")
+            capture_frame(self, ticker, df, market="KR", index_frame=locals().get("idf"))
 
             # 게이트 판정 (deterministic)
             # T1: 종가가 50일선(오닐 10주선) 아래 = 핵심 라인 이탈. 기울기 무관 —
@@ -1713,6 +1713,7 @@ class StockTrackingAgent:
         scenario: Dict[str, Any],
         sector: str,
         was_traded: bool = False,
+        skip_detail: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Save deferred KR analyses for watchlist and performance tracking."""
         try:
@@ -1815,6 +1816,8 @@ class StockTrackingAgent:
                 stored_decision_context = scenario.get("_decision_context")
                 if isinstance(stored_decision_context, dict):
                     decision_context.update(stored_decision_context)
+                if isinstance(skip_detail, dict):   # stable skip codes + gate numbers (prism_core.skip_reasons)
+                    decision_context.update(skip_detail)
                 observe_or_emit(self, emit_trading_context,
                     "candidate.evaluated",
                     market="KR",
@@ -4855,6 +4858,10 @@ class StockTrackingAgent:
                     if _regime_floor_block:
                         reason_parts.append("Market regime score floor")
                     reason = " / ".join(reason_parts) or "Deterministic gate blocked entry"
+                    from prism_core.skip_reasons import decision_fields as _skip_fields
+                    state.setdefault("skip_detail", _skip_fields(
+                        ai_entry=analysis_result.get("decision") == "Enter", score_below_min=buy_score < min_score,
+                        gate=_buy_gate, cooldown=bool(_cd_block), regime_floor=bool(_regime_floor_block)))
 
                     logger.info(f"Purchase deferred: {company_name}({ticker}) - {reason}")
                     state["should_save_watchlist"] = True
@@ -4881,6 +4888,7 @@ class StockTrackingAgent:
                     scenario=scenario,
                     sector=analysis_result.get("sector", "Unknown"),
                     was_traded=False,
+                    skip_detail=state.get("skip_detail"),
                 )
 
             logger.info(f"Report processing complete - Strategy entries: {buy_count} stocks, Sold: {sell_count} stocks")

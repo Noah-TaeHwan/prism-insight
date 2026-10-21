@@ -1280,7 +1280,7 @@ class USStockTrackingAgent:
             from observability.trend_research import cache_snapshot
             cache_snapshot(self, ticker, df, locals().get("idf"), market="US", source="existing_adjusted_us_trend_frames")
             from observability.decision_inputs import capture_frame
-            capture_frame(self, ticker, df, market="US")
+            capture_frame(self, ticker, df, market="US", index_frame=locals().get("idf"))
 
             # 게이트 판정 (deterministic)
             # T1: 종가가 50일선(오닐 10주선) 아래 = 핵심 라인 이탈. 기울기 무관 —
@@ -2115,7 +2115,8 @@ class USStockTrackingAgent:
         skip_reason: str,
         scenario: Dict[str, Any],
         sector: str,
-        was_traded: bool = False
+        was_traded: bool = False,
+        skip_detail: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Save stocks not purchased to us_watchlist_history table and us_analysis_performance_tracker.
@@ -2245,6 +2246,8 @@ class USStockTrackingAgent:
                 stored_decision_context = scenario.get("_decision_context")
                 if isinstance(stored_decision_context, dict):
                     decision_context.update(stored_decision_context)
+                if isinstance(skip_detail, dict):   # stable skip codes + gate numbers (prism_core.skip_reasons)
+                    decision_context.update(skip_detail)
                 quality = getattr(self, '_screening_quality_contexts', {}).get(ticker)
                 if quality is not None:
                     decision_context['screening_quality_context'] = quality
@@ -4701,6 +4704,11 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                         if _cd_block:
                             reason_parts.append("Recent risk-exit re-entry cooldown")
                         reason = " / ".join(reason_parts) if reason_parts else "Other"
+                        from prism_core.skip_reasons import decision_fields as _skip_fields
+                        state.setdefault("skip_detail", _skip_fields(
+                            ai_entry=normalized_decision == "entry",
+                            score_below_min=adjusted_score < min_score and not rebound_pilot,
+                            sector_blocked=not sector_diverse, gate=_buy_gate, cooldown=bool(_cd_block)))
                         logger.info(f"Purchase deferred: {company_name} ({ticker}) - {reason}")
                         state["should_save_watchlist"] = True
                         state["skip_reason"] = state["skip_reason"] or reason
@@ -4732,7 +4740,8 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
                     skip_reason=stored_skip_reason(state["skip_reason"] or "Trade not executed", scenario),
                     scenario=scenario,
                     sector=analysis_result.get("sector", "Unknown"),
-                    was_traded=False
+                    was_traded=False,
+                    skip_detail=state.get("skip_detail"),
                 )
 
             logger.info(f"Report processing complete - Bought: {buy_count}, Sold: {sell_count}")

@@ -75,6 +75,8 @@ BULL_REGIMES = ("parabolic", "strong_bull", "moderate_bull")
 HORIZON = 60                # watch sessions after the anchor
 MAX_ATTEMPTS = 3
 PRIOR_HIGH_BARS = 60        # "prior 60-session high" resistance candidate (completed bars only)
+# Trigger result fields kept as evaluation details (why a signal missed), observation only.
+DETAIL_KEYS = ("rr", "rr_floor", "target", "stop", "target_unsupported", "volume_ratio")
 REBREAK_CHASE = 0.03        # R1C: price <= L*1.03
 RETEST_BAND = 0.03          # R2S: day low within L*(1 +/- 3%)
 RETEST_CHASE = 0.05         # R2S: price <= L*1.05
@@ -408,10 +410,12 @@ def evaluate(setup, *, bars, i, flags, price, day_low, regime, window=None, volu
            "policy": policy,
            "prev_close": bars[i - 1]["close"], "price": price, "day_low": day_low,
            "volume_projected": volume_projected, "regime": regime or "sideways"}
-    checks, fired = {}, None
+    checks, details, fired = {}, {}, None
     for trigger_id in (policy["window_triggers"] if window else policy["triggers"]):
         result = TRIGGERS[trigger_id]["fn"](ctx)
         checks[trigger_id] = result["reason"]
+        # Observation only: the numbers behind a miss (R/R vs floor, volume ratio) for the ledger.
+        details[trigger_id] = {k: result[k] for k in DETAIL_KEYS if result.get(k) is not None}
         if result["fired"] and fired is None:
             fired = dict(result, trigger=trigger_id, label=TRIGGERS[trigger_id]["label"])
     if fired is not None:
@@ -419,7 +423,8 @@ def evaluate(setup, *, bars, i, flags, price, day_low, regime, window=None, volu
             fired.update(_priced(ctx, fired["entry"], fired.get("stop"), fired.get("stop_rule")))
         fired.pop("fired", None)
         fired.pop("reason", None)
-    return {"trigger": fired, "checks": checks, "prev_close": ctx["prev_close"], "prior_high": prior_high(bars, i),
+    return {"trigger": fired, "checks": checks, "details": details, "prev_close": ctx["prev_close"],
+            "prior_high": prior_high(bars, i),
             "regime": ctx["regime"], "regime_missing": regime is None, "flags": dict(flags),
             "window": dict(window) if window else None}
 
@@ -450,10 +455,18 @@ def eligible(campaign, i, anchor, policy=None):
     return True, "ok"
 
 
+def _excursion(pos, bars, j, price):
+    """Max gain/loss while held: full bars before the exit day plus the exit price (the exit day's own
+    high/low cannot be ordered against the exit). Observation only."""
+    from prism_core.decision_snapshot import excursion
+    return excursion(bars[pos["_start"]:min(j, len(bars))], pos["entry"], price)
+
+
 def _close(pos, bars, j, price, reason, rule):
     ret = price / pos["entry"] - 1
     pos.update(status="CLOSED", exit_date=bars[j]["date"], exit_price=round(price, 6), exit_reason=reason,
-               exit_rule=rule, ret=round(ret, 6), bars_held=j - pos["_start"] + 1)
+               exit_rule=rule, ret=round(ret, 6), bars_held=j - pos["_start"] + 1,
+               **_excursion(pos, bars, j, price))
     if "alloc" in pos:
         pos["slot"] = round(pos["alloc"] * ret, 6)
 
@@ -481,7 +494,7 @@ def _exit_index(bars, exit_date):
     return next((k for k, b in enumerate(bars) if b["date"] >= exit_date), len(bars))
 
 
-def _close_real(campaign, exit_info, j):
+def _close_real(campaign, exit_info, j, bars):
     """Close the LIVE position's attempt with the real sale from trading_history (the sell logic decided).
 
     j is the session index of the sale (len(bars) when it happened after the last completed bar, e.g.
@@ -493,7 +506,7 @@ def _close_real(campaign, exit_info, j):
     reason = "stop" if exit_info.get("stop") else "real_exit"
     pos.update(status="CLOSED", exit_date=exit_info["date"], exit_price=round(price, 6), exit_reason=reason,
                exit_rule="REAL", real_exit_kind=exit_info.get("exit_kind"), ret=round(ret, 6),
-               slot=round(pos["alloc"] * ret, 6))
+               slot=round(pos["alloc"] * ret, 6), **_excursion(pos, bars, j, price))
     campaign["pnl_slot"] += pos["slot"]
     campaign["_pos"], campaign["_last_exit"], campaign["_last_stop"] = None, j, reason == "stop"
     if reason == "stop" and ret < 0:
@@ -512,7 +525,7 @@ def _step(campaign, bars, j):
         if pos.get("real"):                    # a real position: only its recorded sale closes it
             exit_info = (pos.get("live") or {}).get("exit")
             if exit_info and bars[j]["date"] >= exit_info["date"]:
-                _close_real(campaign, exit_info, j)
+                _close_real(campaign, exit_info, j, bars)
         elif j >= pos["_start"]:
             hit = EXIT_RULES[pos["exit_rule"]](bars, j, pos)
             if hit:
@@ -559,7 +572,7 @@ def _open(campaign, setup, bars, i, trigger, *, mode, decision, regime, pulse, s
     record["close_vs_decision_pct"] = round((bar["close"] / entry - 1) * 100, 4)
     exit_info = (record.get("live") or {}).get("exit")
     if record.get("real") and exit_info and exit_info["date"] <= bar["date"]:
-        _close_real(campaign, exit_info, i)        # sold on the entry day: closes on the entry bar
+        _close_real(campaign, exit_info, i, bars)        # sold on the entry day: closes on the entry bar
         return
     # An entry at the decision time still lives through the rest of the session: a new low after
     # the decision that reaches the stop exits on the entry day (the low so far was above the stop).
@@ -720,7 +733,7 @@ def replay(setup, bars, anchor, *, decisions=None, regime_at=None, pulse_at=None
         if camp["_pos"] is not None and camp["attempts"][camp["_pos"]].get("real"):
             exit_info = (camp["attempts"][camp["_pos"]].get("live") or {}).get("exit")
             if exit_info:
-                _close_real(camp, exit_info, _exit_index(bars, exit_info["date"]))
+                _close_real(camp, exit_info, _exit_index(bars, exit_info["date"]), bars)
     complete = a + policy["horizon"] <= n - 1
     upcoming = {}
     if last == n - 1 and not complete:
