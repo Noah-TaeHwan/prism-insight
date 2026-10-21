@@ -56,7 +56,8 @@ def _service(market: str, account_name: str):
 def _query_range(market: str, day: str) -> tuple[str, str]:
     if market == "KR":
         return day, day
-    # US orders are stamped by the broker in KST, which can be the next calendar day.
+    # Live rows (10/09, 10/14) carry the US session date with a KST order time; the next day stays in
+    # range so a row dated the KST calendar day is not missed (exact order-number match decides).
     nxt = (datetime.strptime(day, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
     return day, nxt
 
