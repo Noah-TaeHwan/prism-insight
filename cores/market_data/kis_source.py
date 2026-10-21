@@ -31,7 +31,7 @@ import logging
 import math
 import threading
 from datetime import datetime, time
-from time import monotonic
+from time import monotonic, sleep
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -128,6 +128,11 @@ _DATE_FIELD = "stck_bsop_date"
 # looping forever against an endpoint that has stopped moving backwards.
 _MAX_WINDOWS = 40
 
+# KIS's per-second quota is shared by every process on the app key and resets each
+# second, so a short wait answers it; anything else is refused at once.
+_RATE_LIMIT_CODE = "EGW00201"
+_RATE_LIMIT_WAITS = (0.5, 1.0)
+
 
 class KisSource:
     name = "kis"
@@ -159,18 +164,21 @@ class KisSource:
         return self._client
 
     def _fetch(self, api_url: str, tr_id: str, params: dict) -> object:
-        try:
-            response = self._trading()._request(api_url, tr_id, params)
-        except Unavailable:
-            raise
-        except Exception as exc:  # transport, auth, rate limit — all "not now"
-            raise Unavailable(f"KIS {tr_id} failed: {exc}") from exc
+        for wait in (*_RATE_LIMIT_WAITS, None):
+            try:
+                response = self._trading()._request(api_url, tr_id, params)
+            except Unavailable:
+                raise
+            except Exception as exc:  # transport, auth — all "not now"
+                raise Unavailable(f"KIS {tr_id} failed: {exc}") from exc
 
-        if not response or not response.isOK():
-            raise Unavailable(
-                f"KIS {tr_id} rejected the request: {self._error_detail(response)}"
-            )
-        return response.getBody()
+            if response and response.isOK():
+                return response.getBody()
+            detail = self._error_detail(response)
+            if wait is None or _RATE_LIMIT_CODE not in detail:
+                raise Unavailable(f"KIS {tr_id} rejected the request: {detail}")
+            logger.info("KIS %s rate-limited; retrying in %.1fs", tr_id, wait)
+            sleep(wait)
 
     @staticmethod
     def _error_detail(response) -> str:
