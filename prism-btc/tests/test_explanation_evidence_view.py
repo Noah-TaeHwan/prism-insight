@@ -1,8 +1,11 @@
 """The actual report consumer remains entirely outside trading authority."""
 from copy import deepcopy
 import json
+from pathlib import Path
+import sys
 
-from tools.btc_explanation_evidence import build_view, digest, render_markdown, view_event
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tools.btc_explanation_evidence import build_view, digest, render_markdown, view_event  # noqa: E402
 
 
 def event():
