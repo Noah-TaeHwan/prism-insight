@@ -276,6 +276,48 @@ def test_rejected_request_is_unavailable():
         _source(client).price_history("005930", "20260801", "20260803")
 
 
+_RATE_LIMITED = '{"rt_cd":"1","msg1":"초당 거래건수를 초과하였습니다.","msg_cd":"EGW00201"}'
+
+
+class _RateLimitedThenOk(_FakeClient):
+    def __init__(self, refusals, error=_RATE_LIMITED):
+        super().__init__([[_price_row("20260803")]])
+        self.refusals = refusals
+        self.error = error
+
+    def _request(self, api_url, tr_id, params):
+        if self.refusals:
+            self.refusals -= 1
+            self.calls.append(params)
+            return _Response([], ok=False, error=self.error)
+        return super()._request(api_url, tr_id, params)
+
+
+def test_rate_limit_is_retried(monkeypatch):
+    """2026-10-21: one per-second refusal dropped a stock from the afternoon screen."""
+    waits = []
+    monkeypatch.setattr("cores.market_data.kis_source.sleep", waits.append)
+    frame = _source(_RateLimitedThenOk(2)).price_history("005930", "20260803", "20260803")
+    assert frame.loc["2026-08-03", "Close"] == 1000
+    assert waits == [0.5, 1.0]
+
+
+def test_rate_limit_gives_up_after_retries(monkeypatch):
+    monkeypatch.setattr("cores.market_data.kis_source.sleep", lambda _s: None)
+    client = _RateLimitedThenOk(99)
+    with pytest.raises(Unavailable, match="EGW00201"):
+        _source(client).price_history("005930", "20260803", "20260803")
+    assert len(client.calls) == 3
+
+
+def test_other_refusal_is_not_retried(monkeypatch):
+    monkeypatch.setattr("cores.market_data.kis_source.sleep", lambda _s: pytest.fail("slept"))
+    client = _RateLimitedThenOk(99, error="조회할 자료가 없습니다")
+    with pytest.raises(Unavailable, match="rejected"):
+        _source(client).price_history("005930", "20260803", "20260803")
+    assert len(client.calls) == 1
+
+
 def test_blank_value_is_nan_not_zero():
     rows = [{**_price_row("20260803"), "stck_clpr": ""}]
     frame = _source(_FakeClient([rows])).price_history("005930", "20260803", "20260803")
