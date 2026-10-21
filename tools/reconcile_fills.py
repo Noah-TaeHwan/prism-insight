@@ -134,9 +134,10 @@ def main(argv=None) -> int:
     _bootstrap_path(args.market)
     try:
         from dotenv import load_dotenv
+    except ImportError:
+        logger.warning("[FILL_RECONCILE] python-dotenv unavailable; using the process environment")
+    else:
         load_dotenv(ROOT / ".env")
-    except Exception:  # noqa: BLE001
-        pass
     from observability.fill_reconciliation import MARKET_TZ, after_close
     day = args.date or datetime.now(MARKET_TZ[args.market]).strftime("%Y%m%d")
     if not args.dry_run and not after_close(args.market, day, datetime.now(timezone.utc)):
