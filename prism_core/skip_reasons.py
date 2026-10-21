@@ -52,7 +52,9 @@ def gate_numbers(gate):
     return out
 
 
-def decision_fields(**flags):
+def decision_fields(*, ai_entry, score_below_min=False, sector_blocked=False, gate=None, cooldown=False,
+                    regime_floor=False):
     """{skip_reason_codes, gate numbers} for a skip's decision_context."""
-    gate = flags.get("gate")
-    return {"skip_reason_codes": skip_codes(**flags), **gate_numbers(gate)}
+    codes = skip_codes(ai_entry=ai_entry, score_below_min=score_below_min, sector_blocked=sector_blocked, gate=gate,
+                       cooldown=cooldown, regime_floor=regime_floor)
+    return {"skip_reason_codes": codes, **gate_numbers(gate)}
