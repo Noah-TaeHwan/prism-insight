@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import uuid
@@ -33,9 +34,11 @@ _SENSITIVE_KEY_PARTS = (
     "password",
     "private_key",
     "secret",
-    "session",
     "token",
 )
+# Session identifiers are secrets; trading words that merely contain "session" (session_date,
+# stall_sessions, earliest_session) are not and were wiped until 2026-10-21.
+_SESSION_SECRET_KEYS = re.compile(r"^(j|php)?sess(ion)?_?(id|key)?$|sess(ion)?_?(id|key)$")
 
 _CONFIG_KEYS = (
     "ENTRY_QUALITY_CAPTURE_ENABLED",
@@ -82,7 +85,7 @@ def _normalize_hex_id(value: str | None, length: int) -> str:
 
 def _redacted_key(key: str) -> bool:
     lowered = key.lower()
-    return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
+    return any(part in lowered for part in _SENSITIVE_KEY_PARTS) or bool(_SESSION_SECRET_KEYS.search(lowered))
 
 
 def _sanitize(value: Any, *, key: str = "", depth: int = 0) -> Any:
