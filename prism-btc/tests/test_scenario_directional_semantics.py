@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # Deployed v1 policy preserved; structured-goal instructions are v2-only.
-    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "807979497ffd29fe97f57715bca0a9565156642fd19b5a5e87ca2de20b408316"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "5deed47582696aa4dedd565ebf93cfb5dc97ca3eca618bf3e52e09ea64dad2ff"
+    # 2026-10-22: approved flat-OPEN joint exit advisory; risk/holding rules unchanged.
+    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "bf8041c3fab337ac5f83802cb553debc3c0a860e73fadf1636a0dc9af4b5af98"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "05f3e690f5b5bc81b156a8274213db8604f3be156ca338a05afb501195c8d747"
