@@ -176,6 +176,12 @@ One `trace_id` reads a decision end to end. Read it with `tools/clickstack_query
   (`mode=reentry_v3_signal|reentry_v3_near_miss`). The weekly outcome pass emits
   `candidate.forward_outcome` (MFE/MAE over 5/10/20/30 sessions, `hit_50`, 7/14/30 returns,
   descriptors) on the same trace once the row is final.
+- **Pocket Pivot Base observation (2026-10-22, default off)**: with
+  `POCKET_PIVOT_TRIGGER_MODE=observe` the KR/US afternoon batches write every detector pass
+  (`prism_core/pocket_pivot.py`) as a candidate-ledger row, `mode=pocket_pivot_observe`,
+  `trigger_type="Pocket Pivot Base"`, `selected=0`, `trade_date` = the completed signal session
+  (features: pivots, structural stop, depth, dry-up, kind, rank; `earnings_within_5d` stays null).
+  The same block is in the trigger JSON as `metadata.pocket_pivot_observe`. It never feeds selection.
 - **Broker fill confirmation (2026-10-21)**: `tools/reconcile_fills.py --market KR|US`
   runs after the close. It reads each BUY in `order_intents`/`broker_orders` for that
   market-local day (read-only), queries the sending account's daily executions (KR

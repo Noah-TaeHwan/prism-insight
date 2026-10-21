@@ -1744,6 +1744,37 @@ def _load_screening_inputs(trade_date):
     return tickers, current.loc[kept].copy(), previous.loc[kept].copy(), date, diagnostic
 
 
+def _pocket_pivot_observe(trade_date, prev_date, snapshot, prev_snapshot, universe_diagnostic,
+                          market_regime):
+    """Observe the "Pocket Pivot Base" trigger (POCKET_PIVOT_TRIGGER_MODE=observe, default off).
+
+    Uses the batch's eligible universe (listed_common: >= $1B cap and >= $50M value already
+    applied) and the same $50M floor on the signal day. Before the 16:00 ET close the signal day is
+    the previous completed session. Results go to JSON metadata and the candidate ledger only,
+    never to selection. Fail-open: any error returns None and leaves the batch unchanged.
+    """
+    try:
+        from prism_core import pocket_pivot_trigger as ppt
+        if ppt.resolve_mode(logger) != "observe":
+            return None
+        complete = ppt.session_complete("US", trade_date)
+        universe = ppt.observe_universe(snapshot, prev_snapshot, complete=complete,
+                                        min_amount=MIN_TRADING_VALUE)
+        return ppt.run_observe(
+            market="US", batch_trade_date=trade_date,
+            signal_date=trade_date if complete else prev_date,
+            universe=universe, fetch_history=get_multi_day_ohlcv,
+            universe_basis={"session_complete": complete, "up_day_prefilter": complete,
+                            "min_trading_value_usd": MIN_TRADING_VALUE,
+                            "min_market_cap_usd": (universe_diagnostic or {}).get('min_market_cap_usd'),
+                            "market_cap_basis": ("batch_universe_eligibility" if universe_diagnostic
+                                                 else "not_checked_major_indices")},
+            market_regime=market_regime, log=logger)
+    except Exception as exc:  # noqa: BLE001 - observation must never change the batch
+        logger.warning("[POCKET-PIVOT] observe unavailable: %s", type(exc).__name__)
+        return None
+
+
 def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = None, macro_context: dict = None, override_date: str = None, watch_batch_ref: str = None):
     """
     Execute trigger batch.
@@ -1988,6 +2019,12 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
     except Exception as exc:  # noqa: BLE001 - observation must not stop screening
         logger.warning("Candidate ledger unavailable: %s", type(exc).__name__)
 
+    # Observation only (default off): never enters final_results or selection.
+    pocket_pivot_block = (
+        _pocket_pivot_observe(trade_date, prev_date, snapshot, prev_snapshot, universe_diagnostic,
+                              (macro_context or {}).get("market_regime"))
+        if trigger_time == "afternoon" else None)
+
     # Research observes a copy boundary, never modifies ranking, JSON or BUY inputs.
     if watch_batch_ref:
         try:
@@ -2100,6 +2137,7 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
             "market_cap_lookup_coverage": cap_lookup_coverage,
             "trigger_quality": {**quality_snapshot.to_metadata(),
                                 **({"selection": selection_record} if selection_record else {})},
+            **({"pocket_pivot_observe": pocket_pivot_block} if pocket_pivot_block else {}),
         }
 
         with open(output_file, 'w', encoding='utf-8') as f:
