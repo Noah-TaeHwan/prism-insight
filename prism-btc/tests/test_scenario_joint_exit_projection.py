@@ -7,6 +7,51 @@ from live.scenario_calculated_review import _gross_projection, calculate_candida
 from tests.test_scenario_calculated_review import context, wire
 
 
+def test_north_star_framing_is_optional_structural_not_profit_or_stop_pressure():
+    from live.scenario_calculated_review import DRAFT_PROMPT, SELECT_PROMPT
+    assert 'normal thesis-preserving fluctuations' in DRAFT_PROMPT
+    assert 'rounding dust an intentional runner' in DRAFT_PROMPT
+    assert 'without a fixed stop width or exit percentage' in DRAFT_PROMPT
+    assert 'remaining quantity at hard SL as a stress test, NOT the' in SELECT_PROMPT
+    assert 'an unpriced protected remainder has no invented profit' in SELECT_PROMPT
+    assert 'No partial SL, full TP or no fixed TP can each be' in SELECT_PROMPT
+    assert 'never force a runner or a partial stop' in SELECT_PROMPT
+    assert 'not hidden reasoning' in SELECT_PROMPT
+    assert all(label in SELECT_PROMPT for label in ('계획:', '경로:', '연장:'))
+
+
+@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
+@pytest.mark.parametrize('tp_fraction', [None, .5, 1])
+def test_no_partial_stop_full_tp_and_unpriced_runner_remain_valid_without_risk_credit(side, tp_fraction):
+    ctx = context()
+    raw = wire(ctx, side)
+    if tp_fraction is None:
+        raw['take_profits'] = []
+    else:
+        raw['take_profits'][0]['fraction'] = tp_fraction
+    before = deepcopy(raw)
+    receipt = calculate_candidate(raw, ctx, candidate_id='c0')
+    assert receipt['eligible']
+    assert receipt['raw_proposal'] == raw == before
+    projection = receipt['projection']
+    expected_remainder = .01 * (1 - (tp_fraction or 0))
+    assert paths(projection)['TP_THEN_HARD_SL']['remaining_before_hard_stop'] == pytest.approx(expected_remainder)
+    assert paths(projection)['PARTIAL_SL_THEN_HARD_SL']['gross_pnl'] == projection['gross_at_full_stop']
+    assert projection['actual_net_pnl'] is None
+    baseline = calculate_candidate(wire(ctx, side), ctx, candidate_id='c0')
+    assert receipt['raw_risk'] == baseline['raw_risk']
+    assert receipt['effective_per_entry_risk'] == baseline['effective_per_entry_risk']
+
+
+def test_comparison_labels_are_not_new_selection_fields_or_execution_gate():
+    from tests.test_scenario_calculated_review import run
+    result, _, calls = run()
+    assert set(calls[1]['response_schema']['properties']) == {'selection_token', 'rationale'}
+    assert result['selection']['selection'] == 'c0'
+    assert result['selection']['rationale'] == '계산과 추세 검토 후 선택'
+    assert set(result['selection']) == {'selection', 'receipt_sha256', 'rationale'}
+
+
 def fixture(side='LONG'):
     ctx = context()
     ctx.update(quantity_step=.1, minimum_quantity=.1, now=1000)

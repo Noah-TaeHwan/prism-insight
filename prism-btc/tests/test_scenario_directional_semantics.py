@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # 2026-10-22: approved flat-OPEN joint exit advisory; risk/holding rules unchanged.
-    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "bf8041c3fab337ac5f83802cb553debc3c0a860e73fadf1636a0dc9af4b5af98"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "05f3e690f5b5bc81b156a8274213db8604f3be156ca338a05afb501195c8d747"
+    # 2026-10-22 v2: observable joint-path/upside comparison, no new execution gate.
+    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "95b941506d6b73138252036eefbb20f1fb96f51ed85177dc5add2d33cd1249d7"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "b07fcc4efba30c1e66fad528b0c77bc2afe4889e323e73e327d7a522c9a1279e"

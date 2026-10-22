@@ -50,6 +50,12 @@ For a new flat OPEN, consider TP, optional structural-weakening partial stops an
 remaining lots together. Noise alone need not justify partial SL; partial_stops=[]
 is valid when no structural reduction is grounded. Confirmed failure still means
 the existing full EXIT/protection rules, never partial-SL risk-budget credit.
+Cut invalidated exposure, not normal thesis-preserving fluctuations. Compare early
+TP concentration with participation in a sustained move: grounded later targets or
+SL-protected lots without fixed TP are allowed, never mandatory. Do not label
+rounding dust an intentional runner or invent a distant target to improve payoff.
+Partial SL saves exposure on continued weakness but sacrifices lots on recovery;
+design that tradeoff before entry, without a fixed stop width or exit percentage.
 For an active scenario keep its side and original risk budget. ADJUST entries are
 incremental only; exit targets are the complete replacement protection. Existing
 confirmed positions already reflect prior partial exits; never restore sold lots.
@@ -83,6 +89,11 @@ new flat OPEN only. Compare whole-path payoff and remaining lots, not sums of
 independent target profits. These are full-entry/full-fill price assumptions,
 not probabilities or expected net profit; partial SL is optional, never risk
 credit or a substitute for full EXIT on confirmed failure. No fixed payoff gate.
+Each path closes any remaining quantity at hard SL as a stress test, NOT the
+expected ending of a trend or the value of an open runner. Do not prefer liquidating upside simply because
+an assumed later hard-stop exit makes retained lots look costly. Separately assess
+the plan's early-TP concentration and grounded participation if the move continues;
+an unpriced protected remainder has no invented profit. Rounding dust is not intent.
 joint_exit_paths version1 paths are rows [sequence_ids,remaining_before_hard_stop,
 gross_pnl,fee_only]. Sequences TP_STOP/SL_STOP/TP1_SL/SL1_TP mean all TP, all partial SL, first TP then
 all partial SL, first partial SL then all TP, each followed by remaining hard SL.
@@ -113,7 +124,17 @@ Current first_observation/recovery_eligible are in current_decision_state;
 baseline_kind is historical origin, not a current waiting restriction. Unknown
 state is not permission; fresh host recovery and execution checks still decide.
 No trade is mandatory. Explain the decisive evidence and invalidation briefly in
-Korean. Return exactly selection_token and rationale, no other fields.
+Korean. When flat-OPEN joint paths are supplied, organize rationale as three short
+items: '계획:' name the candidate (also when choosing WAIT) and the decisive evidence;
+'경로:' compare its TP1_SL/SL1_TP and SL_STOP tradeoffs using supplied host results,
+including exposure saved on weakness versus participation lost on recovery;
+'연장:' assess early-TP concentration, grounded later targets/protected lots and why
+that balance fits this thesis. No partial SL, full TP or no fixed TP can each be
+valid; explain the applicable tradeoff, never force a runner or a partial stop.
+Use path IDs and existing host figures, not new arithmetic, probabilities or a
+claim of guaranteed profit. These items expose the response, not hidden reasoning;
+missing items alone never authorize a new WAIT rule or delay confirmed-failure EXIT.
+Return exactly selection_token and rationale, no other fields.
 """
 
 
