@@ -169,3 +169,89 @@ def test_load_inputs_prices_only_the_shortlist(monkeypatch):
     participation = diagnostic["market_participation"]
     assert participation["universe_count"] == 2              # AAA + CCC listed on KIS, not only priced names
     assert participation["advance"] == 2
+
+
+# --- previous-session fallback (2026-10-22: yfinance dropped the 10/21 bar for 581/583 names) ---
+
+class FakeDaily:
+    def __init__(self, bars, fail=()):
+        # bars: {symbol: [(xymd, open, high, low, close, volume), ...]}
+        self.bars, self.fail, self.calls = bars, set(fail), []
+
+    def __call__(self, url, tr_id, params):
+        assert url == screen_mod.DAILY_URL and tr_id == screen_mod.DAILY_TR_ID
+        assert params["GUBN"] == "0" and params["MODP"] == "1"
+        self.calls.append(dict(params))
+        if params["SYMB"] in self.fail:
+            return SimpleNamespace(isOK=lambda: False, getErrorCode=lambda: "EGW00201")
+        page = [{"xymd": d, "open": str(o), "high": str(h), "low": str(lo), "clos": str(c), "tvol": str(v)}
+                for d, o, h, lo, c, v in self.bars.get(params["SYMB"], [])]
+        return SimpleNamespace(isOK=lambda: True, getBody=lambda: SimpleNamespace(output2=page))
+
+
+def test_exact_daily_bars_accept_only_the_requested_session():
+    fake = FakeDaily({
+        "AAPL": [("20261021", 339.36, 345.25, 338.83, 343.99, 35614126),
+                 ("20261020", 339.86, 343.06, 338.7, 339.5, 35851382)],
+        "OLD": [("20261020", 10, 11, 9, 10.5, 1000)],          # target session absent
+        "BAD": [("20261021", 10, 11, 9, "", 1000)],             # blank close
+    }, fail=("ERR",))
+    frame, diag = screen_mod.fetch_exact_daily_bars(
+        fake, {"AAPL": "NAS", "OLD": "NYS", "BAD": "NYS", "ERR": "NAS", "BRK-B": "NYS"},
+        "20261021", pause_seconds=0)
+    assert list(frame.index) == ["AAPL"]
+    assert frame.loc["AAPL", "Close"] == 343.99 and frame.loc["AAPL", "Volume"] == 35614126
+    assert frame.loc["AAPL", "Amount"] == pytest.approx(343.99 * 35614126)
+    assert diag["reason_counts"] == {"missing_exact_date": 1, "invalid_ohlcv": 1,
+                                     "request_failed": 1, "unsupported_symbol": 1}
+    assert [c["EXCD"] for c in fake.calls] == ["NAS", "NYS", "NYS", "NAS"]
+
+
+def test_exact_daily_bars_stop_after_consecutive_failures():
+    fake = FakeDaily({}, fail=("A", "B", "C"))
+    frame, diag = screen_mod.fetch_exact_daily_bars(
+        fake, {s: "NAS" for s in ("A", "B", "C", "D", "E")}, "20261021",
+        pause_seconds=0, failure_stop=3)
+    assert frame.empty and len(fake.calls) == 3
+    assert diag["stop_reason"] == "failure_stop"
+    assert diag["reason_counts"] == {"request_failed": 3, "failure_stop": 2}
+
+
+def _snap(tickers, close=10.0):
+    return pd.DataFrame({"Open": close, "High": close, "Low": close, "Close": close,
+                         "Volume": 1e7, "Amount": close * 1e7}, index=list(tickers))
+
+
+def test_previous_fallback_fills_only_missing_names_and_updates_coverage(monkeypatch):
+    batch = _batch()
+    monkeypatch.delenv("US_SNAPSHOT_KIS_DAILY_FALLBACK", raising=False)
+    current = _snap(["AAA", "BBB", "CCC"])
+    previous = _snap(["AAA"], close=9.0)
+    previous.attrs["snapshot_coverage"] = {"requested_count": 3, "valid_count": 1,
+                                           "missing_count": 2, "status": "PARTIAL",
+                                           "reason_counts": {"missing_exact_date": 2}}
+    screen = pd.DataFrame({"KisExchange": ["NAS", "NYS", "NAS"]}, index=["AAA", "BBB", "CCC"])
+    fake = FakeDaily({"BBB": [("20261021", 8, 9, 7, 8.5, 2000)]})
+    with patch.object(batch, "_kis_request", return_value=fake):
+        filled, diag = batch._fill_previous_from_kis("20261021", ["AAA", "BBB", "CCC"],
+                                                     current, previous, screen)
+    assert [c["SYMB"] for c in fake.calls] == ["BBB", "CCC"]     # AAA already had a provider bar
+    assert sorted(filled.index) == ["AAA", "BBB"]
+    assert filled.loc["AAA", "Close"] == 9.0 and filled.loc["BBB", "Close"] == 8.5
+    coverage = filled.attrs["snapshot_coverage"]
+    assert coverage["valid_count"] == 2 and coverage["missing_count"] == 1
+    assert coverage["kis_daily_fallback_count"] == 1
+    assert coverage["reason_counts"] == {"missing_exact_date": 2}  # provider reasons kept
+    assert diag["status"] == "USED" and diag["filled_count"] == 1
+
+
+def test_previous_fallback_is_skipped_without_exchange_map_or_when_disabled(monkeypatch):
+    batch = _batch()
+    current, previous = _snap(["AAA"]), _snap([])
+    with patch.object(batch, "_kis_request", side_effect=AssertionError("no KIS call")):
+        assert batch._fill_previous_from_kis("20261021", ["AAA"], current, previous, None)[1] == \
+            {"status": "NO_EXCHANGE_MAP"}
+        monkeypatch.setenv("US_SNAPSHOT_KIS_DAILY_FALLBACK", "false")
+        screen = pd.DataFrame({"KisExchange": ["NAS"]}, index=["AAA"])
+        assert batch._fill_previous_from_kis("20261021", ["AAA"], current, previous, screen)[1] == \
+            {"status": "DISABLED"}

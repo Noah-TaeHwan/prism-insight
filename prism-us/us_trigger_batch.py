@@ -47,7 +47,7 @@ from cores.us_surge_detector import (
     enhance_dataframe,
 )
 from cores.rs_rating import oneil_weighted_return, percentile_ratings
-from cores.kis_us_market_screen import fetch_market_screen
+from cores.kis_us_market_screen import fetch_exact_daily_bars, fetch_market_screen
 from prism_core.screening_price_evidence import build_screening_price_evidence
 from prism_core.ohlcv_shape import normalize_single_ticker_ohlcv
 from prism_core import trigger_quality
@@ -1609,6 +1609,47 @@ def _kis_price_shortlist(tickers, minimum):
     return shortlist, screen, diagnostic
 
 
+def _fill_previous_from_kis(previous_date, tickers, current, previous, screen):
+    """Fill previous-session bars the free provider left out with KIS daily prices.
+
+    yfinance can drop a completed session for most symbols (2026-10-22: the
+    10/21 bar was missing for 581/583 names). Only exact-date KIS bars are
+    added; symbols KIS cannot confirm stay missing. Returns
+    ``(previous, diagnostic)``.
+    """
+    if os.getenv('US_SNAPSHOT_KIS_DAILY_FALLBACK', 'true').lower() != 'true':
+        return previous, {'status': 'DISABLED'}
+    if screen is None or 'KisExchange' not in screen:
+        return previous, {'status': 'NO_EXCHANGE_MAP'}
+    missing = [ticker for ticker in tickers
+               if ticker in current.index and ticker not in previous.index
+               and ticker in screen.index]
+    if not missing:
+        return previous, {'status': 'NOT_NEEDED'}
+    # Most liquid names first, so a budget stop can only drop the thinnest ones.
+    missing.sort(key=lambda ticker: -float(current.at[ticker, 'Amount']))
+    try:
+        bars, diagnostic = fetch_exact_daily_bars(
+            _kis_request(), {ticker: screen.at[ticker, 'KisExchange'] for ticker in missing},
+            previous_date)
+    except Exception as exc:
+        logger.warning('KIS previous-bar fallback unavailable: %s', type(exc).__name__)
+        return previous, {'status': 'UNAVAILABLE', 'error_type': type(exc).__name__,
+                          'requested_count': len(missing)}
+    diagnostic['status'] = 'USED' if not bars.empty else 'EMPTY'
+    if bars.empty:
+        return previous, diagnostic
+    attrs = dict(previous.attrs.get('snapshot_coverage', {}))
+    filled = pd.concat([previous, bars.reindex(columns=previous.columns)]) if not previous.empty \
+        else bars
+    count = attrs.get('requested_count', len(tickers))
+    attrs.update({'valid_count': len(filled), 'missing_count': count - len(filled),
+                  'status': ('COMPLETE' if count and len(filled) >= count else 'PARTIAL'),
+                  'kis_daily_fallback_count': len(bars)})
+    filled.attrs['snapshot_coverage'] = attrs
+    return filled, diagnostic
+
+
 def _load_screening_inputs(trade_date):
     """Apply one common-stock/cap/liquidity boundary before every US trigger."""
     mode = os.getenv('US_SCREENING_UNIVERSE', DEFAULT_US_SCREENING_UNIVERSE)
@@ -1640,6 +1681,8 @@ def _load_screening_inputs(trade_date):
     if shortlist is not None:
         tickers = shortlist
     current, previous, date, collection = get_batched_snapshot_pair(trade_date, tickers)
+    previous, previous_fallback = _fill_previous_from_kis(date, tickers, current, previous, screen)
+    collection = {**collection, 'previous_kis_fallback': previous_fallback}
     from prism_core.batch_run_status import snapshot_coverage
     raw_coverage = snapshot_coverage(current, previous, tickers, trade_date, date)
     from prism_core.market_intelligence import optional_participation
