@@ -35,8 +35,9 @@ def test_no_partial_stop_full_tp_and_unpriced_runner_remain_valid_without_risk_c
     assert receipt['raw_proposal'] == raw == before
     projection = receipt['projection']
     expected_remainder = .01 * (1 - (tp_fraction or 0))
-    assert paths(projection)['TP_THEN_HARD_SL']['remaining_before_hard_stop'] == pytest.approx(expected_remainder)
-    assert paths(projection)['PARTIAL_SL_THEN_HARD_SL']['gross_pnl'] == projection['gross_at_full_stop']
+    path_name = 'TP_THEN_HARD_SL' if tp_fraction is not None else 'HARD_SL_ONLY'
+    assert paths(projection)[path_name]['remaining_before_hard_stop'] == pytest.approx(expected_remainder)
+    assert paths(projection)['HARD_SL_ONLY']['gross_pnl'] == projection['gross_at_full_stop']
     assert projection['actual_net_pnl'] is None
     baseline = calculate_candidate(wire(ctx, side), ctx, candidate_id='c0')
     assert receipt['raw_risk'] == baseline['raw_risk']
@@ -62,10 +63,44 @@ def fixture(side='LONG'):
     return plan, ctx
 
 
+@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
+@pytest.mark.parametrize('case,expected', [
+    ('no_sl', {'TP_STOP', 'TP1_STOP', 'STOP'}),
+    ('no_tp', {'SL_STOP', 'SL1_STOP', 'STOP'}),
+    ('neither', {'STOP'}),
+    ('full_tp', {'TP_STOP', 'TP1_STOP', 'SL_STOP', 'SL1_TP'}),
+    ('full_sl', {'TP_STOP', 'SL_STOP', 'SL1_STOP', 'TP1_SL'}),
+    ('subminimum_sl_after_tp', {'TP_STOP', 'TP1_STOP', 'SL_STOP', 'SL1_TP'}),
+    ('subminimum_initial_sl', {'TP_STOP', 'TP1_STOP', 'STOP'}),
+])
+def test_only_actually_applied_leg_types_are_named(side, case, expected):
+    plan, ctx = fixture(side)
+    if case in {'no_sl', 'neither'}:
+        plan['partial_stops'] = []
+    if case in {'no_tp', 'neither'}:
+        plan['take_profits'] = []
+    if case == 'full_tp':
+        plan['take_profits'][0]['fraction'] = 1
+    if case == 'full_sl':
+        plan['partial_stops'][0]['fraction'] = 1
+    if case == 'subminimum_sl_after_tp':
+        ctx['minimum_quantity'] = .2
+        plan['take_profits'][0]['fraction'] = .9
+    if case == 'subminimum_initial_sl':
+        plan['partial_stops'][0]['fraction'] = .05
+    joint = _gross_projection(plan, ctx)['joint_exit_paths']
+    actual = [name for row in joint['paths'] for name in row[0]]
+    assert set(actual) == expected
+    assert len(actual) == len(set(actual))
+    assert joint['version'] == 2
+
+
 def paths(projection):
     result = projection['joint_exit_paths']
     names = dict(TP_STOP='TP_THEN_HARD_SL', SL_STOP='PARTIAL_SL_THEN_HARD_SL',
-                 TP1_SL='FIRST_TP_THEN_PARTIAL_SL', SL1_TP='FIRST_PARTIAL_SL_THEN_TP')
+                 TP1_SL='FIRST_TP_THEN_PARTIAL_SL', SL1_TP='FIRST_PARTIAL_SL_THEN_TP',
+                 TP1_STOP='FIRST_TP_THEN_HARD_SL', SL1_STOP='FIRST_PARTIAL_SL_THEN_HARD_SL',
+                 STOP='HARD_SL_ONLY')
     expanded = {}
     for sequences, residual, gross, fee in result['paths']:
         path = dict(remaining_before_hard_stop=residual, gross_pnl=gross,
@@ -124,11 +159,11 @@ def test_minimum_dust_and_full_close_respect_existing_target_quantities():
     plan['take_profits'] = [dict(id='dust', price=110, fraction=.15), dict(id='rest', price=120, fraction=.9)]
     p = paths(_gross_projection(plan, ctx))
     assert p['TP_THEN_HARD_SL']['gross_pnl'] == 16
-    assert p['FIRST_TP_THEN_PARTIAL_SL']['gross_pnl'] == 16
+    assert p['FIRST_TP_THEN_HARD_SL']['gross_pnl'] == 16
     plan['take_profits'] = [dict(id='all', price=120, fraction=1)]
     p = paths(_gross_projection(plan, ctx))
-    assert p['FIRST_TP_THEN_PARTIAL_SL']['gross_pnl'] == 20
-    assert p['FIRST_TP_THEN_PARTIAL_SL']['remaining_before_hard_stop'] == 0
+    assert p['FIRST_TP_THEN_HARD_SL']['gross_pnl'] == 20
+    assert p['FIRST_TP_THEN_HARD_SL']['remaining_before_hard_stop'] == 0
 
 
 @pytest.mark.parametrize('evidence', ['missing', 'valid', 'stale'])
@@ -154,7 +189,7 @@ def test_fee_all_entry_quantity_charged_once_or_entire_path_unknown(evidence):
         assert path['fee_only']['assumed_exit_fee'] == pytest.approx(.108)
         assert path['fee_only']['estimated_net_before_unmodelled_costs'] == pytest.approx(7.792)
     from live.scenario_calculated_review import SELECT_PROMPT
-    assert result['version'] == 1
+    assert result['version'] == 2
     assert 'remain UNKNOWN/unmodelled, never zero' in SELECT_PROMPT
 
 
@@ -207,8 +242,8 @@ def test_equal_price_stable_order_and_subminimum_crossed_residual():
     plan['take_profits'] = [dict(id='$hard_stop', price=120, fraction=.9)]
     plan['partial_stops'] = [dict(id='first', price=90, fraction=.3), dict(id='second', price=90, fraction=.3)]
     p = paths(_gross_projection(plan, ctx))
-    assert p['FIRST_TP_THEN_PARTIAL_SL']['gross_pnl'] == 16
-    assert p['FIRST_TP_THEN_PARTIAL_SL']['remaining_before_hard_stop'] == .1
+    assert p['FIRST_TP_THEN_HARD_SL']['gross_pnl'] == 16
+    assert p['FIRST_TP_THEN_HARD_SL']['remaining_before_hard_stop'] == .1
     assert p['PARTIAL_SL_THEN_HARD_SL']['gross_pnl'] == -14
     assert p['PARTIAL_SL_THEN_HARD_SL']['remaining_before_hard_stop'] == .4
 

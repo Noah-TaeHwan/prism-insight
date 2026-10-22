@@ -94,9 +94,12 @@ expected ending of a trend or the value of an open runner. Do not prefer liquida
 an assumed later hard-stop exit makes retained lots look costly. Separately assess
 the plan's early-TP concentration and grounded participation if the move continues;
 an unpriced protected remainder has no invented profit. Rounding dust is not intent.
-joint_exit_paths version1 paths are rows [sequence_ids,remaining_before_hard_stop,
-gross_pnl,fee_only]. Sequences TP_STOP/SL_STOP/TP1_SL/SL1_TP mean all TP, all partial SL, first TP then
-all partial SL, first partial SL then all TP, each followed by remaining hard SL.
+joint_exit_paths version2 paths are rows [sequence_ids,remaining_before_hard_stop,
+gross_pnl,fee_only]. TP_STOP/SL_STOP mean applied TP/partial-SL legs;
+TP1_STOP/SL1_STOP mean only the first TP/partial-SL leg; STOP means hard SL alone.
+TP1_SL/SL1_TP mean first TP then partial SL / first partial SL then TP; both kinds
+actually apply. All paths close any remainder at hard SL. Compare only displayed
+paths: omitted/zero/subminimum/capped-out legs are NOT part of their names.
 Original projection.quantity and targets supply all quantities/prices for these
 sequences; no independent leg profits are added to path gross. Targets retain their
 initial revision quota (not a fraction of each new remainder), sorted by price
@@ -126,8 +129,9 @@ state is not permission; fresh host recovery and execution checks still decide.
 No trade is mandatory. Explain the decisive evidence and invalidation briefly in
 Korean. When flat-OPEN joint paths are supplied, organize rationale as three short
 items: '계획:' name the candidate (also when choosing WAIT) and the decisive evidence;
-'경로:' compare its TP1_SL/SL1_TP and SL_STOP tradeoffs using supplied host results,
-including exposure saved on weakness versus participation lost on recovery;
+'경로:' compare its displayed paths using supplied host results. Only if partial-SL
+legs actually apply, compare exposure saved on weakness versus participation lost
+on recovery; otherwise explain the no-reduction tradeoff, never invent a partial SL;
 '연장:' assess early-TP concentration, grounded later targets/protected lots and why
 that balance fits this thesis. No partial SL, full TP or no fixed TP can each be
 valid; explain the applicable tradeoff, never force a runner or a partial stop.
@@ -165,6 +169,7 @@ def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
     paths = []
     for sequence_id, ordered in sequences:
         remaining, gross, legs, fee_legs = quantity, Decimal(0), [], []
+        applied_kinds = set()
         for target in ordered:
             qty = min(remaining, _decimal(target['quantity']))
             if qty <= 0 or qty < minimum:
@@ -172,7 +177,15 @@ def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
             remaining -= qty
             gross += sign * (_decimal(target['price']) - basis) * qty
             legs.append([target['id'], float(qty)])
+            applied_kinds.add(target['kind'])
             fee_legs.append(fees(target['price'], qty))
+        # Name only legs that survive quantity caps/minimums, not the template.
+        if not applied_kinds:
+            sequence_id = 'STOP'
+        elif applied_kinds == {'take_profits'}:
+            sequence_id = 'TP1_STOP' if sequence_id == 'TP1_SL' else 'TP_STOP'
+        elif applied_kinds == {'partial_stops'}:
+            sequence_id = 'SL1_STOP' if sequence_id == 'SL1_TP' else 'SL_STOP'
         residual = remaining
         if remaining > 0:
             gross += sign * (_decimal(plan['hard_stop']) - basis) * remaining
@@ -180,7 +193,8 @@ def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
             fee_legs.append(fees(plan['hard_stop'], remaining))
         existing = next((p for p in paths if p[1] == legs), None)
         if existing is not None:
-            existing[0].append(sequence_id)
+            if sequence_id not in existing[0]:
+                existing[0].append(sequence_id)
             continue
         fee_view = None
         if fee_legs and all(f.get('status') == 'AVAILABLE' for f in fee_legs):
@@ -189,7 +203,7 @@ def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
         paths.append([[sequence_id], legs, float(residual), float(gross), fee_view])
     # The versioned column/sequence meanings live once in SELECT_PROMPT, not
     # repeated per candidate/path in the size-limited user payload.
-    return dict(version=1, paths=[[path[0], *path[2:]] for path in paths])
+    return dict(version=2, paths=[[path[0], *path[2:]] for path in paths])
 
 
 def _gross_projection(plan, context, *, lots=None,

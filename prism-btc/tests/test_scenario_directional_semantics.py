@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # 2026-10-22 v2: observable joint-path/upside comparison, no new execution gate.
+    # 2026-10-22 v3: compare only actually applied path legs; no new execution gate.
     assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "95b941506d6b73138252036eefbb20f1fb96f51ed85177dc5add2d33cd1249d7"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "b07fcc4efba30c1e66fad528b0c77bc2afe4889e323e73e327d7a522c9a1279e"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "81cdf44f851ea78965622920d55a0cecb8a771dc1d0233b399711b3c6f3200e3"
