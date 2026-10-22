@@ -18,6 +18,7 @@ def _job(key):
 
 def _setup(tmp_path, monkeypatch):
     monkeypatch.setattr(W, "ROOT", tmp_path)
+    monkeypatch.setattr(W, "_journalctl", lambda unit, cursor: None)    # hermetic: no journal on the test host
     (tmp_path / "logs").mkdir()
     return tmp_path / "runtime" / "state.json"
 
@@ -41,11 +42,18 @@ def test_heartbeats_and_failure_strings_exist_in_the_job_sources():
                                           "[REENTRY_V3_LIVE][%s] executor failed"],
         "observability/reentry_v3_shadow.py": ['"live_results"', '"phase": phase'],
         "prism_core/sell_facts.py": ["[sell_facts]"],
+        "tools/run_b3_ae_shadow.py": ['contract="b3-ae-worker-v1"', "print(json.dumps(result, sort_keys=True"],
+        "prism_core/b3_ae_worker.py": ['contract="b3-ae-worker-v1"'],
+        "deploy/systemd/prism-b3-ae-shadow@.service": ["tools/run_b3_ae_shadow.py --market %i"],
     }
     for path, needles in sources.items():
         text = (ROOT / path).read_text(encoding="utf-8")
         for needle in needles:
             assert needle in text, (path, needle)
+    # The worker's printed tick line carries the pinned heartbeat (json.dumps default separators).
+    assert W.B3_CONTRACT in json.dumps(dict(contract="b3-ae-worker-v1", market="KR", rows=[]), sort_keys=True)
+    assert {job.unit for job in W.JOBS if job.unit} == {"prism-b3-ae-shadow@kr.service",
+                                                         "prism-b3-ae-shadow@us.service"}
 
 
 def test_scan_finds_order_failures_tracebacks_and_skips_logging_slips():
@@ -147,7 +155,7 @@ def test_daily_reentry_deadline_and_morning_summary(tmp_path, monkeypatch):
     state = _setup(tmp_path, monkeypatch)
     monkeypatch.setattr(W, "_is_session", lambda market, day: day.weekday() < 5)
     for job in W.JOBS:
-        if "{date}" not in job.log:
+        if job.log and "{date}" not in job.log:
             _write(tmp_path, job.log, "", "w")
     sent = []
     send = lambda m: sent.append(m) or True  # noqa: E731
@@ -192,8 +200,141 @@ def test_switch_off_and_cron_safety(monkeypatch, capsys):
     assert W.main([]) == 1                                                 # reported, never raised
 
 
+def test_kr_morning_batch_log_is_scanned(tmp_path, monkeypatch):
+    job = _job("kr_morning")
+    assert job.log == "logs/stock_analysis_morning.log" and job.market == "KR" and not job.heartbeat
+    state = _setup(tmp_path, monkeypatch)
+    _write(tmp_path, job.log, "", "w")
+    sent = []
+    send = lambda m: sent.append(m) or True  # noqa: E731
+    W.run(datetime(2026, 10, 23, 7, 0, tzinfo=KST), state_path=state, sender=send, jobs=(job,))
+    _write(tmp_path, job.log, "2026-10-23 07:31:00,000 - x - CRITICAL - database is locked\n")
+    W.run(datetime(2026, 10, 23, 7, 35, tzinfo=KST), state_path=state, sender=send, jobs=(job,))
+    assert len(sent) == 1 and "분석·매매 배치(한국) — 심각 오류 1건" in sent[0]
+    assert "로그: logs/stock_analysis_morning.log" in sent[0]
+
+
+def _tick(market="KR", status="COMPLETED", rows=()):
+    # The exact line tools/run_b3_ae_shadow.py prints every minute.
+    return json.dumps(dict(contract="b3-ae-worker-v1", market=market, at="2026-10-23T01:00:00+00:00",
+                           status=status, rows=list(rows)), sort_keys=True, default=str)
+
+
+def test_b3_journal_lines_give_heartbeats_and_failures():
+    now = datetime(2026, 10, 23, 10, 0, tzinfo=KST)
+    lines = [
+        _tick(),
+        _tick(status="OUTSIDE_REGULAR_SESSION"),
+        _tick(status="ERROR")[:-1] + ', "error_type": "OperationalError", "detail": "database is locked"}',
+        _tick(rows=[{"campaign_id": "c1", "status": "ERROR", "error_type": "TypeError",
+                     "detail": "'NoneType' object is not subscriptable"},
+                    {"campaign_id": "c2", "status": "WAIT", "live": {"status": "ERROR"}},
+                    {"campaign_id": "c3", "status": "ERROR", "error_type": "ValueError",
+                     "detail": "QUOTE_STALE_OR_FUTURE"}]),
+        "Traceback (most recent call last):",
+        '  File "tools/run_b3_ae_shadow.py", line 1, in <module>',
+        "ModuleNotFoundError: No module named 'prism_core.b3_ae_worker'",
+    ]
+    beats, failures, reentry = W.scan_lines(_job("b3_kr"), lines, now, path="journalctl -u x")
+    assert len(beats) == 4 and reentry == []          # tick lines are heartbeats, not re-entry summaries
+    found = sorted((f["text"], f["label"], f["severity"], f["market"]) for f in failures)
+    assert found == [
+        ("ModuleNotFoundError: No module named 'prism_core.b3_ae_worker'", "프로그램 오류", "장애", "KR"),
+        ("OperationalError: database is locked", "프로그램 오류", "장애", "KR"),
+        ("TypeError: 'NoneType' object is not subscriptable", "프로그램 오류", "장애", "KR"),
+        ("ValueError: QUOTE_STALE_OR_FUTURE", "데이터 조회 실패", "주의", "KR"),    # a reason code: missing input
+    ]
+    # A failed LIVE add order is alerted by the worker itself (prism_core.ops_alert), not again here.
+    assert not any("c2" in f["text"] for f in failures)
+
+
+def test_b3_journal_run_alerts_failures_and_a_stopped_worker(tmp_path, monkeypatch):
+    state = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(W, "_is_session", lambda market, day: day.weekday() < 5)
+    journal = {"cursor": "c0", "lines": []}
+    calls = []
+
+    def fake(unit, cursor):
+        calls.append((unit, cursor))
+        lines, journal["lines"] = journal["lines"], []
+        return (lines if cursor else ["old line - ERROR - ignored"]), journal["cursor"]
+
+    monkeypatch.setattr(W, "_journalctl", fake)
+    job = _job("b3_kr")
+    sent = []
+    send = lambda m: sent.append(m) or True  # noqa: E731
+    W.run(datetime(2026, 10, 23, 9, 0, tzinfo=KST), state_path=state, sender=send, jobs=(job,))   # Friday
+    assert sent == [] and calls == [("prism-b3-ae-shadow@kr.service", None)]   # first read: only the cursor
+    journal.update(cursor="c1", lines=[_tick(), _tick(rows=[{"campaign_id": "c1", "status": "ERROR",
+                                                            "error_type": "KeyError", "detail": "'price'"}])])
+    W.run(datetime(2026, 10, 23, 9, 5, tzinfo=KST), state_path=state, sender=send, jobs=(job,))
+    assert calls[-1] == ("prism-b3-ae-shadow@kr.service", "c0")
+    assert len(sent) == 1 and "증액 집행(한국) — 프로그램 오류 1건" in sent[0]
+    assert "로그: journalctl -u prism-b3-ae-shadow@kr.service" in sent[0]
+    saved = json.loads(state.read_text(encoding="utf-8"))
+    assert saved["journal_cursors"] == {"prism-b3-ae-shadow@kr.service": "c1"}
+    assert saved["last_run"]["b3_kr"] == "2026-10-23T09:05:00+09:00"
+    W.run(datetime(2026, 10, 23, 9, 20, tzinfo=KST), state_path=state, sender=send, jobs=(job,))
+    assert len(sent) == 1                                                  # inside the 20-minute tolerance
+    W.run(datetime(2026, 10, 23, 9, 30, tzinfo=KST), state_path=state, sender=send, jobs=(job,))
+    assert len(sent) == 2 and "증액 집행(한국) — 작업 멈춤: 25분째 실행 안 됨" in sent[1]
+    journal.update(cursor="c2", lines=[_tick()])
+    W.run(datetime(2026, 10, 23, 9, 35, tzinfo=KST), state_path=state, sender=send, jobs=(job,))
+    assert len(sent) == 3 and "[복구] 증액 집행(한국)" in sent[2]
+
+
+def test_missing_journalctl_skips_the_journal_jobs_without_alerts(tmp_path, monkeypatch):
+    monkeypatch.setattr(W, "ROOT", tmp_path)             # the real _journalctl, but no journalctl binary
+    monkeypatch.setattr(W, "_is_session", lambda market, day: True)
+    state = tmp_path / "runtime" / "state.json"
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("journalctl")
+
+    monkeypatch.setattr(W.subprocess, "run", missing)
+    assert W._journalctl("prism-b3-ae-shadow@kr.service", None) is None
+    jobs = tuple(job for job in W.JOBS if job.unit)
+    sent = []
+    for hour in (9, 10, 12, 15):                         # through the KR window
+        W.run(datetime(2026, 10, 23, hour, 0, tzinfo=KST), state_path=state, sender=sent.append, jobs=jobs)
+    for hour in (23, 1, 4):                              # and the US session
+        day = 23 if hour == 23 else 24
+        W.run(datetime(2026, 10, day, hour, 0, tzinfo=KST), state_path=state, sender=sent.append, jobs=jobs)
+    assert sent == []
+    assert json.loads(state.read_text(encoding="utf-8")).get("journal_cursors") == {}
+
+
+def test_journalctl_reads_after_the_cursor_and_drops_a_bad_one(monkeypatch):
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        entries = [{"__CURSOR": "c1", "MESSAGE": _tick()},
+                   {"__CURSOR": "c2", "MESSAGE": list(b"bad \xff byte - ERROR - x")},   # non-UTF-8 message
+                   {"__CURSOR": "c3", "MESSAGE": None}]
+        out = "\n".join(json.dumps(e) for e in entries).encode() + b"\nnot json\n"
+        return W.subprocess.CompletedProcess(argv, 0, out, b"")
+
+    monkeypatch.setattr(W.subprocess, "run", fake_run)
+    lines, cursor = W._journalctl("prism-b3-ae-shadow@us.service", "c0")
+    assert seen[-1] == ["journalctl", "-u", "prism-b3-ae-shadow@us.service", "-o", "json", "--no-pager", "-q",
+                        "--after-cursor", "c0", "-n", str(W.JOURNAL_MAX_ENTRIES)]
+    assert cursor == "c3" and lines[0] == _tick() and lines[1].startswith("bad ") and len(lines) == 2
+    assert W._journalctl("prism-b3-ae-shadow@us.service", None) == ([], "c3")    # first read: cursor only
+    assert seen[-1][-2:] == ["-n", "1"]
+    monkeypatch.setattr(W.subprocess, "run", lambda argv, **k: W.subprocess.CompletedProcess(argv, 1, b"", b""))
+    state = {"journal_cursors": {"prism-b3-ae-shadow@us.service": "vacuumed"}}
+    assert W._read_journal(_job("b3_us"), state) is None and state["journal_cursors"] == {}
+    monkeypatch.setattr(W.subprocess, "run", lambda argv, **k: (_ for _ in ()).throw(
+        W.subprocess.TimeoutExpired(argv, 30)))
+    state = {"journal_cursors": {"prism-b3-ae-shadow@us.service": "c9"}}
+    assert W._read_journal(_job("b3_us"), state) is None
+    assert state["journal_cursors"] == {"prism-b3-ae-shadow@us.service": "c9"}   # a timeout keeps the position
+
+
 @pytest.mark.parametrize("job", W.JOBS, ids=lambda j: j.key)
 def test_job_definitions_are_consistent(job):
+    assert bool(job.unit) != bool(job.log)                 # one source: a log file or a systemd unit
     if job.heartbeat:
         re.compile(job.heartbeat)
         assert job.market in W.TZ and (job.every_min and job.window or job.deadline)
