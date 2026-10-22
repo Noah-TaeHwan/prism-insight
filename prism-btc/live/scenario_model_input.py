@@ -8,6 +8,86 @@ def _json(value, *, sort_keys=False):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=sort_keys)
 
 
+def _has_gap_marker(value):
+    if isinstance(value, dict):
+        return '$ma_gap' in value or any(_has_gap_marker(v) for v in value.values())
+    return isinstance(value, list) and any(_has_gap_marker(v) for v in value)
+
+
+def _gap_locations(payload):
+    snapshot, context = payload.get('market_snapshot'), payload.get('contract_context')
+    frames = snapshot.get('timeframes') if isinstance(snapshot, dict) else None
+    structure = context.get('ma_structure') if isinstance(context, dict) else None
+    primary = structure.get('primary') if isinstance(structure, dict) else None
+    if not isinstance(frames, dict) or not isinstance(primary, dict):
+        return
+    for tf in ('15m', '30m', '1h'):
+        frame, target = frames.get(tf), primary.get(tf)
+        source = frame.get('ma_path') if isinstance(frame, dict) else None
+        if isinstance(source, dict) and isinstance(target, dict):
+            for kind in ('confirmed_gap', 'forming_gap'):
+                if kind in source and kind in target:
+                    yield f'{tf}.{kind}', source, target, kind
+
+
+def _factor_ma_gaps(payload):
+    """v7 reuses only exact primary-frame gap copies above an existing projection."""
+    metadata = payload.get('model_input_projection')
+    if not isinstance(metadata, dict) or metadata.get('version') not in (1, 2, 3, 4, 5, 6):
+        return False
+    prior = _json(payload, sort_keys=True)
+    # Preserve exact request bytes for every previously callable review tape.
+    if len(prior.encode()) <= 100_000:
+        return False
+    references = []
+    for path, source, target, kind in _gap_locations(payload):
+        value, original = source[kind], target[kind]
+        if (isinstance(value, dict) and isinstance(original, dict)
+                and _json(value, sort_keys=True) == _json(original, sort_keys=True)):
+            references.append((path, source, target, kind, original))
+    if not references:
+        return False
+    old_metadata = deepcopy(metadata)
+    for path, source, target, kind, original in references:
+        target[kind] = {'$ma_gap': path}
+    metadata.update(version=7, prior_projection_version=old_metadata['version'],
+        ma_gap_references=[row[0] for row in references],
+        prior_projection_sha256=hashlib.sha256(prior.encode()).hexdigest(),
+        ma_gap_meaning='Each $ma_gap TF.KIND copies the exact object at market_snapshot.timeframes[TF].ma_path[KIND] into contract_context.ma_structure.primary[TF][KIND]. No market facts change.')
+    if len(_json(payload).encode()) >= len(prior.encode()):
+        for _, _, target, kind, original in references:
+            target[kind] = original
+        payload['model_input_projection'] = old_metadata
+        return False
+    return True
+
+
+def _restore_ma_gaps(payload, metadata):
+    prior_version = metadata.get('prior_projection_version')
+    paths = metadata.get('ma_gap_references')
+    if (type(prior_version) is not int or prior_version not in (1, 2, 3, 4, 5, 6)
+            or not isinstance(paths, list) or not 1 <= len(paths) <= 6
+            or any(not isinstance(path, str) for path in paths) or len(paths) != len(set(paths))):
+        raise ValueError('invalid_ma_gap_projection')
+    locations = {path: (source, target, kind) for path, source, target, kind in _gap_locations(payload)}
+    for path in paths:
+        if path not in locations:
+            raise ValueError('unknown_ma_gap_path')
+        source, target, kind = locations[path]
+        if target[kind] != {'$ma_gap': path} or not isinstance(source[kind], dict):
+            raise ValueError('invalid_ma_gap_reference')
+        target[kind] = deepcopy(source[kind])
+    if _has_gap_marker(payload):
+        raise ValueError('unregistered_ma_gap')
+    expected = metadata.pop('prior_projection_sha256', None)
+    for key in ('prior_projection_version', 'ma_gap_references', 'ma_gap_meaning'):
+        metadata.pop(key, None)
+    metadata['version'] = prior_version
+    previous = dict(payload, model_input_projection=metadata)
+    if hashlib.sha256(_json(previous, sort_keys=True).encode()).hexdigest() != expected:
+        raise ValueError('ma_gap_source_hash_mismatch')
+
+
 def _has_schema_marker(value):
     if isinstance(value, dict):
         return '$schema_value' in value or '$schema_object' in value or any(_has_schema_marker(v) for v in value.values())
@@ -413,13 +493,13 @@ def _restore_tables(original, metadata):
         raise ValueError("unregistered_row_table")
 
 
-def project_model_input(payload):
+def project_model_input(payload, *, allow_gap_rescue=False):
     """Return independent projected payload and value-free byte/hash/path audit."""
     original = _json(payload)
     projected = deepcopy(payload)
     if ("model_input_projection" in payload or _has_table_marker(payload)
             or _has_wrapper_marker(payload) or _has_proposal_marker(payload) or _has_receipt_marker(payload)
-            or _has_recovery_marker(payload) or _has_schema_marker(payload)):
+            or _has_recovery_marker(payload) or _has_schema_marker(payload) or _has_gap_marker(payload)):
         raise ValueError("reserved_projection_field")
     references, definitions, paths = [], {}, []
     recovery = projected.get("contract_context", {}).get("recovery")
@@ -566,6 +646,9 @@ def project_model_input(payload):
             projected["model_input_projection"]["meaning"] += " After expanding tables and numeric_market-v1 current, $recovery_changes baseline-current-v1 provides host-computed ordered changed paths in key_order; prepend path_prefix to each key when present. Do NOT calculate which paths changed. For each full path, read changed_evidence[path]={before:baseline[path],now:current[path]}. Preserve source numeric types. restored_sha256 verifies insertion-order compact UTF-8 JSON of reconstructed changes. No changed facts are omitted."
     if _factor_goal_schema(projected):
         paths.append('response_contract')
+    if allow_gap_rescue and _factor_ma_gaps(projected):
+        paths.extend('contract_context.ma_structure.primary.' + path
+                     for path in projected['model_input_projection']['ma_gap_references'])
     encoded = _json(projected)
     if len(encoded.encode()) >= len(original.encode()):
         projected, encoded, paths = deepcopy(payload), original, []
@@ -585,6 +668,12 @@ def restore_model_input(payload):
     """Deterministic reconstruction for audit/tests; no network or model calls."""
     original = deepcopy(payload)
     metadata = original.pop("model_input_projection", None)
+    if isinstance(metadata, dict) and metadata.get('version') == 7:
+        if type(metadata['version']) is not int:
+            raise ValueError('unknown_projection_version')
+        _restore_ma_gaps(original, metadata)
+    elif _has_gap_marker(original):
+        raise ValueError('unregistered_ma_gap')
     if isinstance(metadata, dict) and metadata.get('version') == 6:
         if type(metadata['version']) is not int:
             raise ValueError('unknown_projection_version')

@@ -63,8 +63,10 @@ def project_position_flow_input(payload):
     """
     projected, audit = project_model_input(payload)
     flow = (payload.get("contract_context") or {}).get("position_flow")
-    if _size(projected) <= _MODEL_INPUT_LIMIT or not isinstance(flow, dict):
+    if _size(projected) <= _MODEL_INPUT_LIMIT:
         return projected, audit
+    if not isinstance(flow, dict):
+        return project_model_input(payload, allow_gap_rescue=True)
     candidate = copy.deepcopy(payload)
     flow = candidate["contract_context"]["position_flow"]
     fields = ("historical_observation_changes", "requested_changes", "thesis_transitions")
@@ -90,7 +92,8 @@ def project_position_flow_input(payload):
         scope="Refer to registered_entry_contract/entry_thesis/previous_thesis_assessment; history unavailable.")
     # If mandatory market/account/candidate evidence still exceeds the cap, the
     # existing caller rejects it. Never trim safety or candidate evidence here.
-    return project_model_input(candidate)
+    # Try lossless gap reuse only after the legacy history-budget pass fails.
+    return project_model_input(candidate, allow_gap_rescue=True)
 
 
 def build_position_flow(conn, active, context, now):
