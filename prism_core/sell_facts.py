@@ -72,6 +72,19 @@ def trend_weakness(bars):
             "volume_above": volume_ok, "ma20": ma20, "below_ma20": below, "met": met}
 
 
+def tier3_counts(trend, held):
+    """Tier 3 is a sell reason only when all three lower closes are completed bars after the entry session.
+
+    Weakness that already existed before the buy was known at entry (user decision 2026-10-22, FRO re-entry
+    sold 57 minutes after the buy on a pre-entry Tier-3 bar). True/False, or None when unknown.
+    """
+    if not trend or trend["met"] is None:
+        return None
+    if not trend["met"]:
+        return False
+    return None if held is None else held >= TREND_DOWN_CLOSES
+
+
 def sessions_held(bars, market, buy_date):
     """Completed sessions after the entry session, or None."""
     try:
@@ -153,15 +166,23 @@ def prompt_block(*, market, language, stock_data, highest_price, threshold_pct, 
                  "below the current price" + ("" if t["regime_live"] else ", no raise while the regime is unavailable")
                  + ")"))
     if trend:
+        counts = tier3_counts(trend, held)
+        after = ""
+        if trend["met"]:
+            after_entry = None if held is None else held >= TREND_DOWN_CLOSES
+            after = (f". 하락 3거래일이 모두 매수 후 확정 일봉: {_yes(after_entry, ko)} → 3단계 매도 근거 {_yes(counts, ko)}"
+                     + ("(매수 전부터 있던 약세는 세지 않음)" if counts is False else "") if ko else
+                     f". All three lower closes after the entry session: {_yes(after_entry, ko)} → Tier-3 sell reason "
+                     f"{_yes(counts, ko)}" + (" (weakness from before the buy does not count)" if counts is False else ""))
         ratio = _yes(None, ko) if trend["volume_ratio"] is None else f"{trend['volume_ratio']:.2f}"
         lines.append(
             (f"- 3단계 추세 약화 조건: 3거래일 연속 종가 하락 {_yes(trend['three_down'], ko)}, 기준일 거래량/직전 20일 평균 "
              f"{ratio}배({_yes(trend['volume_above'], ko, '평균 이상', '평균 미만')}), 종가가 20일선 {m(trend['ma20'])} "
-             f"{_yes(trend['below_ma20'], ko, '아래', '위')} → 3개 모두 충족 {_yes(trend['met'], ko)}" if ko else
+             f"{_yes(trend['below_ma20'], ko, '아래', '위')} → 3개 모두 충족 {_yes(trend['met'], ko)}" + after if ko else
              f"- Tier-3 trend-weakness conditions: 3 consecutive lower closes {_yes(trend['three_down'], ko)}, "
              f"reference-bar volume / prior 20-day average {ratio}x ({_yes(trend['volume_above'], ko, 'at or above', 'below')}), "
              f"close {_yes(trend['below_ma20'], ko, 'below', 'above')} the 20-day MA {m(trend['ma20'])} → all three met "
-             f"{_yes(trend['met'], ko)}"))
+             f"{_yes(trend['met'], ko)}" + after))
     avg = average_entry(stock_data.get("scenario"))
     price = R._num(stock_data.get("current_price"))
     if avg and price:

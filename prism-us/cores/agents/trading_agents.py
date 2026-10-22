@@ -983,7 +983,7 @@ def create_us_sell_decision_agent(language: str = "ko"):
 - 1단계: 절대 매도 (장중 현재가 기준 -7% 이상 손실 OR 현재가 stop_loss×0.995 이하 — 장중 하드스탑이 자동 실행)
 - 2단계: trailing stop 이탈 — 최근 확정 종가 기준, 당일은 장 마감 직전 자동 점검이 확인 (활성화된 이후에만)
 - 시스템 자동(AI 판단 아님): 손실 중(현재가 < 매수가)인 종목이 50일선×0.995 이하이면 장 마감 직전 자동 점검 또는 여러 날 연속 이탈 확인으로 전량 매도합니다.
-- 3단계: 추세 약화 점검(AI 판단) — 3거래일 연속 종가 하락 + 20일 평균 이상 거래량 + 20일선 종가 이탈, 3개 모두 충족
+- 3단계: 추세 약화 점검(AI 판단) — 3거래일 연속 종가 하락 + 20일 평균 이상 거래량 + 20일선 종가 이탈, 3개 모두 충족. 하락한 3거래일이 모두 매수일 이후의 확정 일봉일 때만 셉니다(보유 3거래일 이상). 매수 전부터 있던 약세는 매수할 때 이미 알던 정보이므로 3단계 매도 사유가 아닙니다.
 - 시간 조건은 매도 트리거가 아닙니다. 추세 점검 시점일 뿐이며, 매도 결정은 위 1~3단계에서만 발동합니다.
 - 사용자 메시지에 '시스템 계산 사실' 블록이 있으면 트레일링 라인·손절선 상향 자격·3단계 조건·보유 거래일은 그 값을 그대로 쓰십시오.
 
@@ -999,7 +999,7 @@ def create_us_sell_decision_agent(language: str = "ko"):
 - 목표가는 최소 기준일뿐, 추세 살아있으면 계속 보유
 - Trailing Stop: 고점 대비 **-8%** (고점 × 0.92, 노이즈 무시)
 - 매도 조건: **명확한 추세 약화 시에만**
-  * 핵심-4의 3단계: 3거래일 연속 종가 하락 + 20일 평균 이상 거래량 + 20일선 종가 이탈을 모두 충족
+  * 핵심-4의 3단계: 매수 후 3거래일 연속 종가 하락 + 20일 평균 이상 거래량 + 20일선 종가 이탈을 모두 충족
   * VIX 급등 (20 돌파)은 보조 정황이며, 위 복합 조건을 대체하지 않음
   * 주요 지지선(20일선) 이탈은 위 복합 조건의 일부이며, 단독 추세 매도 조건이 아님
 
@@ -1219,7 +1219,7 @@ Run the self-check only when that regime is missing or could not be computed.
 - Tier 1: Absolute sell (live-price loss ≥ -7%, OR live price at or below stop_loss × 0.995 — executed automatically by the intraday hard stop).
 - Tier 2: Trailing-stop breach — on the latest confirmed close; today's breach is confirmed by the pre-close automatic check (only if activated per Core-3).
 - System-run (not your decision): a position in loss (price below entry) at or below its 50-day MA × 0.995 is sold in full by the pre-close automatic check or after a breach over several consecutive days.
-- Tier 3: Trend-weakness check (your judgement): 3 consecutive daily-closing declines + volume above its 20-day average + close below 20d MA — ALL three required.
+- Tier 3: Trend-weakness check (your judgement): 3 consecutive daily-closing declines + volume above its 20-day average + close below 20d MA — ALL three required. It counts only when all three declining closes are completed bars after the entry session (3+ sessions held); weakness that already existed before the buy was known at entry and is not a Tier-3 reason.
 - Time-based conditions are NOT sell triggers; they are trend-review checkpoints only. Sell decisions fire only via Tiers 1~3.
 - When the user message has the 'System-computed facts' block, use its trailing line, stop-raise eligibility, tier-3 conditions and sessions held as given.
 
@@ -1235,7 +1235,7 @@ Run the self-check only when that regime is missing or could not be computed.
 - Target is minimum baseline, keep holding if trend alive
 - Trailing Stop: **-8%** from peak (peak × 0.92, ignore noise)
 - Sell only when **clear trend weakness**:
-  * Core-4 Tier 3: 3 consecutive daily-closing declines + volume above its 20-day average + close below 20d MA — ALL three required
+  * Core-4 Tier 3: 3 consecutive daily-closing declines after the entry session + volume above its 20-day average + close below 20d MA — ALL three required
   * VIX surge (cross above 20) is supporting context, not a substitute for the composite conditions
   * A close below major support (20-day MA) is part of the composite, not a standalone trend sell trigger
 
