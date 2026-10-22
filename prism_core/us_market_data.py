@@ -162,7 +162,6 @@ def daily_history(symbol: str, start, end, *, adjusted: bool = False) -> pd.Data
                 "FID_COND_MRKT_DIV_CODE": index_code[0], "FID_INPUT_ISCD": index_code[1], "FID_INPUT_DATE_1": first,
                 "FID_INPUT_DATE_2": cursor, "FID_PERIOD_DIV_CODE": "D"})
             return getattr(body, "output2", None) or []
-        fields = _INDEX_FIELDS
     else:
         exchange = _PRICE_EXCD.get(_trading()._resolve_exchange(symbol))
         if exchange is None:
