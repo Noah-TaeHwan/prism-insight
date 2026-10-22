@@ -223,6 +223,12 @@ def test_followthrough_facts_survive_exact_input_cap_without_evidence_truncation
     assert restored['contract_context']['ma_structure'] == build_ma_structure_context(market, ctx)
     assert (market, ctx) == original
     ctx['retained_evidence'] += 'x'
+    propose(market, ctx, response_contract(ctx), generate=generate, clock=lambda: ctx['now'])
+    rescued = json.loads(calls[-1]['user_prompt'])
+    assert rescued['model_input_projection']['version'] == 7
+    assert len(calls[-1]['user_prompt'].encode()) <= 100_000
+    assert restore_model_input(rescued)['contract_context']['retained_evidence'] == ctx['retained_evidence']
+    ctx['retained_evidence'] += 'x' * 100_000
     with pytest.raises(ScenarioModelError, match='input_size'):
         propose(market, ctx, response_contract(ctx), generate=generate, clock=lambda: ctx['now'])
-    assert len(calls) == 2
+    assert len(calls) == 3
