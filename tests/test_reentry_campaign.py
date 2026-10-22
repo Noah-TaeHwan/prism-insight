@@ -633,6 +633,22 @@ def test_runtime_recheck_failure_reason_reaches_the_ledger(tmp_path, monkeypatch
     assert len(traces) == 1 and None not in traces          # one campaign trace per watch
 
 
+def test_runtime_intraday_skips_a_watch_whose_history_vanished(tmp_path, monkeypatch):
+    # 2026-10-22 US 13:50: Yahoo dropped the 10/21 bar after the close run advanced the watches to that day,
+    # the collector returned no history and evaluate() raised IndexError, stopping every re-entry decision.
+    bars, root, sent, run, quote = _runtime(tmp_path, monkeypatch)
+    run(70, llm_recheck=False)
+    quoted = []
+    summary = V3.run("KR", bars[70]["date"], collector=lambda t, c: {"__benchmark_rows": {}, "__regime_rows": bars},
+                     db_path=tmp_path / "t.sqlite", root=root, reports_root=tmp_path, archive_db=None,
+                     phase="intraday", decision_day=bars[71]["date"],
+                     quote_fn=lambda ticker: quoted.append(ticker) or quote(ticker), llm_recheck=False)
+    assert summary["intraday"]["frame_missing"] == 1 and summary["intraday"]["decisions"] == 0
+    assert summary["new_triggers"] == 0 and quoted == []           # no quote spent on an undecidable watch
+    state = json.loads((root / "reentry_v3_state_kr.json").read_text())
+    assert state["watches"][0]["status"] == "ACTIVE" and state["watches"][0]["decisions"] == {}
+
+
 def test_runtime_shakeout_recovery_is_decided_per_rule(tmp_path, monkeypatch):
     bars, root, _sent, run, quote = _runtime(tmp_path, monkeypatch, rows=_yc_shakeout_rows(), exit_price=11500,
                                             quote_price=12100.0, quote_low=11480.0, quote_volume=1250.0)

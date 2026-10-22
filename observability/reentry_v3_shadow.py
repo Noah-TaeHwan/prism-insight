@@ -422,7 +422,7 @@ def intraday(state, market, decision_day, frames, completed, quote_fn, ctx, repo
     """Decision-time (KR 14:00 / US 13:50) evaluations for campaigns that may open a position today.
     Returns (frozen, counts); ``observed`` (a list) collects (watch, decision, near_misses) for the ledger."""
     counts = {"candidates": 0, "quotes": 0, "quote_missing": 0, "quote_cap": 0, "decisions": 0, "triggers": 0,
-              "near_misses": 0}
+              "near_misses": 0, "frame_missing": 0}
     frozen = []
     for watch in state["watches"]:
         ledger = watch.get("ledger") or {}
@@ -431,6 +431,14 @@ def intraday(state, market, decision_day, frames, completed, quote_fn, ctx, repo
                 or decision_day in (watch.get("decisions") or {}):
             continue
         counts["candidates"] += 1
+        # 2026-10-22 US: Yahoo dropped the completed bar after the close run, so this run's history was
+        # empty for watches already advanced to that day. No completed history means no decision (the
+        # same rule _refresh applies), never a crash that stops every other watch.
+        bars, _ = _frames_for(watch, frames, completed)
+        if not bars or bars[-1]["date"] != completed:
+            counts["frame_missing"] += 1
+            watch["last_missing"] = completed
+            continue
         if counts["quotes"] >= MAX_QUOTES:
             counts["quote_cap"] += 1
             continue
