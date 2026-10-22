@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # 2026-10-22 v3: compare only actually applied path legs; no new execution gate.
+    # 2026-10-22 v4: compare applicable paths without a fictional reduction mandate.
     assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "95b941506d6b73138252036eefbb20f1fb96f51ed85177dc5add2d33cd1249d7"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "81cdf44f851ea78965622920d55a0cecb8a771dc1d0233b399711b3c6f3200e3"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "a77a977bb4ca2dcf8982a5045d68e017ca619c55064f52a3bd7bd625fe2b94fe"

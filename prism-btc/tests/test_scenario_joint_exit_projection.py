@@ -20,6 +20,13 @@ def test_north_star_framing_is_optional_structural_not_profit_or_stop_pressure()
     assert all(label in SELECT_PROMPT for label in ('계획:', '경로:', '연장:'))
 
 
+def test_no_partial_stop_compares_applicable_paths_not_a_fictional_reduction():
+    from live.scenario_calculated_review import SELECT_PROMPT
+    assert 'compare the applicable full-stop/TP paths, never invent a partial SL' in SELECT_PROMPT
+    assert 'explain the no-reduction tradeoff' not in SELECT_PROMPT
+    assert 'legs actually apply, compare exposure saved on weakness versus participation lost' in SELECT_PROMPT
+
+
 @pytest.mark.parametrize('side', ['LONG', 'SHORT'])
 @pytest.mark.parametrize('tp_fraction', [None, .5, 1])
 def test_no_partial_stop_full_tp_and_unpriced_runner_remain_valid_without_risk_credit(side, tp_fraction):

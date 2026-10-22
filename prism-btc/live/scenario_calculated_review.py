@@ -131,7 +131,7 @@ Korean. When flat-OPEN joint paths are supplied, organize rationale as three sho
 items: '계획:' name the candidate (also when choosing WAIT) and the decisive evidence;
 '경로:' compare its displayed paths using supplied host results. Only if partial-SL
 legs actually apply, compare exposure saved on weakness versus participation lost
-on recovery; otherwise explain the no-reduction tradeoff, never invent a partial SL;
+on recovery; otherwise compare the applicable full-stop/TP paths, never invent a partial SL;
 '연장:' assess early-TP concentration, grounded later targets/protected lots and why
 that balance fits this thesis. No partial SL, full TP or no fixed TP can each be
 valid; explain the applicable tradeoff, never force a runner or a partial stop.
