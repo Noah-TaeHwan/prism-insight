@@ -202,6 +202,8 @@ def _run(tmp_path, market, mode, shape="flat", detect_fail=False, session_open=F
     assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-4000:]
     payload = json.loads(output.read_text())
     payload["metadata"].pop("run_time", None)
+    # Wall-clock capture time; present when the host .env enables market participation (db-server).
+    (payload["metadata"].get("market_participation") or {}).pop("captured_at", None)
     selected = json.loads(proc.stdout.strip().splitlines()[-1])
     rows = []
     if db.exists():
