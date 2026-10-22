@@ -38,6 +38,7 @@ Bars are dicts {date, open, high, low, close, volume} sorted by date. A function
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from itertools import pairwise
 from pathlib import Path
@@ -117,6 +118,25 @@ POLICY = {
     "max_attempts": MAX_ATTEMPTS,
     "horizon": HORIZON,
 }
+# R2S stale-level guard (research 2026-10-22, KR 028670): when the report has resistance levels and every one
+# of them is at or under the entry, the levels are stale and the R/R target falls to a wick high, so the
+# pullback buy needs a fresh analysis instead. Default off; REENTRY_V3_STALE_LEVEL_GUARD=true or the policy
+# key "r2s_stale_guard" turns it on. R1C and SHAKEOUT_RECLAIM are unchanged.
+STALE_LEVELS = "stale_levels"
+
+
+def stale_guard_enabled(policy=None):
+    value = (policy or {}).get("r2s_stale_guard")
+    if value is not None:
+        return bool(value)
+    return os.getenv("REENTRY_V3_STALE_LEVEL_GUARD", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def stale_levels(setup, entry):
+    """True when the report gives resistance levels and all of them are at or below the entry."""
+    levels = setup["levels"]
+    res = [v for v in (levels.get("primary_resistance"), levels.get("secondary_resistance")) if v]
+    return bool(res) and all(v <= entry for v in res)
 
 
 def _pos(value):
@@ -370,6 +390,8 @@ def _trigger_retest(ctx):
         return {"fired": False, "reason": "below_level"}
     if price > level * (1 + RETEST_CHASE):
         return {"fired": False, "reason": "chase"}
+    if stale_guard_enabled(ctx["policy"]) and stale_levels(setup, price):
+        return {"fired": False, "reason": STALE_LEVELS}
     out = {"fired": True, "reason": "fired", "entry": price}
     out.update(_priced(ctx, price))
     if out["target"] is None:
@@ -745,7 +767,8 @@ def replay(setup, bars, anchor, *, decisions=None, regime_at=None, pulse_at=None
     ledger = {
         "policy_version": policy["policy_version"],
         "rule_ids": {k: policy[k] for k in ("triggers", "window_triggers", "campaign_rules", "primary_rule",
-                                            "stop_rule", "exit_rule", "shadow_exit_rules")},
+                                            "stop_rule", "exit_rule", "shadow_exit_rules")}
+        | {"r2s_stale_guard": stale_guard_enabled(policy)},
         "L": level, "anchor_date": bars[a]["date"], "asof": bars[last]["date"], "elapsed": last - a,
         "horizon_complete": complete, "flags": flags, "next": upcoming,
         "trigger_stats": {"fired": stats["fired"], "checks": stats["checks"]}, "conflicts": stats["conflicts"],

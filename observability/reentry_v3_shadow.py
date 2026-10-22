@@ -379,7 +379,7 @@ def freeze_inputs(market, watch, decision, frames, completed, reports_root, arch
 
 # Primary-rule misses worth keeping as evidence (the rule's own filters), per trigger. Structural
 # non-events (not armed, no touch, previous close on the wrong side) are not near misses.
-NEAR_MISS = {"R2S": ("rr_below_floor", "target_unsupported", "chase", "below_level"),
+NEAR_MISS = {"R2S": ("rr_below_floor", "target_unsupported", "chase", "below_level", "stale_levels"),
              "R1C": ("chase",), "SHAKEOUT_RECLAIM": ("chase", "volume_below_avg20")}
 
 
