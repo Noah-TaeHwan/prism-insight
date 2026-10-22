@@ -55,8 +55,10 @@ def taped(ctx=None, *, mode="economic-reject-calculated-v1", status="FAILED", mu
     snap = dict(valid=True, as_of_ms=1000000)
     contract = response_contract(ctx)
     calls = []
+    draft_raw = None
 
     def generate(**request):
+        nonlocal draft_raw
         calls.append(request)
         assert ENTRY_CONTRACT_PROMPT in request["system_prompt"]
         assert len(request["user_prompt"].encode()) <= 100000
@@ -74,10 +76,13 @@ def taped(ctx=None, *, mode="economic-reject-calculated-v1", status="FAILED", mu
                 assert bundle["wait"]["template_only"] and bundle["wait"]["eligible"] is False
                 assert all(not t.startswith("WAIT:") for t in request["response_schema"]["properties"]["selection_token"]["enum"])
             chosen = bundle["wait"] if choose_wait else bundle["candidates"][0]
-            assert chosen["raw_proposal"]["thesis_assessment"] == wire(ctx, status=status)["thesis_assessment"]
+            original = draft_raw['wait_proposal'] if choose_wait else draft_raw['candidates'][0]
+            assert chosen["raw_proposal"]["thesis_assessment"] == original['thesis_assessment']
             raw = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale="Selected original premise response")
         if mutate:
             mutate(raw, len(calls))
+        if len(calls) == 1:
+            draft_raw = deepcopy(raw)
         return SimpleNamespace(text=json.dumps(raw))
 
     envelope = record_review(partial(research_review, research_mode=mode), snap, ctx, contract,
@@ -114,7 +119,6 @@ def test_other_assessments_preserve_wait_choice(status):
 
 @pytest.mark.parametrize("mutation", [
     lambda r: r["candidates"][0]["thesis_assessment"].update(status="INTACT"),
-    lambda r: r["candidates"][0]["thesis_assessment"].update(reason="Different rationale"),
     lambda r: r.update(candidates=[], no_candidate_reason="wait instead"),
     lambda r: r["candidates"][0].update(action="ADJUST"),
     lambda r: r["wait_proposal"]["thesis_assessment"].update(contract_id="forged"),
@@ -123,6 +127,107 @@ def test_other_assessments_preserve_wait_choice(status):
 def test_invalid_or_conflicting_failed_draft_never_gets_selection(mutation):
     args, calls = taped(mutate=lambda raw, phase: mutation(raw) if phase == 1 else None)
     assert args[3]["outcome"]["status"] != "COMPLETE"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('side', ['LONG', 'SHORT'])
+@pytest.mark.parametrize('status,reasons', [
+    ('WEAKENING', ('확정 실패 관측은 0회입니다.', '확정 실패 관측은 0회.')),
+    ('INTACT', ('원래 가정 유지', '원래 가정이 유지됩니다.')),
+    ('UNKNOWN', ('근거 불충분', '추가 근거가 필요합니다.')),
+    ('FAILED', ('원래 가정이 깨졌습니다.', '원래 가정 실패')),
+])
+def test_same_state_different_reasons_preserved_through_selection_and_guard(side, status, reasons):
+    def mutate(raw, phase):
+        if phase == 1:
+            raw['wait_proposal']['thesis_assessment']['reason'] = reasons[0]
+            raw['candidates'][0]['thesis_assessment']['reason'] = reasons[1]
+    args, calls = taped(context(side), status=status, mutate=mutate)
+    assert args[3]['outcome']['status'] == 'COMPLETE', args[3]['outcome']
+    result = args[3]['outcome']['result']
+    assert result['candidates']['wait']['raw_proposal']['thesis_assessment']['reason'] == reasons[0]
+    assert result['selected']['raw_proposal']['thesis_assessment']['reason'] == reasons[1]
+    fresh = dict(args[1], now=1001, account_captured_at=1001)
+    checked = guard_review(*args, fresh, bindings={'test': 'entry-contract'},
+                           research_mode='economic-reject-calculated-v1')
+    assert checked['payload']['thesis_assessment']['reason'] == reasons[1]
+    assert checked['payload']['action'] == 'EXIT'
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize('rehash_envelope', [False, True])
+def test_reason_remains_bound_to_original_receipt_and_exact_tape(rehash_envelope):
+    from backtest.scenario_tape import digest
+    args, _ = taped()
+    envelope = deepcopy(args[3])
+    envelope['outcome']['result']['selected']['raw_proposal']['thesis_assessment']['reason'] = '변조된 설명'
+    if rehash_envelope:
+        envelope['sha256'] = digest({k: v for k, v in envelope.items() if k != 'sha256'})
+    fresh = dict(args[1], now=1001, account_captured_at=1001)
+    with pytest.raises(ValueError):
+        guard_review(*args[:3], envelope, fresh, bindings={'test': 'entry-contract'},
+                     research_mode='economic-reject-calculated-v1')
+
+
+def test_assessment_prompt_contract_matches_comparison_and_preserves_input_budget():
+    args, calls = taped(status='WEAKENING')
+    rule = next(rule for rule in args[2]['rules'] if rule.startswith('entry_contract is non-null'))
+    assert 'share contract_id/status; reasons may differ' in rule
+    assert len(rule.encode()) <= 394  # Previous exact-assessment rule byte budget.
+    assert 'Draft assessments must share contract_id/status, not reason wording' in calls[0]['system_prompt']
+
+
+@pytest.mark.parametrize('choose_wait', [False, True])
+def test_weakening_adjust_and_wait_remain_selectable_with_different_reasons(choose_wait):
+    ctx = context()
+    def mutate(raw, phase):
+        if phase == 1:
+            raw['candidates'][0] = wire(ctx, 'ADJUST', 'WEAKENING')
+            raw['candidates'][0]['thesis_assessment']['reason'] = '실패 관측 0회.'
+            raw['wait_proposal']['thesis_assessment']['reason'] = '실패 관측 0회입니다.'
+    args, calls = taped(ctx, status='WEAKENING', mutate=mutate, choose_wait=choose_wait)
+    assert args[3]['outcome']['status'] == 'COMPLETE', args[3]['outcome']
+    result = args[3]['outcome']['result']
+    assert result['selected']['raw_proposal']['action'] == ('WAIT' if choose_wait else 'ADJUST')
+    fresh = dict(ctx, now=1001, account_captured_at=1001)
+    checked = guard_review(*args, fresh, bindings={'test': 'entry-contract'},
+                           research_mode='economic-reject-calculated-v1')
+    assert checked['payload']['action'] == ('WAIT' if choose_wait else 'ADJUST')
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize('assessment', [None, [], 'WEAKENING'])
+def test_missing_or_malformed_candidate_assessment_remains_blocked(assessment):
+    def mutate(raw, phase):
+        if phase == 1:
+            raw['candidates'][0]['thesis_assessment'] = assessment
+    args, calls = taped(mutate=mutate)
+    assert args[3]['outcome']['status'] != 'COMPLETE'
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('field,value', [
+    ('reason', ''), ('reason', '   '), ('reason', None), ('reason', 0),
+    ('reason', 'x' * 241), ('contract_id', 'forged'), ('status', 'INTACT'),
+    ('unexpected', 'value'),
+])
+def test_reason_difference_does_not_bypass_invalid_assessment(field, value):
+    def mutate(raw, phase):
+        if phase == 1:
+            raw['candidates'][0]['thesis_assessment'].update({field: value})
+    args, calls = taped(mutate=mutate)
+    assert args[3]['outcome']['status'] != 'COMPLETE'
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('action', ['WAIT', 'ADJUST'])
+def test_failed_nonexit_stays_blocked_even_with_different_reason(action):
+    def mutate(raw, phase):
+        if phase == 1:
+            raw['candidates'][0]['action'] = action
+            raw['candidates'][0]['thesis_assessment']['reason'] = '다른 설명'
+    args, calls = taped(mutate=mutate)
+    assert args[3]['outcome']['status'] != 'COMPLETE'
     assert len(calls) == 1
 
 
