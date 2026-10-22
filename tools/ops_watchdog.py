@@ -14,8 +14,12 @@ The same problem is held back for REPEAT_HOURS and then re-sent with its count. 
 runs again sends [복구]. Once a day (SUMMARY_AT, KST) a summary shows what ran, which also proves the
 watchdog itself is alive: no summary in the morning means the watchdog is down.
 
+Jobs that run under systemd (the B3 worker, which also runs the LIVE micro-split adds) log to journald;
+they are read with journalctl after a stored cursor. Without journalctl (CI, macOS) or a readable journal
+such a job is skipped for that run: no failure scan and no stopped-job alert.
+
 Never touches orders, the DB or the jobs, and never raises into cron. Rollback: OPS_WATCHDOG_ENABLED=false.
-State: runtime/ops_watchdog_state.json (log offsets, last runs, sent alerts).
+State: runtime/ops_watchdog_state.json (log offsets, journal cursors, last runs, sent alerts).
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import subprocess  # nosec B404 - fixed journalctl argv, no shell
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -43,6 +48,9 @@ SUMMARY_AT = os.getenv("OPS_WATCHDOG_SUMMARY_AT", "08:30")      # KST
 MAX_READ_BYTES = 50 * 1024 * 1024
 EXAMPLES_PER_GROUP = 3
 MESSAGE_LIMIT = 3400
+JOURNAL_MAX_ENTRIES = 5000             # per unit and run (oldest first); the rest is read on the next run
+JOURNAL_TIMEOUT_S = 30
+B3_CONTRACT = '"contract": "b3-ae-worker-v1"'   # the B3 worker's tick line (printed every minute, all day)
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,7 @@ class Job:
     every_min: int | None = None   # loop spacing inside ``window`` (market local time)
     window: tuple[str, str] | None = None
     deadline: str | None = None    # daily job: a heartbeat by this market-local time on session days
+    unit: str | None = None        # systemd unit: read from journald instead of ``log``
 
 
 # Heartbeat strings are the loops' own summary lines (pinned in tests/test_ops_watchdog.py).
@@ -79,7 +88,12 @@ JOBS = (
     Job("us_tracking", "매매 판단", "US", "us_stock_tracking_{date}.log"),
     Job("us_morning", "분석·매매 배치", "US", "logs/us_morning.log"),
     Job("us_afternoon", "분석·매매 배치", "US", "logs/us_afternoon.log"),
+    Job("kr_morning", "분석·매매 배치", "KR", "logs/stock_analysis_morning.log"),
     Job("kr_afternoon", "분석·매매 배치", "KR", "logs/stock_analysis_afternoon.log"),
+    # journald: the B3 worker prints B3_CONTRACT every minute all day and runs the LIVE in-slot adds
+    # (tools/run_micro_split_add.py); it alerts failed add orders itself (prism_core.ops_alert).
+    Job("b3_kr", "증액 집행", "KR", "", B3_CONTRACT, 1, ("08:30", "16:00"), unit="prism-b3-ae-shadow@kr.service"),
+    Job("b3_us", "증액 집행", "US", "", B3_CONTRACT, 1, ("09:00", "16:30"), unit="prism-b3-ae-shadow@us.service"),
 )
 
 # First match wins: (pattern, label, severity). The specific sell/order lines come before the generic ERROR.
@@ -99,6 +113,7 @@ IGNORED = re.compile(r"possibly delisted|below one share|quantity is 0|budget un
 _EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Interrupt|Exit|Timeout)\b")
 _MARKET_TAG = re.compile(r"\[(KR|US)\]|\((KR|US)\)|market=(KR|US)\b|\b(KR|US) (summary|trading context)")
 _STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
+_REASON_CODE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 
 
 def _signature(job_key, label, text):
@@ -161,6 +176,24 @@ def scan_lines(job, lines, now_kst, *, path=""):
                                      "log": path})
                 continue
             in_traceback = False
+        if line.startswith("{") and B3_CONTRACT in line:       # the B3 worker's tick result
+            if beat and beat.search(line):
+                beats.append(_stamp(line, now_kst).isoformat())
+            try:
+                tick = json.loads(line)
+            except ValueError:
+                continue
+            # A failed tick or one campaign's failed step (failed LIVE add orders the worker alerts itself).
+            # A bare reason code (e.g. ValueError QUOTE_STALE_OR_FUTURE) is missing input data, not a bug.
+            for item in [tick] + [row for row in tick.get("rows") or [] if isinstance(row, dict)]:
+                if item.get("status") == "ERROR":
+                    data = bool(_REASON_CODE.match(str(item.get("detail"))))
+                    failures.append({"job": job.key, "market": tick.get("market") or job.market,
+                                     "label": "데이터 조회 실패" if data else "프로그램 오류",
+                                     "severity": "주의" if data else "장애", "log": path,
+                                     "text": _clean(f"{item.get('error_type')}: {item.get('detail')}"),
+                                     "at": now_kst.isoformat()})
+            continue
         if beat and beat.search(line):          # the re-entry runner's JSON summary line
             beats.append(_stamp(line, now_kst).isoformat())
             try:
@@ -260,6 +293,59 @@ def _read_new(path, state, first_run):
     return key, data[:cut].decode("utf-8", errors="replace").replace("\x00", "").splitlines()
 
 
+def _journalctl(unit, cursor):
+    """(message lines, last cursor) of ``unit`` after ``cursor``; None when journalctl is missing or times out.
+
+    Without a cursor only the newest entry's cursor is taken (start at the end, like a known log on the
+    first run). ``-n`` after ``--after-cursor`` keeps the oldest entries (checked on systemd 239), so a
+    backlog is read over several runs. A failed call with a cursor (e.g. "Failed to seek to cursor" after
+    the journal was vacuumed) returns no cursor, so the next run starts again at the end.
+    """
+    argv = ["journalctl", "-u", unit, "-o", "json", "--no-pager", "-q"]
+    argv += ["--after-cursor", cursor, "-n", str(JOURNAL_MAX_ENTRIES)] if cursor else ["-n", "1"]
+    try:
+        done = subprocess.run(argv, capture_output=True, timeout=JOURNAL_TIMEOUT_S, check=False)  # nosec B603 B607  # nosemgrep
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return ([], None) if cursor else None
+    lines, last = [], cursor
+    for raw in done.stdout.splitlines()[:JOURNAL_MAX_ENTRIES]:
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            continue
+        message = entry.get("MESSAGE")
+        if isinstance(message, list):        # journald gives a non-UTF-8 message as a byte array
+            message = bytes(message).decode("utf-8", errors="replace")
+        last = entry.get("__CURSOR") or last
+        if cursor and isinstance(message, str):
+            lines.extend(message.replace("\x00", "").splitlines())
+    return lines, last
+
+
+def _read_journal(job, state):
+    """New message lines of ``job.unit``, or None when its journal cannot be read on this run.
+
+    The first read of a unit (no stored cursor) only sets the cursor and counts as not read, so a
+    missing journal or an absent unit never raises a stopped-job alert.
+    """
+    cursors = state.setdefault("journal_cursors", {})
+    cursor = cursors.get(job.unit)
+    try:
+        result = _journalctl(job.unit, cursor)
+    except Exception:  # noqa: BLE001 - fail open: a broken reader skips the job, never the run
+        result = None
+    if result is None:
+        return None
+    lines, last = result
+    if not last:
+        cursors.pop(job.unit, None)
+        return None
+    cursors[job.unit] = last
+    return lines if cursor else None
+
+
 def _job_name(job, market=None):
     market = market or job.market
     return f"{job.label}({MARKET_KO.get(market, market)})" if market in MARKET_KO else job.label
@@ -344,13 +430,25 @@ def run(now_kst=None, *, state_path=STATE_PATH, sender=None, dry_run=False, jobs
     sent = state.setdefault("sent", {})
     found = []
     read = {}
+    blind = set()                        # journald jobs whose journal could not be read on this run
     for job in jobs:
-        owner = _owner(jobs, job.log)
-        for path in _paths(job, now_kst):
-            key = str(path.relative_to(ROOT))
-            if key not in read:
-                read[key] = _read_new(path, state, first_run)[1]
-            beats, failures, reentry = scan_lines(job, read[key], now_kst, path=key)
+        owner = _owner(jobs, _source(job))
+        if job.unit:
+            lines = _read_journal(job, state)
+            if lines is None:
+                blind.add(job.key)
+                continue
+            path = f"journalctl -u {job.unit}"
+            sources = [(path, lines)]
+        else:
+            sources = []
+            for file in _paths(job, now_kst):
+                key = str(file.relative_to(ROOT))
+                if key not in read:
+                    read[key] = _read_new(file, state, first_run)[1]
+                sources.append((key, read[key]))
+        for key, lines in sources:
+            beats, failures, reentry = scan_lines(job, lines, now_kst, path=key)
             if beats:
                 state.setdefault("last_run", {})[job.key] = max(beats + [state.get("last_run", {}).get(job.key, "")])
                 _tally(state, job.key, "runs", len(beats))
@@ -362,8 +460,8 @@ def run(now_kst=None, *, state_path=STATE_PATH, sender=None, dry_run=False, jobs
             if job is not owner:
                 continue                 # a shared log's failures are counted once, by its first job
             for failure in failures:     # ...and filed under the job of the market the line names
-                failure["job"] = next((j.key for j in jobs if j.log == job.log and j.market == failure["market"]),
-                                      owner.key)
+                failure["job"] = next((j.key for j in jobs if _source(j) == _source(job)
+                                       and j.market == failure["market"]), owner.key)
             found.extend(failures)
 
     # De-duplicate: one alert per signature per REPEAT_HOURS, then again with the count.
@@ -383,7 +481,7 @@ def run(now_kst=None, *, state_path=STATE_PATH, sender=None, dry_run=False, jobs
             to_send.append((failure, record["count"] if record["alerts"] > 1 else count, record["alerts"]))
             record["count"] = 0
 
-    stale_now = stale_jobs(state, now_kst, jobs)
+    stale_now = stale_jobs(state, now_kst, [job for job in jobs if job.key not in blind])
     open_stale = state.setdefault("stale", {})
     stale_new = [s for s in stale_now if s[0].key not in open_stale]
     for job, _, _ in stale_new:
@@ -426,9 +524,14 @@ def run(now_kst=None, *, state_path=STATE_PATH, sender=None, dry_run=False, jobs
     return messages
 
 
-def _owner(jobs, log):
-    """The first job declared for a log file; it owns lines whose market cannot be told."""
-    return next(job for job in jobs if job.log == log)
+def _source(job):
+    """Where a job's lines come from: its log file or its systemd unit's journal."""
+    return f"journal:{job.unit}" if job.unit else job.log
+
+
+def _owner(jobs, source):
+    """The first job declared for a log file or unit; it owns lines whose market cannot be told."""
+    return next(job for job in jobs if _source(job) == source)
 
 
 def _send(text):
