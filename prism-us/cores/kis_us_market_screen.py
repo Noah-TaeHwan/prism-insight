@@ -143,3 +143,84 @@ def fetch_market_screen(request: Callable, min_cap_usd: float, *,
     }
     logger.info("KIS US market screen: %s", diagnostic)
     return frame, diagnostic
+
+
+# Overseas daily prices (HHDFS76240000). Unlike the condition search, each row
+# carries its session date (``xymd``), so an exact-date row is a dated bar.
+DAILY_URL = "/uapi/overseas-price/v1/quotations/dailyprice"
+DAILY_TR_ID = "HHDFS76240000"
+_BAR_FIELDS = ("Open", "High", "Low", "Close", "Volume")
+
+
+def fetch_exact_daily_bars(request: Callable, exchanges: dict, date: str, *,
+                           budget_seconds: float = 420.0, pause_seconds: float = 0.06,
+                           failure_stop: int = 5) -> tuple[pd.DataFrame, dict]:
+    """Return the ``date`` (YYYYMMDD) OHLCV bar for each ``{symbol: excd}``.
+
+    Only a single row dated exactly ``date`` with finite positive prices is
+    accepted (split-adjusted, ``MODP=1``). ~0.19 s per symbol on db-server
+    (2026-10-22: 1,038 symbols in 199 s). Symbols are requested in the given
+    order, so a budget or failure stop drops only the tail. Never raises on an
+    API error: the caller keeps whatever it had for the unfilled symbols.
+    """
+    started = time.monotonic()
+    rows: dict[str, dict] = {}
+    reasons: dict[str, int] = {}
+    calls = 0
+    failures = 0
+    stop_reason = None
+    symbols = list(exchanges)
+
+    def miss(reason, count=1):
+        reasons[reason] = reasons.get(reason, 0) + count
+
+    for position, symbol in enumerate(symbols):
+        if failures >= failure_stop:
+            stop_reason = "failure_stop"
+        elif time.monotonic() - started >= budget_seconds:
+            stop_reason = "time_budget"
+        if stop_reason:
+            miss(stop_reason, len(symbols) - position)
+            break
+        if "-" in symbol:  # class shares: the KIS spelling (BRK/B) is not recoverable here
+            miss("unsupported_symbol")
+            continue
+        if calls:
+            time.sleep(pause_seconds)
+        calls += 1
+        params = {"AUTH": "", "EXCD": exchanges[symbol], "SYMB": symbol,
+                  "GUBN": "0", "BYMD": date, "MODP": "1"}
+        try:
+            response = request(DAILY_URL, DAILY_TR_ID, params)
+            ok = response.isOK()
+        except Exception:  # noqa: BLE001 - one failed quote must not stop the batch
+            ok = False
+        if not ok:
+            failures += 1
+            miss("request_failed")
+            continue
+        failures = 0
+        page = getattr(response.getBody(), "output2", None) or []
+        matching = [item for item in page if str(item.get("xymd") or "").strip() == date]
+        if len(matching) != 1:
+            miss("missing_exact_date" if not matching else "duplicate_exact_date")
+            continue
+        item = matching[0]
+        bar = {"Open": _number(item.get("open")), "High": _number(item.get("high")),
+               "Low": _number(item.get("low")), "Close": _number(item.get("clos")),
+               "Volume": _number(item.get("tvol"))}
+        prices = [bar[k] for k in ("Open", "High", "Low", "Close")]
+        if (not all(math.isfinite(v) and v > 0 for v in prices)
+                or not math.isfinite(bar["Volume"]) or bar["Volume"] < 0):
+            miss("invalid_ohlcv")
+            continue
+        bar["Amount"] = bar["Close"] * bar["Volume"]
+        rows[symbol] = bar
+    frame = pd.DataFrame.from_dict(rows, orient="index", columns=[*_BAR_FIELDS, "Amount"])
+    frame.index.name = "Ticker"
+    diagnostic = {"source": "kis_dailyprice", "tr_id": DAILY_TR_ID, "date": date,
+                  "requested_count": len(symbols), "filled_count": len(frame),
+                  "calls": calls, "elapsed_seconds": round(time.monotonic() - started, 3),
+                  "reason_counts": reasons, "stop_reason": stop_reason}
+    logger.info("KIS US exact daily bars: %s", diagnostic)
+    return frame, diagnostic
