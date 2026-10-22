@@ -5122,7 +5122,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             if held:
                 return {"bought": False, "reason": "already_held"}
             scenario_slot_limit = _scenario_slot_limit(scenario, hard_max=self.max_slots)
-            if current_slots >= scenario_slot_limit:
+            # Same as the BUY path (2026-10-19): hard row cap unchanged, the AI cap is compared with
+            # slot-weighted usage, so partial micro-split rows do not block a re-entry early.
+            if (current_slots >= self.max_slots
+                    or self._weighted_slots_if_capped(current_slots, scenario_slot_limit) >= scenario_slot_limit):
                 return {"bought": False, "reason": "max_slots"}
             if not await self._check_sector_diversity(sector, is_pyramiding_add=False):
                 return {"bought": False, "reason": "sector_limit"}

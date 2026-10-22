@@ -359,7 +359,8 @@ def test_entry_lock_is_shared_and_fails_closed_for_reentry(tmp_path):
 def _load_method(path, class_name, name, namespace):
     tree = ast.parse(Path(path).read_text(encoding="utf-8"))
     node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == class_name)
-    method = copy.deepcopy(next(n for n in node.body if isinstance(n, ast.AsyncFunctionDef) and n.name == name))
+    method = copy.deepcopy(next(n for n in node.body if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
+                                     and n.name == name))
     module = ast.Module(body=[method], type_ignores=[])
     ast.fix_missing_locations(module)
     exec(compile(module, str(path), "exec"), namespace)  # noqa: S102 - test-only compile of a real method
@@ -392,17 +393,18 @@ def _base_ns():
 class _Agent:
     """Holds the stubbed collaborators of a tracker; the real method is bound per test."""
 
-    def __init__(self, table, held=False, slots=0, sector_ok=True, gate=True, quote=12150.0, broken_db=False):
+    def __init__(self, table, held=False, slots=0, sector_ok=True, gate=True, quote=12150.0, broken_db=False,
+                 slot_scenario=None):
         self.max_slots, self.db_path, self.enable_journal = 10, ":memory:", False
         self.conn = sqlite3.connect(":memory:")
         if not broken_db:
             self.conn.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, ticker TEXT, account_key TEXT, "
-                              "buy_price REAL)")
+                              "buy_price REAL, scenario TEXT)")
             if held:
                 self.conn.execute(f"INSERT INTO {table} (ticker, account_key, buy_price) VALUES ('000001','acct-key',1)")
             for k in range(slots):
-                self.conn.execute(f"INSERT INTO {table} (ticker, account_key, buy_price) VALUES (?, 'acct-key', 1)",
-                                  (f"9{k:05d}",))
+                self.conn.execute(f"INSERT INTO {table} (ticker, account_key, buy_price, scenario) "
+                                  "VALUES (?, 'acct-key', 1, ?)", (f"9{k:05d}", slot_scenario))
         self.cursor, self.table, self.calls = self.conn.cursor(), table, []
         self._sector_ok, self._gate, self._quote = sector_ok, gate, quote
         self.trigger_info_map = {}
@@ -478,6 +480,9 @@ def _us(agent, monkeypatch):
                          {"_safe_number", "_scenario_slot_limit", "_effective_buy_score"}, _base_ns())
     method = _load_method(ROOT / "prism-us/us_stock_tracking_agent.py", "USStockTrackingAgent",
                           "enter_reentry_candidate", ns)
+    for name in ("_weighted_slots_if_capped", "_holding_scenarios"):   # the real slot-weighted cap reads
+        helper = _load_method(ROOT / "prism-us/us_stock_tracking_agent.py", "USStockTrackingAgent", name, ns)
+        setattr(agent, name, lambda *a, _h=helper: _h(agent, *a))
     return lambda **kw: method(agent, account={"name": "main", "account_key": "acct-key"}, **kw)
 
 
@@ -968,3 +973,15 @@ def test_sector_falls_back_to_the_tickers_other_rows_then_unknown_without_blocki
     assert LIVE.resolve_sector(db, market, "DDD", gone) == ("기계·장비" if market == "KR" else "Unknown")
     assert LIVE.resolve_sector(db, market, "BBB", gone) == "Unknown"     # unknown is recorded, never a block
     assert LIVE.resolve_sector(tmp_path / "missing.sqlite", market, "AAA", gone) == "Unknown"
+
+
+def test_us_reentry_compares_the_ai_cap_with_slot_weighted_usage(monkeypatch, no_cooldown):
+    """2026-10-23: like the BUY path (2026-10-19), six 35% micro-split rows (2.1 slots) do not fill an AI cap of 6."""
+    micro = json.dumps({"micro_split": {"contract": "micro-split-live-v1", "allocation": "0.35"}})
+    kwargs = _kwargs("US")
+    kwargs["scenario"]["max_portfolio_size"] = 6
+    partial = _Agent("us_stock_holdings", slots=6, slot_scenario=micro)
+    assert asyncio.run(_us(partial, monkeypatch)(**kwargs))["bought"] is True
+    legacy = _Agent("us_stock_holdings", slots=6)                       # legacy rows count as one slot each
+    assert asyncio.run(_us(legacy, monkeypatch)(**_kwargs("US") | {"scenario": kwargs["scenario"]})) == \
+        {"bought": False, "reason": "max_slots"}
