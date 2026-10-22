@@ -167,6 +167,17 @@ One `trace_id` reads a decision end to end. Read it with `tools/clickstack_query
   decision, falling back to a watch-scoped trace when it is unknown. A live re-entry buy
   is a new position with its own trace. `reentry_v3.live_entry` carries its
   `entry_trace_id`, and that position's context events carry `origin_trace_id`.
+- **Buy decision quarterly EPS (2026-10-23)**: `decision_inputs.shadow_captured` (same trace as
+  the decision's `candidate.evaluated`) carries `quarterly_eps` (`quarterly_eps_v1`,
+  `prism_core/decision_snapshot.quarterly_eps`): `period`, `eps`, `prior_year_period`,
+  `prior_year_eps`, `yoy_pct` (only on a positive base), `turnaround` (base <= 0 < eps),
+  `change` (`yoy`, `turned_to_profit`, `turned_to_loss`, `loss_continued`, `zero_base`,
+  `fell_to_zero`), `currency`, `eps_basis`, `statement_basis`, `source`, `asof`, `status`,
+  `missing`. Reported quarters only, taken from the table the report step already collected in
+  the same run (KR WiseReport quarterly Financial Summary, period `YYYY/MM`, reported EPS in KRW;
+  US yfinance quarterly income statement, period = quarter-end date, diluted EPS in USD). No
+  extra fetch at decision time; a block collected after the decision or absent from the report
+  run is `MISSING` (`not_in_report_meta`, `collected_after_decision`). Observation only.
 - **Re-entry evidence (2026-10-21)**: `reentry_v3.shadow_trigger` and
   `reentry_v3.shadow_near_miss` (the primary rule missed only on its own filters: R/R floor,
   no target, chase, below the level, shakeout volume) carry a `snapshot`

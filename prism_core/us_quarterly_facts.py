@@ -73,6 +73,27 @@ def _prior_year(rows, latest):
     return None
 
 
+def quarterly_eps_summary(rows, *, asof=None):
+    """Numeric quarterly_eps_v1 block for the BUY decision ledger (KR twin in kr_financial_summary).
+
+    ``rows``: ``quarterly_rows`` output; None means the table was not collected. Diluted EPS, the same
+    prior-year match as the report table. Observation only.
+    """
+    from datetime import datetime, timezone
+
+    from prism_core.decision_snapshot import quarterly_eps
+    common = dict(source="yfinance_quarterly_income_stmt", currency="USD", eps_basis="diluted_eps",
+                  asof=asof or datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    if rows is None:
+        return quarterly_eps(None, None, reason="not_collected", **common)
+    if not rows:
+        return quarterly_eps(None, None, reason="no_reported_quarter", **common)
+    latest = rows[-1]
+    prior = _prior_year(rows, latest)
+    return quarterly_eps({"period": latest["period"], "eps": latest.get("diluted_eps")},
+                         {"period": prior["period"], "eps": prior.get("diluted_eps")} if prior else None, **common)
+
+
 def _change(prior, now, ko):
     if prior is None or now is None:
         return "N/A"

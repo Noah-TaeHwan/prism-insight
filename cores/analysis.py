@@ -208,15 +208,24 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
             prefetched['peer_comparison'] = peer_packet
         # Quarterly EPS with its prior-year quarter, collected by code so the
         # company-status writer no longer depends on which pages it scraped.
+        quarterly_frame, quarterly_reason = None, None
         try:
             from prism_core.kr_financial_summary import (
                 collect_wisereport_quarterly_summary, render_quarterly_facts)
-            quarterly_facts = render_quarterly_facts(
-                await collect_wisereport_quarterly_summary(company_code, reference_date), language)
+            quarterly_frame = await collect_wisereport_quarterly_summary(company_code, reference_date)
+            quarterly_facts = render_quarterly_facts(quarterly_frame, language)
             if quarterly_facts:
                 prefetched['quarterly_eps_facts'] = quarterly_facts
         except Exception as e:  # noqa: BLE001 - optional data, never a trading gate
+            quarterly_reason = f"error_{type(e).__name__}"
             logger.warning(f"Quarterly EPS facts unavailable: {type(e).__name__}")
+        if report_meta is not None:
+            # Ledger-only numbers from the same frame (quarterly_eps_v1); never a prompt input or gate.
+            try:
+                from prism_core.kr_financial_summary import quarterly_eps_summary
+                report_meta['quarterly_eps'] = quarterly_eps_summary(quarterly_frame, reason=quarterly_reason)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Quarterly EPS summary unavailable: {type(e).__name__}")
         if report_meta is not None:
             # SHADOW measurement only (decision_inputs_v1); not a BUY prompt input.
             from observability.decision_inputs import peer_valuation_summary

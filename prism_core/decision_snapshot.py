@@ -106,3 +106,48 @@ def excursion(path, entry, exit_price=None):
         return {"max_gain_pct": None, "max_loss_pct": None}
     return {"max_gain_pct": round((max(highs) / entry - 1) * 100, 4),
             "max_loss_pct": round((min(lows) / entry - 1) * 100, 4)}
+
+
+QUARTERLY_EPS_CONTRACT = "quarterly_eps_v1"
+
+
+def quarterly_eps(latest, prior, *, source, asof, currency, eps_basis, statement_basis=None, reason=None):
+    """Latest reported quarter's EPS vs the same quarter a year earlier, as numbers (observation only).
+
+    ``latest``/``prior``: {"period": str, "eps": number|None}; ``prior`` None = the prior-year quarter is
+    not in the provider table. ``reason`` names why ``latest`` is None. Reported quarters only, as
+    published when collected (``asof``); estimates never enter. A growth rate exists only on a positive
+    base: a loss or zero base gives ``yoy_pct=None`` and the sign change is in ``change``/``turnaround``.
+    """
+    out = {"contract": QUARTERLY_EPS_CONTRACT, "period": None, "eps": None, "prior_year_period": None,
+           "prior_year_eps": None, "yoy_pct": None, "turnaround": None, "change": None,
+           "currency": currency, "eps_basis": eps_basis, "statement_basis": statement_basis,
+           "source": source, "asof": asof}
+    if not latest or not latest.get("period"):
+        return {**out, "status": "MISSING", "missing": {"latest_quarter": reason or "no_reported_quarter"}}
+    missing = {}
+    out["period"] = str(latest["period"])
+    eps = out["eps"] = _num(latest.get("eps"))
+    if eps is None:
+        missing["eps"] = "not_reported"
+    base = None
+    if not prior or not prior.get("period"):
+        missing["prior_year_quarter"] = "not_in_table"
+    else:
+        out["prior_year_period"] = str(prior["period"])
+        base = out["prior_year_eps"] = _num(prior.get("eps"))
+        if base is None:
+            missing["prior_year_eps"] = "not_reported"
+    status = "OK" if not missing else "PARTIAL"
+    if eps is None or base is None:
+        missing["yoy_pct"] = missing["turnaround"] = "inputs_missing"
+    else:
+        out["turnaround"] = base <= 0 < eps
+        if base > 0:
+            out["yoy_pct"] = round((eps / base - 1) * 100, 4)
+            out["change"] = "yoy" if eps > 0 else ("turned_to_loss" if eps < 0 else "fell_to_zero")
+        else:
+            missing["yoy_pct"] = "base_not_positive"
+            out["change"] = ("turned_to_profit" if eps > 0 else
+                             "loss_continued" if base < 0 and eps < 0 else "zero_base")
+    return {**out, "status": status, "missing": missing}

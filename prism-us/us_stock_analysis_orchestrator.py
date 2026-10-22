@@ -630,6 +630,10 @@ class USStockAnalysisOrchestrator:
         semaphore = asyncio.Semaphore(concurrency)
         from prism_core.market_report_singleflight import MarketReportCache
         market_report_cache = MarketReportCache()
+        # Per-ticker ledger-only report facts handed to the tracking agent in-process (KR mirror).
+        report_meta_by_ticker = {}
+        if self is not None:   # some tests call the method unbound
+            self.report_meta = report_meta_by_ticker
 
         async def generate_one(idx, ticker_info):
             if isinstance(ticker_info, dict):
@@ -652,6 +656,7 @@ class USStockAnalysisOrchestrator:
                 from prism_core.oneil_batch_setup import enabled, write_sidecar
                 research_metadata = {}
                 research_kwargs = {'research_metadata': research_metadata} if enabled() else {}
+                report_meta = {}
 
                 async with semaphore:
                     logger.info(
@@ -664,12 +669,15 @@ class USStockAnalysisOrchestrator:
                         language=language,
                         macro_context=macro_context,
                         market_report_cache=market_report_cache,
+                        report_meta=report_meta,
                         **research_kwargs,
                     )
 
                 if report and len(report.strip()) > 0:
                     with open(output_file, "w", encoding="utf-8") as f:
                         f.write(report)
+                    if report_meta:
+                        report_meta_by_ticker[ticker] = report_meta
                     if research_metadata.get('oneil_source') is not None:
                         try:
                             write_sidecar(output_file, research_metadata['oneil_source'])
@@ -1542,6 +1550,7 @@ class USStockAnalysisOrchestrator:
                             pdf_paths, chat_id, language,
                             telegram_config=self.telegram_config,
                             trigger_results_file=trigger_results_file,
+                            report_meta=getattr(self, "report_meta", None),
                             market_regime=(macro_context or {}).get("market_regime"),
                             market_context={
                                 **(
