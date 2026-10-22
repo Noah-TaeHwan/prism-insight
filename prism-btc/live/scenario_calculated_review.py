@@ -886,7 +886,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return deepcopy(result)
     draft_prompt = DRAFT_PROMPT
     if context.get("entry_contract_version") in (1, 2):
-        draft_prompt += "\nEntry-contract exception: FAILED wait_proposal is a nonexecutable template, not a fallback. All draft assessments must match exactly; supply valid EXIT candidates only when FAILED.\n"
+        draft_prompt += "\nEntry-contract exception: FAILED wait_proposal is a nonexecutable template, not a fallback. Draft assessments must share contract_id/status, not reason wording; supply valid EXIT candidates only when FAILED.\n"
     if allocation:
         draft_prompt = draft_prompt.replace("SL, TP, quantities and fractions yourself", "SL, TP, confidence and entry allocation_fraction yourself") + ALLOCATION_SINGLE_PROMPT
         payload = _model_payload(frozen_snapshot, frozen_context, draft_schema)
@@ -899,7 +899,11 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     failed_template = False
     if context.get("entry_contract_version") in (1, 2):
         assessment = wait_wire.get("thesis_assessment")
-        if any(candidate.get("thesis_assessment") != assessment for candidate in draft["candidates"]):
+        assessments = [assessment] + [candidate.get("thesis_assessment") for candidate in draft["candidates"]]
+        # Compare state only; retain original explanations in hash-bound receipts.
+        states = [{key: value for key, value in item.items() if key != "reason"}
+                  if isinstance(item, dict) else item for item in assessments]
+        if any(state != states[0] for state in states[1:]):
             raise ValueError("research_entry_assessment_conflict")
         failed_template = isinstance(assessment, dict) and assessment.get("status") == "FAILED"
         if failed_template and (not draft["candidates"] or any(c["action"] != "EXIT" for c in draft["candidates"])):

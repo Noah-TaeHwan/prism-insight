@@ -92,7 +92,7 @@ def response_contract(context):
         from live.scenario_entry_contract import assessment_schema, entry_contract_schema
         contract["entry_contract"] = entry_contract_schema(context['entry_contract_version'])
         contract["thesis_assessment"] = assessment_schema(context)
-        contract["rules"].append("entry_contract is non-null only for OPEN; all other actions use null. Registered active scenarios require thesis_assessment with exact contract_id and INTACT/WEAKENING/FAILED/UNKNOWN. FAILED permits EXIT only. Flat/legacy assessment is null. Two-pass WAIT template and every candidate must share one exact assessment; FAILED WAIT template cannot be selected and requires a valid EXIT candidate.")
+        contract["rules"].append("entry_contract is non-null only for OPEN; all other actions use null. Registered active scenarios require thesis_assessment with exact contract_id and INTACT/WEAKENING/FAILED/UNKNOWN. FAILED permits EXIT only. Flat/legacy assessment is null. Two-pass WAIT/candidates share contract_id/status; reasons may differ. FAILED WAIT template cannot be selected and requires a valid EXIT candidate.")
     return contract
 
 
