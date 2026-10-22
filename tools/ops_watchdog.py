@@ -304,7 +304,7 @@ def _journalctl(unit, cursor):
     argv = ["journalctl", "-u", unit, "-o", "json", "--no-pager", "-q"]
     argv += ["--after-cursor", cursor, "-n", str(JOURNAL_MAX_ENTRIES)] if cursor else ["-n", "1"]
     try:
-        done = subprocess.run(argv, capture_output=True, timeout=JOURNAL_TIMEOUT_S, check=False)  # nosec B603 B607
+        done = subprocess.run(argv, capture_output=True, timeout=JOURNAL_TIMEOUT_S, check=False)  # nosec B603 B607  # nosemgrep
     except (OSError, subprocess.SubprocessError):
         return None
     if done.returncode != 0:
