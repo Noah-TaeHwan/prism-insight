@@ -212,6 +212,7 @@ class USTelegramSummaryGenerator:
             # Afternoon triggers
             "Intraday Rise Top": "Intraday Rise",
             "Volume Surge Sideways": "Volume Surge (Sideways)",
+            "Steady Leader Pullback": "Steady Leader Pullback",
             # Fallback/legacy names
             "intraday_surge": "Intraday Surge",
             "volume_surge": "Volume Surge",

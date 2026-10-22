@@ -72,6 +72,9 @@ TRIGGER_CRITERIA = {
     "Volume Surge Sideways": {"rr_target": 1.5, "sl_max": 0.07},
     "Macro Sector Leader": {"rr_target": 1.3, "sl_max": 0.07},
     "Contrarian Value Pick": {"rr_target": 1.5, "sl_max": 0.08},
+    # T-B (2026-10-22): 0.05 = the tightest regime max loss (cores/buy_gate.REGIME_RULES 5-7%), so
+    # this proxy is never wider than any regime cap. The natural MA20 x 0.99 stop is often wider.
+    "Steady Leader Pullback": {"rr_target": 1.3, "sl_max": 0.05},
     "default": {"rr_target": 1.5, "sl_max": 0.07}
 }
 
@@ -1474,6 +1477,9 @@ def select_final_tickers(triggers: dict, trade_date: str = None, use_hybrid: boo
                 remaining_slots -= 1
 
     if selection_diagnostics is not None:
+        # Hard cap and score basis, read by the optional steady-leader live merge.
+        selection_diagnostics["max_selections"] = max_selections
+        selection_diagnostics["score_column"] = score_column
         # Evidence only (docs/TWO_WEEK_REVIEW_ko.md): candidates that lost the guaranteed pick.
         selection_diagnostics["trigger_quality"] = trigger_quality.selection_record(
             trigger_candidates, phase2_order, before_guarantee, selected_tickers, fill_picks,
@@ -1775,6 +1781,78 @@ def _pocket_pivot_observe(trade_date, prev_date, snapshot, prev_snapshot, univer
         return None
 
 
+def _steady_leader_detect(trade_date, prev_date, snapshot, prev_snapshot, universe_diagnostic):
+    """Detect the "Steady Leader Pullback" trigger (STEADY_LEADER_TRIGGER_MODE, default off).
+
+    Uses the batch's eligible universe (listed_common: >= $1B cap and >= $50M value already
+    applied) and the same $50M floor on the signal day, completed daily bars only (before the
+    16:00 ET close the signal day is the previous session). Returns (block, universe) or None
+    when off or on any error (fail-open: the batch stays unchanged).
+    """
+    try:
+        from prism_core import steady_leader_trigger as slt
+        mode = slt.resolve_mode(logger)
+        if mode == "off":
+            return None
+        complete = slt.session_complete("US", trade_date)
+        universe = slt.observe_universe(snapshot, prev_snapshot, complete=complete,
+                                        min_amount=MIN_TRADING_VALUE)
+        block = slt.evaluate(
+            market="US", mode=mode, batch_trade_date=trade_date,
+            signal_date=trade_date if complete else prev_date,
+            universe=universe, fetch_history=get_multi_day_ohlcv,
+            universe_basis={"session_complete": complete, "up_day_prefilter": complete,
+                            "min_trading_value_usd": MIN_TRADING_VALUE,
+                            "min_market_cap_usd": (universe_diagnostic or {}).get('min_market_cap_usd'),
+                            "market_cap_basis": ("batch_universe_eligibility" if universe_diagnostic
+                                                 else "not_checked_major_indices")},
+            log=logger)
+        return block, universe
+    except Exception as exc:  # noqa: BLE001 - the optional trigger must never change the batch
+        logger.warning("[STEADY-LEADER] unavailable: %s", type(exc).__name__)
+        return None
+
+
+def _steady_leader_live_merge(final_results, block, snapshot, prev_snapshot, selection_diagnostics):
+    """Live mode: add at most one T-B pick within the regime's hard cap (fail-open)."""
+    try:
+        from prism_core import steady_leader_trigger as slt
+        cap = selection_diagnostics.get("max_selections")
+        if cap is None:
+            block["live"] = {"applied": False, "reason": "CAP_UNKNOWN"}
+            return final_results
+
+        def pick_frame(ticker, candidate):
+            if ticker not in snapshot.index:
+                return None
+            row = snapshot.loc[[ticker], ["Close", "Volume", "Amount"]].copy()
+            prev_close = (pd.to_numeric(prev_snapshot.loc[ticker, "Close"], errors="coerce")
+                          if ticker in prev_snapshot.index else float("nan"))
+            row["DailyChange"] = (row["Close"] / prev_close - 1) * 100
+            try:
+                row = enhance_dataframe(row)
+            except Exception:  # noqa: BLE001 - a missing display name is not a reason to skip
+                pass
+            if "CompanyName" not in row.columns or not row["CompanyName"].iloc[0]:
+                row["CompanyName"] = ticker
+            for column, value in slt.pick_columns(candidate).items():
+                row[column] = value
+            return row
+
+        merged, decision = slt.merge_live(final_results, block, max_selections=cap,
+                                          pick_frame=pick_frame,
+                                          score_column=selection_diagnostics.get("score_column"),
+                                          log=logger)
+        block["live"] = decision
+        slt.unmark_displaced(selection_diagnostics.get("candidate_ledger"),
+                             decision.get("displaced_ticker"))
+        return merged
+    except Exception as exc:  # noqa: BLE001 - keep the regular selection on any error
+        logger.warning("[STEADY-LEADER] live merge unavailable: %s", type(exc).__name__)
+        block["live"] = {"applied": False, "reason": "ERROR"}
+        return final_results
+
+
 def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = None, macro_context: dict = None, override_date: str = None, watch_batch_ref: str = None):
     """
     Execute trigger batch.
@@ -2011,6 +2089,15 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
     selection_record = selection_diagnostics.get("trigger_quality")
     trigger_quality.emit_selection_record(selection_record, market="US", trade_date=trade_date,
                                           trigger_mode=trigger_time, log=logger)
+
+    # "Steady Leader Pullback" (default off). observe: metadata + ledger only. live: at most one
+    # pick joins final_results within the regime's hard cap, before the ledger is written.
+    steady = (_steady_leader_detect(trade_date, prev_date, snapshot, prev_snapshot, universe_diagnostic)
+              if trigger_time == "afternoon" else None)
+    steady_block = steady[0] if steady else None
+    if steady_block and steady_block["mode"] == "live":
+        final_results = _steady_leader_live_merge(final_results, steady_block, snapshot,
+                                                  prev_snapshot, selection_diagnostics)
     try:
         from observability import candidate_ledger
         candidate_ledger.record(selection_diagnostics.get("candidate_ledger"), market="US",
@@ -2018,6 +2105,10 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
                                 market_regime=(macro_context or {}).get("market_regime"))
     except Exception as exc:  # noqa: BLE001 - observation must not stop screening
         logger.warning("Candidate ledger unavailable: %s", type(exc).__name__)
+    if steady_block:
+        from prism_core import steady_leader_trigger as _slt
+        _slt.record_ledger(steady_block, universe=steady[1], market="US",
+                           market_regime=(macro_context or {}).get("market_regime"), log=logger)
 
     # Observation only (default off): never enters final_results or selection.
     pocket_pivot_block = (
@@ -2082,6 +2173,9 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
                     if "SelectionChannel" in stocks_df.columns:
                         stock_info["selection_channel"] = str(stocks_df.loc[ticker, "SelectionChannel"])
                     stock_info["trigger_quality_weight"] = quality_snapshot.weight(trigger_type)
+                    if "steady_leader_signal_date" in stocks_df.columns:
+                        from prism_core.steady_leader_trigger import export_fields
+                        stock_info["steady_leader"] = export_fields(stocks_df.loc[ticker])
 
                     if "CapacityFill" in stocks_df.columns:
                         stock_info["capacity_fill"] = bool(stocks_df.loc[ticker, "CapacityFill"])
@@ -2138,6 +2232,7 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
             "trigger_quality": {**quality_snapshot.to_metadata(),
                                 **({"selection": selection_record} if selection_record else {})},
             **({"pocket_pivot_observe": pocket_pivot_block} if pocket_pivot_block else {}),
+            **({"steady_leader": steady_block} if steady_block else {}),
         }
 
         with open(output_file, 'w', encoding='utf-8') as f:
