@@ -116,6 +116,9 @@ def test_sell_factory_matches_reviewed_volume_prompt():
     # "re-entry cost" premise and the KR long-hold opportunity-cost sell, "-5% sharp decline" and "market shock" discretionary sells are dropped (user decisions); the raised-stop rule stays intraday (user decision, F2 replay).
     # 2026-10-19 reviewed: Core-4 adds one line deferring to the user message's system-computed facts block
     # (prism_core/sell_facts.py: trailing line, raise eligibility, tier-3 conditions, sessions held). No rule change.
+    # 2026-10-22 reviewed (user decision after the FRO re-entry was sold 57 minutes after the buy): Tier 3 counts only
+    # when all three lower closes are completed bars after the entry session; KR/US x ko/en and the stored
+    # scenario trigger say the same (tests/test_sell_facts.py). Hard stop, -7%, trailing and the MA50 exit unchanged.
     source = SOURCE.read_text(encoding="utf-8")
     node = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "create_sell_decision_agent")
-    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "497fb06e9255b6a3830b4c5069150287fbc66e3505dbb7927bec788d34a860c3"
+    assert hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest() == "fefd48a873c8b131d88427af3f6096cf0c826507b037eae5dcdbcb97ef8e2e76"
