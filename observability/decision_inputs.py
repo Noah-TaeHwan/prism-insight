@@ -87,6 +87,20 @@ def peer_valuation_summary(packet):
         return {"status": "MISSING", "reason": "summary_error_" + type(error).__name__}
 
 
+def _quarterly_eps(meta, now):
+    """Report-stage quarterly_eps_v1 block (same run, collected before the decision); never refetched."""
+    block = meta.get("quarterly_eps")
+    if not isinstance(block, dict):
+        return {"contract": "quarterly_eps_v1", "status": "MISSING", "missing": {"latest_quarter": "not_in_report_meta"}}
+    try:
+        if datetime.fromisoformat(str(block.get("asof"))) > now:   # look-ahead guard
+            return {"contract": "quarterly_eps_v1", "status": "MISSING",
+                    "missing": {"latest_quarter": "collected_after_decision"}}
+    except (TypeError, ValueError):
+        pass
+    return dict(block)
+
+
 def _next_earnings(ticker, today):
     import yfinance as yf
     calendar = yf.Ticker(ticker).calendar or {}
@@ -152,6 +166,7 @@ def emit_decision_inputs(agent, *, market, ticker, decision_id, scenario, curren
                       "missing": {"daily_frame": "not_captured"}}
         meta = (getattr(agent, "_report_meta", None) or {}).get(ticker) or {}
         result["peer_valuation"] = meta.get("peer_valuation") or {"status": "MISSING", "reason": "not_in_report_meta"}
+        result["quarterly_eps"] = _quarterly_eps(meta, now)
         shown = (getattr(agent, "_decision_input_prompt", {}) or {}).get(ticker)
         if market == "US":
             result["earnings"] = (shown or {}).get("earnings") or earnings_lookup(ticker, now.date())

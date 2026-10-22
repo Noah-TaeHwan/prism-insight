@@ -231,6 +231,32 @@ def _fmt(value, unit=""):
     return f"{value:,.0f}{unit}" if _finite(value) else "N/A"
 
 
+def quarterly_eps_summary(frame, *, asof=None, reason=None):
+    """Numeric twin of ``render_quarterly_facts`` for the BUY decision ledger (quarterly_eps_v1).
+
+    Same anchor as the report table: latest reported (non-estimate) quarter vs the same month a year
+    earlier. ``frame`` None (not collected) gives status MISSING with ``reason``. Observation only.
+    """
+    from prism_core.decision_snapshot import quarterly_eps
+    asof = asof or datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds")
+    common = dict(source="wisereport_financial_summary_quarterly", asof=asof, currency="KRW",
+                  eps_basis="reported_eps")
+    if frame is None:
+        return quarterly_eps(None, None, reason=reason or "not_collected", **common)
+    common["statement_basis"] = frame.attrs.get("basis")
+    if "eps" not in frame or "estimate" not in frame:
+        return quarterly_eps(None, None, reason="eps_row_missing", **common)
+    actual = frame[~frame["estimate"].astype(bool)]
+    if actual.empty:
+        return quarterly_eps(None, None, reason="no_reported_quarter", **common)
+    latest = str(actual.index[-1])
+    year, month = latest.split("/")
+    prior = f"{int(year) - 1}/{month}"
+    return quarterly_eps({"period": latest, "eps": actual.at[latest, "eps"]},
+                         {"period": prior, "eps": actual.at[prior, "eps"]} if prior in actual.index else None,
+                         **common)
+
+
 def render_quarterly_facts(frame, language="ko"):
     """Markdown facts: reported quarters, latest vs prior-year quarter, share-count change.
 

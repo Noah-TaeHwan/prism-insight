@@ -5649,7 +5649,7 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
     async def run(self, pdf_report_paths: List[str], chat_id: str = None,
                   language: str = "ko", telegram_config=None, trigger_results_file: str = None,
                   sector_names: list = None, market_regime: str = None,
-                  market_context: dict | None = None) -> bool:
+                  market_context: dict | None = None, report_meta: dict | None = None) -> bool:
         """
         Main execution function for US stock tracking system.
 
@@ -5659,12 +5659,15 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
             language: Message language (default: "ko")
             telegram_config: TelegramConfig object for multi-language support
             trigger_results_file: Path to trigger results JSON file
+            report_meta: {ticker: {'quarterly_eps': ...}} ledger-only facts from report generation (optional)
 
         Returns:
             bool: Execution success status
         """
         try:
             logger.info("Starting US tracking system batch execution")
+            # Ledger-only (decision_inputs); never a BUY prompt input or gate.
+            self._report_meta = report_meta if isinstance(report_meta, dict) else {}
 
             # Store telegram_config for use in send_telegram_message
             self.telegram_config = telegram_config

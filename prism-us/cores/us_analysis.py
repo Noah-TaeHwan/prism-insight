@@ -203,6 +203,7 @@ async def analyze_us_stock(
     macro_context: dict = None,
     market_report_cache: MarketReportCache | None = None,
     research_metadata: dict | None = None,
+    report_meta: dict | None = None,
 ) -> str:
     """
     Generate comprehensive stock analysis report for US stock.
@@ -214,6 +215,7 @@ async def analyze_us_stock(
         language: Language code (default: "ko")
         include_news: Whether to include news analysis (requires Perplexity API)
         market_report_cache: Optional batch-owned market report singleflight.
+        report_meta: Optional dict that receives ledger-only facts (``quarterly_eps``) for the BUY step.
 
     Returns:
         str: Generated final report markdown text
@@ -267,6 +269,13 @@ async def analyze_us_stock(
         except Exception as e:
             logger.warning(f"US data prefetch failed, falling back to MCP: {e}")
             prefetched = {}
+        if report_meta is not None:
+            # Ledger-only numbers from the prefetched quarterly table (quarterly_eps_v1); never a prompt input.
+            try:
+                from prism_core.us_quarterly_facts import quarterly_eps_summary
+                report_meta['quarterly_eps'] = quarterly_eps_summary(prefetched.get('quarterly_results'))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Quarterly EPS summary unavailable: {type(e).__name__}")
 
         # Private numeric sidecar never reaches agent instructions or public report.
         oneil_source = prefetched.pop('_oneil_batch_source', None)
