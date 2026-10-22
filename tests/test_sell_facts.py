@@ -119,3 +119,41 @@ def test_switch_off_returns_nothing(monkeypatch):
     monkeypatch.setenv("SELL_FACTS_ENABLED", "false")
     assert F.prompt_block_safe(market="KR", language="ko", stock_data={"ticker": "005930"}, highest_price=1,
                                threshold_pct=3.0, regime=None) == ""
+
+
+def test_tier3_counts_only_on_lower_closes_after_the_entry_session():
+    # 2026-10-22 FRO: re-entry bought on 10/21, sold the same day on the 10/20 Tier-3 bar (weakness before the buy)
+    met = {"met": True}
+    assert F.tier3_counts(met, 0) is False and F.tier3_counts(met, 2) is False
+    assert F.tier3_counts(met, 3) is True and F.tier3_counts(met, 19) is True
+    assert F.tier3_counts(met, None) is None                      # unknown entry -> unknown, never filled
+    assert F.tier3_counts({"met": False}, 0) is False
+    assert F.tier3_counts({"met": None}, 5) is None and F.tier3_counts(None, 5) is None
+
+
+@pytest.mark.parametrize("language", ["ko", "en"])
+def test_prompt_block_rejects_tier3_from_before_the_buy(language):
+    closes = [100.0] * 17 + [104.0, 103.0, 102.0, 95.0]            # bars 09-01 .. 09-21, Tier 3 met on 09-21
+    bars = _bars(closes, [100.0] * 20 + [150.0])
+    stock = {"ticker": "FRO", "buy_price": 96.0, "current_price": 96.5, "stop_loss": 90.0,
+             "buy_date": "2026-09-22 02:52:00", "scenario": "{}"}       # KST: entry session 09-21 ET, 0 sessions held
+    text = F.prompt_block(market="US", language=language, stock_data=stock, highest_price=96.5, threshold_pct=3.0,
+                          regime="sideways", bars=bars)
+    if language == "ko":
+        assert "3개 모두 충족 예" in text and "매수 후 확정 일봉: 아니오 → 3단계 매도 근거 아니오" in text
+    else:
+        assert "all three met yes" in text and "after the entry session: no → Tier-3 sell reason no" in text
+    stock["buy_date"] = "2026-09-17 10:00:00"                           # 09-18 .. 09-21 after entry: counts
+    text = F.prompt_block(market="US", language=language, stock_data=stock, highest_price=96.5, threshold_pct=3.0,
+                          regime="sideways", bars=bars)
+    assert ("3단계 매도 근거 예" in text) if language == "ko" else ("Tier-3 sell reason yes" in text)
+
+
+def test_sell_prompts_count_tier3_only_after_the_entry():
+    for path in ("cores/agents/trading_agents.py", "prism-us/cores/agents/trading_agents.py"):
+        src = (ROOT / path).read_text(encoding="utf-8")
+        assert "all three declining closes are completed bars after the entry session (3+ sessions held)" in src
+        assert "하락한 3거래일이 모두 매수일 이후의 확정 일봉일 때만 셉니다(보유 3거래일 이상)" in src
+        assert "Core-4 Tier 3: 3 consecutive daily-closing declines after the entry session" in src
+        assert "핵심-4의 3단계: 매수 후 3거래일 연속 종가 하락" in src
+    assert F.TREND_DOWN_CLOSES == 3
