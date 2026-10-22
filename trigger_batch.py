@@ -1802,6 +1802,43 @@ def _resolve_trade_date(today_str: str) -> str:
     raise MarketSnapshotUnavailableError("No local-calendar trading session found")
 
 
+POCKET_PIVOT_MIN_MARKET_CAP = 500_000_000_000
+
+
+def _pocket_pivot_observe(trade_date: str, prev_date: str, snapshot: pd.DataFrame,
+                          prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame,
+                          market_regime: Optional[str]) -> Optional[dict]:
+    """Observe the "Pocket Pivot Base" trigger (POCKET_PIVOT_TRIGGER_MODE=observe, default off).
+
+    Runs after selection on the same KIS universe and floors (trade value >= 100억, market cap
+    >= 5000억); results go to JSON metadata and the candidate ledger only, never to selection.
+    Fail-open: any error returns None and leaves the batch unchanged.
+    """
+    try:
+        from prism_core import pocket_pivot_trigger as ppt
+        if ppt.resolve_mode(logger) != "observe":
+            return None
+        complete = ppt.session_complete("KR", trade_date)
+        universe = ppt.observe_universe(snapshot, prev_snapshot, complete=complete,
+                                        min_amount=SCREENING_MIN_TRADE_VALUE)
+        caps = (pd.to_numeric(cap_df["시가총액"], errors="coerce")
+                if cap_df is not None and "시가총액" in cap_df.columns else pd.Series(dtype=float))
+        eligible = caps[caps >= POCKET_PIVOT_MIN_MARKET_CAP].index
+        universe = universe.loc[universe.index.intersection(eligible)]
+        return ppt.run_observe(
+            market="KR", batch_trade_date=trade_date,
+            signal_date=trade_date if complete else prev_date,
+            universe=universe, fetch_history=get_multi_day_ohlcv, names=_get_ticker_name_map(),
+            universe_basis={"session_complete": complete, "up_day_prefilter": complete,
+                            "min_trade_value_krw": SCREENING_MIN_TRADE_VALUE,
+                            "min_market_cap_krw": POCKET_PIVOT_MIN_MARKET_CAP,
+                            "market_cap_basis": "batch_cap_df"},
+            market_regime=market_regime, log=logger)
+    except Exception as exc:  # noqa: BLE001 - observation must never change the batch
+        logger.warning("[POCKET-PIVOT] observe unavailable: %s", type(exc).__name__)
+        return None
+
+
 # --- Batch execution function ---
 def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = None, macro_context: dict = None,
               *, watch_batch_ref: str | None = None):
@@ -1907,6 +1944,12 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
                                 market_regime=(macro_context or {}).get("market_regime"))
     except Exception as exc:  # noqa: BLE001 - observation must not stop screening
         logger.warning("Candidate ledger unavailable: %s", type(exc).__name__)
+
+    # Observation only (default off): never enters final_results or selection.
+    pocket_pivot_block = (
+        _pocket_pivot_observe(trade_date, prev_date, snapshot, prev_snapshot, cap_df,
+                              (macro_context or {}).get("market_regime"))
+        if trigger_time == "afternoon" else None)
 
     # Optional research observes final selection, including an empty candidate set.
     if watch_batch_ref:
@@ -2026,6 +2069,7 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
             "emerging_liquidity_max_candidates": EMERGING_LIQUIDITY_MAX_CANDIDATES,
             "trigger_quality": {**quality_snapshot.to_metadata(),
                                 **({"selection": selection_record} if selection_record else {})},
+            **({"pocket_pivot_observe": pocket_pivot_block} if pocket_pivot_block else {}),
         }
 
         # Save JSON file
