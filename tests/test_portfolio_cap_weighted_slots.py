@@ -53,9 +53,12 @@ def test_call_sites_keep_the_hard_row_cap_and_use_weighted_ai_cap(path, hard_che
     # The AI cap is never compared with the row count any more.
     assert "if current_slots >= max_portfolio_size:" not in src
     assert "if current_slots >= slot_limit:" not in src
-    # Only the US re-entry path (enter_reentry_candidate) keeps the row-count comparison for now: it is being
-    # changed by the open re-entry filing-check PR (#1052) and follows after it merges.
-    assert src.count("if current_slots >= scenario_slot_limit:") == (1 if path.startswith("prism-us") else 0)
+    # 2026-10-23: the US re-entry path (enter_reentry_candidate) follows too, after #1052 merged.
+    assert "if current_slots >= scenario_slot_limit:" not in src
+    if path.startswith("prism-us"):
+        assert ("if (current_slots >= self.max_slots\n"
+                "                    or self._weighted_slots_if_capped(current_slots, scenario_slot_limit)"
+                " >= scenario_slot_limit):") in src
     assert "usage_line(current_slots" in src
 
 

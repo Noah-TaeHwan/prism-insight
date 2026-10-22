@@ -50,7 +50,10 @@ message to the private maintenance chat (`prism_core.ops_alert`):
   summary means the watchdog itself is down.
 
 Jobs and their heartbeat lines are listed in `JOBS` (the loops' own summary lines, pinned in
-`tests/test_ops_watchdog.py`). Add a job there when a new scheduled job is added. Rollback:
+`tests/test_ops_watchdog.py`). Add a job there when a new scheduled job is added. Jobs under systemd
+(the B3 worker `prism-b3-ae-shadow@kr|us`, which also runs the LIVE in-slot adds) are read from journald
+(`journalctl -u <unit>` after a cursor kept in the state file); its per-minute `b3-ae-worker-v1` line is
+the heartbeat. Without a readable journal such a job is skipped, never alerted. Rollback:
 `OPS_WATCHDOG_ENABLED=false` or remove the cron line. State: `runtime/ops_watchdog_state.json`.
 
 ## Deployment topology
