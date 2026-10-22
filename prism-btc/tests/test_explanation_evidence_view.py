@@ -15,6 +15,33 @@ def event():
             wait_proposal=dict(rationale='original WAIT'), candidates=[], no_candidate_reason='no change')))
 
 
+def test_local_label_and_position_mismatches_render_their_actual_basis():
+    result = dict(source_events=1, examined_events=1, omitted_events=0,
+        views=[dict(slot='1', phase='candidate', status='PARTIAL_SCOPE', evidence=dict(annotations=[
+        dict(kind='REFERENCE_LABEL', status='MISMATCH', label_reference=['12h', 'confirmed', 'ma10'],
+             token_reference=['1h', 'confirmed', 'close']),
+        dict(kind='MA_MARK_POSITION', status='MISMATCH', cited_position='위', value=82197.9171,
+             comparison_value=82200.23, actual_position='아래'),
+    ]))])
+    rendered = render_markdown(result)
+    assert '라벨 12h:confirmed:ma10, 토큰 1h:confirmed:close' in rendered
+    assert 'MA 82197.9171는 Mark 82200.23의 아래' in rendered
+    assert 'None' not in rendered
+
+
+def test_ambiguous_basis_is_displayed_as_unassessed_not_numeric_error():
+    result = dict(source_events=1, examined_events=1, omitted_events=0,
+        views=[dict(slot='1', phase='candidate', status='PARTIAL_SCOPE', evidence=dict(annotations=[
+            dict(kind='CONFIRMED_CLOSE_PAIR', status='UNASSESSED', cited_before=82782.3,
+                 cited_value=82751.7, actual_before=82915.9, value=82782.3),
+            dict(kind='MA_MARK_POSITION', status='UNASSESSED', value=82197.9171,
+                 comparison_value=82200.23),
+        ]))])
+    text = render_markdown(result)
+    assert text.count('수동 대조 필요') == 2 and '수치 인용 불일치' not in text
+    assert '인용 82782.3→82751.7, 최신 두 봉 82915.9→82782.3' in text
+
+
 def test_metadata_failure_does_not_mutate_original_event_or_grant_authority():
     source = event()
     before = deepcopy(source)

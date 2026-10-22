@@ -101,7 +101,7 @@ def render_markdown(result):
     shown = 0
     for view in result['views']:
         annotations = view.get('evidence', {}).get('annotations', [])
-        selected = [a for a in annotations if a.get('status') in ('MISMATCH', 'UNVERIFIED', 'VERIFIED_REFERENCE')]
+        selected = [a for a in annotations if a.get('status') in ('MISMATCH', 'UNVERIFIED', 'UNASSESSED', 'VERIFIED_REFERENCE')]
         if not selected and view['status'] != 'UNVERIFIED':
             continue
         shown += 1
@@ -110,12 +110,28 @@ def render_markdown(result):
             lines.append('- 입력 연결 또는 표시 검증이 불가능합니다. 원문은 미검증입니다.')
         for annotation in selected:
             if annotation['status'] == 'MISMATCH':
-                lines.append(f"- 수치 인용 불일치: 인용값 {annotation.get('cited_value')}, "
-                             f"원본 현재값 {annotation.get('value')}.")
+                if annotation.get('kind') == 'REFERENCE_LABEL':
+                    lines.append('- 명시 라벨·참조 불일치: 라벨 '+':'.join(annotation['label_reference'])
+                                 +', 토큰 '+':'.join(annotation['token_reference'])+'.')
+                elif annotation.get('kind') == 'MA_MARK_POSITION':
+                    lines.append(f"- MA 위치 불일치: 설명은 {annotation['cited_position']}, "
+                                 f"원본 MA {annotation['value']}는 Mark {annotation['comparison_value']}의 "
+                                 f"{annotation['actual_position']}입니다.")
+                else:
+                    lines.append(f"- 수치 인용 불일치: 인용값 {annotation.get('cited_value')}, "
+                                 f"원본 현재값 {annotation.get('value')}.")
                 if 'actual_before' in annotation:
                     lines.append(f"- 기준값 대조: 인용 {annotation.get('cited_before')}, 원본 {annotation['actual_before']}.")
             elif annotation['status'] == 'UNVERIFIED':
                 lines.append('- 참조 또는 인용 일부를 검증하지 못했습니다.')
+            elif annotation['status'] == 'UNASSESSED':
+                if annotation.get('kind') == 'CONFIRMED_CLOSE_PAIR':
+                    lines.append(f"- 수동 대조 필요: 인용 구간이 최신 두 봉인지 불명확합니다. "
+                                 f"인용 {annotation['cited_before']}→{annotation['cited_value']}, "
+                                 f"최신 두 봉 {annotation['actual_before']}→{annotation['value']}.")
+                elif annotation.get('kind') == 'MA_MARK_POSITION':
+                    lines.append(f"- 수동 대조 필요: 현재가가 Mark인지 불명확합니다. MA {annotation['value']}, "
+                                 f"참고 Mark {annotation['comparison_value']}이며 원문 위치 판정은 미평가입니다.")
             if 'canonical_fact' in annotation:
                 lines.append('- '+annotation['canonical_fact'])
         lines.append('')
