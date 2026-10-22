@@ -193,6 +193,9 @@ def _run(tmp_path, market, mode, shape="flat", detect_fail=False, session_open=F
                CANDIDATE_LEDGER_ENABLED="true", CANDIDATE_LEDGER_DB=str(db),
                TEST_PP_DETECT_FAIL=str(detect_fail).lower(),
                TEST_PP_SESSION_OPEN=str(session_open).lower())
+    # The batches call load_dotenv(); keep a host .env (db-server enables trigger observe modes and
+    # market-participation metadata) out of these fixture runs.
+    env["PYTHON_DOTENV_DISABLED"] = "1"
     env.pop("POCKET_PIVOT_TRIGGER_MODE", None)
     if mode is not None:
         env["POCKET_PIVOT_TRIGGER_MODE"] = mode

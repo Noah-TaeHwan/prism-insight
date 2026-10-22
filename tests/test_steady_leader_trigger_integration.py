@@ -204,6 +204,9 @@ def _run(tmp_path, market, mode, shape="flat", detect_fail=False, pilot=False, s
                TEST_SL_SESSION_OPEN=str(session_open).lower())
     if tb_tickers:
         env["TEST_SL_TB"] = tb_tickers
+    # The batches call load_dotenv(); keep a host .env (db-server enables trigger observe modes and
+    # market-participation metadata) out of these fixture runs.
+    env["PYTHON_DOTENV_DISABLED"] = "1"
     env.pop("STEADY_LEADER_TRIGGER_MODE", None)
     env.pop("POCKET_PIVOT_TRIGGER_MODE", None)
     if mode is not None:
