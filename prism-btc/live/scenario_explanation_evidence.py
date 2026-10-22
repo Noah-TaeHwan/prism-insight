@@ -24,6 +24,9 @@ CLOSE_PAIR = re.compile(r'(?<![\w./·,])확정\s*(?P<frame>15m|30m|1h|4h|12h|1d|
     + NUMBER.format(name='before') + r'에서\s*' + NUMBER.format(name='after') + r'로\s*내려(?:가|갔)')
 POSITION = re.compile(r'\s*(?:부근은|는|은)?\s*(?P<basis>현 가격|현재가|현재 가격|MarkPrice|MARK_PRICE)\s*'
     r'(?:바로\s*)?(?P<position>위|아래)(?:의|에|다|이다)(?!\s*(?:아니|없))')
+WEEKLY_PREFIX = re.compile(r'(?<![\w./·,])(?P<basis>현 가격|현재가|현재 가격|MarkPrice|MARK_PRICE)\s+'
+    r'(?P<position>위|아래)(?:쪽)?의\s+주봉\s+MA10\s+forming\('
+    + NUMBER.format(name='value') + r'\)')
 
 
 def _ambiguous_prefix(text, start):
@@ -34,6 +37,28 @@ def _ambiguous_prefix(text, start):
 def _local_claims(text, snapshot, context, path):
     """Only adjacent, explicit labels/clauses; never infer arbitrary prose semantics."""
     rows = []
+    for match in WEEKLY_PREFIX.finditer(text):
+        prefix, suffix = text[max(0, match.start()-24):match.start()], text[match.end():match.end()+48]
+        if (_ambiguous_prefix(text, match.start()) or re.search(r'향후|앞으로', prefix)
+                or re.search(r'아니|없|다면|이면|경우|예상|가정|오르면', suffix)
+                or len(match['value'].replace(',', '')) > 32):
+            continue
+        fact = _resolve(snapshot, '1w', 'forming', 'ma10')
+        fact['cited_value'] = float(match['value'].replace(',', ''))
+        if fact['status'] == 'RESOLVED':
+            fact['status'] = 'MATCH' if _rounded_match(match['value'], fact['value']) else 'MISMATCH'
+        location = dict(prose_path=path, span=list(match.span()), raw_excerpt=match[0])
+        rows.append(dict(kind='EXPLICIT_NUMERIC_CITATION', **location, **fact))
+        relation = dict(fact, status='UNVERIFIED', comparison_source_ref='context.mark_price',
+                        cited_position=match['position'])
+        mark = context.get('mark_price') if isinstance(context, dict) else None
+        if 'value' in fact and _number(mark) and mark > 0:
+            actual = '위' if fact['value'] > mark else '아래' if fact['value'] < mark else '동일'
+            relation.update(status='MATCH' if actual == match['position'] else 'MISMATCH',
+                            comparison_value=mark, actual_position=actual)
+            if match['basis'] not in ('MarkPrice', 'MARK_PRICE'):
+                relation.update(status='UNASSESSED', reason='price_basis_not_explicit_mark')
+        rows.append(dict(kind='MA_MARK_POSITION', **location, **relation))
     for match in LABEL.finditer(text):
         if _ambiguous_prefix(text, match.start()):
             continue
