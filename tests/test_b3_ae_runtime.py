@@ -216,3 +216,18 @@ def test_fixed_ladder_never_orders_for_live_campaigns(env, restore_gates, monkey
     assert result["rows"][0]["status"] == "ADD" and result["rows"][0]["mode"] == "LIVE"
     assert "live" not in result["rows"][0] and result["orders_submitted"] == 0 and calls == []
     assert store.snapshot(state["campaign_id"])["legs"][-1]["kind"] == "ADD"  # virtual leg only
+
+
+def test_us_market_snapshot_timeout_is_retried_not_kept(monkeypatch):
+    """2026-10-22: one timed-out snapshot at the open stayed cached as None and failed every later tick."""
+    from prism_core import b3_ae_worker, oneil_runtime_inputs
+
+    answers = [None, {"observed_at": "2026-10-22T13:31:00+00:00"}]
+    monkeypatch.setattr(oneil_runtime_inputs, "fetch_market_snapshot", lambda: answers.pop(0))
+    clock = [datetime(2026, 10, 22, 13, 30, tzinfo=timezone.utc)]
+    monkeypatch.setattr(b3_ae_worker, "datetime", type("Clock", (), {"now": staticmethod(lambda tz=None: clock[0])}))
+    market = b3_ae_worker.us_providers()["market"]
+    with pytest.raises(ValueError, match="MARKET_SNAPSHOT_UNAVAILABLE"):
+        market()
+    clock[0] += timedelta(seconds=61)
+    assert market() == {"observed_at": "2026-10-22T13:31:00+00:00"}

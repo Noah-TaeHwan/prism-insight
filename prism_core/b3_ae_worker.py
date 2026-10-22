@@ -436,8 +436,11 @@ def us_providers():
 
     def market():
         at = datetime.now(timezone.utc)
-        if not cache or (at - _time(cache["value"]["observed_at"])).total_seconds() >= 60:
-            cache["value"] = fetch_market_snapshot()
+        if not cache or (at - cache["at"]).total_seconds() >= 60:
+            cache.update(at=at, value=fetch_market_snapshot())
+        # A timed-out snapshot (None) is retried after 60s, not kept until restart (2026-10-22 open).
+        if cache["value"] is None:
+            raise ValueError("MARKET_SNAPSHOT_UNAVAILABLE")
         return cache["value"]
 
     def schedule(moment):
