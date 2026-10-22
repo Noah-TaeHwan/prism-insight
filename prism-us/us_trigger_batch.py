@@ -1831,8 +1831,9 @@ def _steady_leader_live_merge(final_results, block, snapshot, prev_snapshot, sel
             row["DailyChange"] = (row["Close"] / prev_close - 1) * 100
             try:
                 row = enhance_dataframe(row)
-            except Exception:  # noqa: BLE001 - a missing display name is not a reason to skip
-                pass
+            except Exception as exc:  # noqa: BLE001 - a missing display name is not a reason to skip
+                logger.debug("[STEADY-LEADER] name lookup unavailable for %s: %s",
+                             ticker, type(exc).__name__)
             if "CompanyName" not in row.columns or not row["CompanyName"].iloc[0]:
                 row["CompanyName"] = ticker
             for column, value in slt.pick_columns(candidate).items():
