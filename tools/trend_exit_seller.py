@@ -406,8 +406,10 @@ def _fetch_ma50(market: str, ticker: str) -> float:
     try:
         closes: List[float] = []
         if market == "US":
-            import yfinance as yf
-            hist = yf.Ticker(ticker).history(period="4mo")
+            from prism_core.us_market_data import daily_history
+            end = _now().date()
+            # Same window and dividend-adjusted basis as the former yfinance history(period="4mo").
+            hist = daily_history(ticker, end - timedelta(days=122), end, adjusted=True)
             series = hist["Close"].dropna()
             closes = [float(x) for x in series.tolist()]
         else:  # KR via repository KIS market data
@@ -439,9 +441,10 @@ def _compute_live_regime(market: str) -> Optional[str]:
     """
     try:
         if market == "US":
-            import yfinance as yf
             from cores.data_prefetch import _compute_us_regime
-            sp = yf.Ticker("^GSPC").history(period="1y")
+            from prism_core.us_market_data import daily_history
+            end = _now().date()
+            sp = daily_history("^GSPC", end - timedelta(days=365), end)
             computed = _compute_us_regime(sp)
         else:
             from cores import market_data as stock

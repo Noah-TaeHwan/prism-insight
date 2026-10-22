@@ -139,10 +139,10 @@ def _fetch_kr_daily(ticker: str, start_date: str, end_date: str) -> Dict[str, fl
 
 
 def _fetch_us_daily(ticker: str, start_date: str, end_date: str) -> Dict[str, float]:
-    """Fetch US daily close prices via yfinance. Returns {date: close}."""
+    """Fetch US daily close prices via KIS overseas daily prices. Returns {date: close}."""
     try:
-        import yfinance as yf
-        hist = yf.Ticker(ticker).history(start=start_date, end=end_date, auto_adjust=True)
+        from prism_core.us_market_data import history
+        hist = history(ticker, start=start_date, end=end_date, auto_adjust=True)
         if hist.empty:
             return {}
         return {str(idx)[:10]: float(row["Close"]) for idx, row in hist.iterrows()

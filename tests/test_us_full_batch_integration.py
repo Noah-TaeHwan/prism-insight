@@ -51,6 +51,10 @@ with ExitStack() as stack:
     import telegram_bot_agent as telegram
     import pdf_converter
     from observability import micro_split
+    from prism_core import us_market_data
+    # KIS prices (sector brief, quotes) are a broker connection: unavailable here, never a network call.
+    stack.enter_context(patch.object(us_market_data, "_trading", side_effect=us_market_data.UsMarketDataUnavailable(
+        "integration fixture: no broker")))
 
     provenance = {name: str(Path(module.__file__).resolve()) for name, module in {
         "orchestrator": orchestration, "analysis": analysis,

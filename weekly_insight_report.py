@@ -203,19 +203,23 @@ async def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
         except Exception as e:
             logger.warning(f"KR price lookup failed: {e}")
 
-    # US: batch lookup via yfinance
+    # US: latest KIS daily close per ticker
     if us_sells:
         try:
-            import yfinance as yf
-            tickers_list = [row[0] for row in us_sells]
-            data = yf.download(tickers_list, period="1d", progress=False)
+            from prism_core.us_market_data import history
+
+            prices, failed = {}, 0
+            for ticker, _, _ in us_sells:
+                try:
+                    prices[ticker] = history(ticker, period="1d")['Close'].iloc[-1]
+                except Exception:
+                    prices[ticker], failed = None, failed + 1  # unknown for this ticker only
+            if failed == len(us_sells):
+                raise RuntimeError("no US price available")
 
             for ticker, name, sell_price in us_sells:
                 try:
-                    if len(tickers_list) == 1:
-                        current_price = float(data['Close'].iloc[-1])
-                    else:
-                        current_price = float(data['Close'][ticker].iloc[-1])
+                    current_price = float(prices[ticker])
                     if not all(value is not None and 0 < value < float("inf")
                                for value in (sell_price, current_price)):
                         lines.append(f"  {ticker}: 매도 후 가격 변화 미확인 (유효한 가격 없음)")

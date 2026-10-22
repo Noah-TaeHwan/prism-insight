@@ -97,7 +97,7 @@ def build_etf_packet(series, reference_date, market_days=None):
         output.append(row)
     return {"contract": "market_etf_rotation_v1", "market": "US", "reference_date": reference_date,
             "price_asof": max(cleaned.get("SPY", {}), default=None),
-            "expected_price_asof": dates[-1] if dates else None, "source": "yfinance_adjusted_daily",
+            "expected_price_asof": dates[-1] if dates else None, "source": "kis_adjusted_daily",
             "captured_at": datetime.now(timezone.utc).isoformat(), "rows": output,
             "status": "AVAILABLE" if any(row["returns_pct"] for row in output) else "UNKNOWN", "is_cash_flow": False,
             "calendar_verified": market_days is not None,
@@ -115,7 +115,7 @@ def prefetch_us_context(reference_date):
         # Interpreter and collector are locally fixed; only YYYYMMDD crosses this boundary.
         run = subprocess.run(  # nosec B603 B607  # nosemgrep
                              [sys.executable, str(ROOT / "tools/run_market_intelligence_prefetch.py"),
-                              "--date", reference_date], capture_output=True, text=True, timeout=20, check=True)
+                              "--date", reference_date], capture_output=True, text=True, timeout=60, check=True)
         packet = json.loads(run.stdout)
         if not isinstance(packet, dict) or packet.get("contract") != "market_etf_rotation_v1":
             raise ValueError("unexpected_packet_contract")

@@ -2,7 +2,7 @@
 data_enricher.py — Post-analysis market data collection.
 
 KRDataEnricher : KIS API (FHKST03010100 daily chart) for KR stocks + KOSPI index
-USDataEnricher : yfinance for US stocks + S&P500 index
+USDataEnricher : KIS overseas daily prices for US stocks + S&P500 index
 
 Called at ingest time. Results stored in report_enrichment + market_timeline.
 """
@@ -400,7 +400,7 @@ class USEnrichmentResult:
     stop_was_correct: Optional[bool] = None
     target_1_hit: bool = False
     days_to_target_1: Optional[int] = None
-    data_source: str = "yfinance"
+    data_source: str = "kis_overseas"
     market: str = "us"
 
     def to_dict(self) -> dict:
@@ -412,7 +412,7 @@ class USEnrichmentResult:
 
 class USDataEnricher:
     """
-    Fetches daily price history via yfinance for US stocks + S&P500 index.
+    Fetches daily price history via KIS overseas daily prices for US stocks + S&P500 index.
     """
 
     _semaphore: Optional[asyncio.Semaphore] = None
@@ -422,10 +422,10 @@ class USDataEnricher:
             USDataEnricher._semaphore = asyncio.Semaphore(10)
 
     def _sync_fetch_stock(self, ticker: str, start: str, end: str) -> Dict[str, Dict]:
-        """Fetch daily OHLCV via yfinance. Returns {date: {close, low, high}}"""
+        """Fetch daily OHLCV via KIS overseas daily prices. Returns {date: {close, low, high}}"""
         try:
-            import yfinance as yf
-            hist = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=True)
+            from prism_core.us_market_data import history
+            hist = history(ticker, start=start, end=end, auto_adjust=True)
             if hist.empty:
                 return {}
             result = {}
@@ -438,14 +438,14 @@ class USDataEnricher:
                 }
             return result
         except Exception as e:
-            logger.error(f"[US] yfinance fetch failed for {ticker}: {e}")
+            logger.error(f"[US] KIS daily price fetch failed for {ticker}: {e}")
             return {}
 
     def _sync_fetch_sp500(self, start: str, end: str) -> Dict[str, float]:
         """Fetch S&P500 (^GSPC) daily close. Returns {date: close}"""
         try:
-            import yfinance as yf
-            hist = yf.Ticker("^GSPC").history(start=start, end=end, auto_adjust=True)
+            from prism_core.us_market_data import history
+            hist = history("^GSPC", start=start, end=end, auto_adjust=True)
             if hist.empty:
                 return {}
             result = {}
@@ -484,7 +484,7 @@ class USDataEnricher:
 
         if not stock_prices:
             logger.warning(f"[US] No price data for {ticker} {analysis_date}")
-            result.data_source = "yfinance_unavailable"
+            result.data_source = "kis_overseas_unavailable"
             return result
 
         # Price on analysis date — exact first, then backward (no look-ahead), forward only as last resort

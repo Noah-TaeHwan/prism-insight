@@ -46,14 +46,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from prism_core.micro_split_live import dashboard_fields  # noqa: E402
 from prism_core.slot_weight import weighted_profit_rate  # noqa: E402
 
-# yfinance import for market index data
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-except ImportError:
-    YFINANCE_AVAILABLE = False
-    logger.warning("yfinance not installed. Market index data will be unavailable.")
-
 # KIS US Stock Trading import.
 # Loaded via importlib.util from an explicit path so prism-us/trading/__init__.py
 # does NOT get registered as the top-level `trading` package — see comment above.
@@ -532,12 +524,10 @@ class USDashboardDataGenerator:
         return watchlist
 
     def get_us_market_condition(self) -> List[Dict]:
-        """Get US market condition data - S&P 500 and NASDAQ from yfinance"""
-        if not YFINANCE_AVAILABLE:
-            logger.warning("yfinance not available. Cannot fetch market data.")
-            return []
-
+        """Get US market condition data - S&P 500 and NASDAQ from KIS overseas index prices"""
         try:
+            from prism_core.us_market_data import history
+
             # Use US Season1 start date
             start_date = self.US_SEASON1_START_DATE.replace("-", "")
             today = datetime.now().strftime("%Y%m%d")
@@ -545,15 +535,13 @@ class USDashboardDataGenerator:
             logger.info(f"Fetching US market index data... ({start_date} ~ {today})")
 
             # S&P 500 index data (ticker: ^GSPC)
-            sp500 = yf.Ticker("^GSPC")
-            sp500_df = sp500.history(start=self.US_SEASON1_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
+            sp500_df = history("^GSPC", start=self.US_SEASON1_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
 
             # NASDAQ index data (ticker: ^IXIC)
-            nasdaq = yf.Ticker("^IXIC")
-            nasdaq_df = nasdaq.history(start=self.US_SEASON1_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
+            nasdaq_df = history("^IXIC", start=self.US_SEASON1_START_DATE, end=datetime.now().strftime("%Y-%m-%d"))
 
             if sp500_df.empty or nasdaq_df.empty:
-                logger.warning("Failed to fetch US index data from yfinance.")
+                logger.warning("Failed to fetch US index data from KIS.")
                 return []
 
             # Merge data

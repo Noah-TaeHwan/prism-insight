@@ -68,7 +68,7 @@ def test_timeout_unknown_and_bounded(monkeypatch):
     run = Mock(side_effect=mi.subprocess.TimeoutExpired("collector", 20))
     monkeypatch.setattr(mi.subprocess, "run", run)
     assert mi.prefetch_us_context("20260322")["status"] == "UNKNOWN"
-    assert run.call_args.kwargs["timeout"] == 20
+    assert run.call_args.kwargs["timeout"] == 60  # 16 ETFs x KIS raw+adjusted pages at ~0.2 s per call
 
 
 def test_future_us_date_rejected_before_any_provider_access():
