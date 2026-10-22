@@ -30,7 +30,7 @@ _SELL_TRIGGERS_KO = (
     '추세가 유지되면 보유하고, 이익은 현재 매도 에이전트의 trailing stop 규율로 지킵니다'
     '(고점이 매수가 대비 +5% 이상이 된 뒤 활성화; 강세 국면 고점 × 0.92(-8%), 횡보·약세 국면 '
     '고점 × 0.95(-5%), 국면 확인 불가 시 고점 × 0.90(-10%)).'),
-    ('추세 약화: 매도 에이전트의 3단계 규칙(3거래일 연속 종가 하락 + 평균 이상 거래량 + 20일선 아래 '
+    ('추세 약화: 매도 에이전트의 3단계 규칙(매수 후 3거래일 연속 종가 하락 + 평균 이상 거래량 + 20일선 아래 '
     '마감, 셋 모두 충족)을 적용합니다. 매수 시나리오의 자유서술로 새로운 단독 매도 조건을 만들지 않습니다.'),
     ('하드 스탑: 장중 현재가가 stop_loss×0.995(0.5% 꼬리 버퍼) 이하가 되면 장중 하드스탑이 '
     '즉시 전량 매도하며 종가 마감을 기다리지 않습니다.'),
@@ -43,7 +43,7 @@ _SELL_TRIGGERS_EN = (
     'and protect the gain with the live SELL agent trailing policy (active once the '
     'peak is +5% above entry; peak × 0.92 (-8%) in bull regimes, peak × 0.95 (-5%) '
     'in sideways/bear, peak × 0.90 (-10%) when the live regime is unavailable).'),
-    ('Trend weakening follows the SELL agent Tier 3 rule (3 consecutive lower closes + '
+    ('Trend weakening follows the SELL agent Tier 3 rule (3 consecutive lower closes after the entry + '
     'above-average volume + close below the 20d MA, all three). BUY free text cannot '
     'create a new standalone exit rule.'),
     ('Hard stop is intraday: a live price at or below stop_loss x 0.995 (0.5% wick '

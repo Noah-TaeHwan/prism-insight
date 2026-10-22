@@ -46,6 +46,16 @@ Economic objections alone must submit a candidate for host calculation, not use
 an empty list to bypass calculation. First recovery observation stays WAIT only,
 with empty candidates. Candidate submission is not an order or permission
 to trade. Unknown real fees never authorize invented net-reward arithmetic.
+For a new flat OPEN, consider TP, optional structural-weakening partial stops and
+remaining lots together. Noise alone need not justify partial SL; partial_stops=[]
+is valid when no structural reduction is grounded. Confirmed failure still means
+the existing full EXIT/protection rules, never partial-SL risk-budget credit.
+Cut invalidated exposure, not normal thesis-preserving fluctuations. Compare early
+TP concentration with participation in a sustained move: grounded later targets or
+SL-protected lots without fixed TP are allowed, never mandatory. Do not label
+rounding dust an intentional runner or invent a distant target to improve payoff.
+Partial SL saves exposure on continued weakness but sacrifices lots on recovery;
+design that tradeoff before entry, without a fixed stop width or exit percentage.
 For an active scenario keep its side and original risk budget. ADJUST entries are
 incremental only; exit targets are the complete replacement protection. Existing
 confirmed positions already reflect prior partial exits; never restore sold lots.
@@ -74,6 +84,32 @@ projection.hypothetical_all_fills.targets; keep their assumptions separate, neve
 add these alternative projections together.
 Flat-entry gross target projections assume all proposed entries fill: a partial target is
 not whole-scenario profit, and unknown future fees/funding remain unknown.
+When supplied, joint_exit_paths compares bounded hypothetical exit sequences for
+new flat OPEN only. Compare whole-path payoff and remaining lots, not sums of
+independent target profits. These are full-entry/full-fill price assumptions,
+not probabilities or expected net profit; partial SL is optional, never risk
+credit or a substitute for full EXIT on confirmed failure. No fixed payoff gate.
+Each path closes any remaining quantity at hard SL as a stress test, NOT the
+expected ending of a trend or the value of an open runner. Do not prefer liquidating upside simply because
+an assumed later hard-stop exit makes retained lots look costly. Separately assess
+the plan's early-TP concentration and grounded participation if the move continues;
+an unpriced protected remainder has no invented profit. Rounding dust is not intent.
+joint_exit_paths version2 paths are rows [sequence_ids,remaining_before_hard_stop,
+gross_pnl,fee_only]. TP_STOP/SL_STOP mean applied TP/partial-SL legs;
+TP1_STOP/SL1_STOP mean only the first TP/partial-SL leg; STOP means hard SL alone.
+TP1_SL/SL1_TP mean first TP then partial SL / first partial SL then TP; both kinds
+actually apply. All paths close any remainder at hard SL. Compare only displayed
+paths: omitted/zero/subminimum/capped-out legs are NOT part of their names.
+Original projection.quantity and targets supply all quantities/prices for these
+sequences; no independent leg profits are added to path gross. Targets retain their
+initial revision quota (not a fraction of each new remainder), sorted by price
+crossing order; zero/subminimum legs are omitted and quantities capped at remaining.
+This omission/clip is a modelling assumption, not proof of actual reduce-only fills.
+Partial SL's Mark trigger is only a hypothetical exit price, not its market fill.
+fee_only=null means UNKNOWN; otherwise [assumed_entry_fee,assumed_exit_fee,
+estimated_net_before_unmodelled_costs], in USDT, uses historical taker-max estimates
+with total original entry quantity charged once. Gross is also USDT. Funding,
+slippage, fill timing and revision races remain UNKNOWN/unmodelled, never zero.
 For holdings distinguish confirmed_remaining projections from hypothetical_all_fills
 which additionally assume all pending and new entries fill. Never call hypothetical
 quantity held or add the two projections. Replacement target fractions start from
@@ -91,7 +127,18 @@ Current first_observation/recovery_eligible are in current_decision_state;
 baseline_kind is historical origin, not a current waiting restriction. Unknown
 state is not permission; fresh host recovery and execution checks still decide.
 No trade is mandatory. Explain the decisive evidence and invalidation briefly in
-Korean. Return exactly selection_token and rationale, no other fields.
+Korean. When flat-OPEN joint paths are supplied, organize rationale as three short
+items: '계획:' name the candidate (also when choosing WAIT) and the decisive evidence;
+'경로:' compare its displayed paths using supplied host results. Only if partial-SL
+legs actually apply, compare exposure saved on weakness versus participation lost
+on recovery; otherwise compare the applicable full-stop/TP paths, never invent a partial SL;
+'연장:' assess early-TP concentration, grounded later targets/protected lots and why
+that balance fits this thesis. No partial SL, full TP or no fixed TP can each be
+valid; explain the applicable tradeoff, never force a runner or a partial stop.
+Use path IDs and existing host figures, not new arithmetic, probabilities or a
+claim of guaranteed profit. These items expose the response, not hidden reasoning;
+missing items alone never authorize a new WAIT rule or delay confirmed-failure EXIT.
+Return exactly selection_token and rationale, no other fields.
 """
 
 
@@ -108,6 +155,55 @@ def _decimal(value):
     if type(value) not in (int, float) or not math.isfinite(value):
         raise ValueError("missing_calculation_input")
     return Decimal(str(value))
+
+
+def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
+    """Reuse initial revision quotas; cap each hypothetical exit at live remainder."""
+    sign = Decimal(1 if plan['side'] == 'LONG' else -1)
+    tps = sorted((t for t in targets if t['kind'] == 'take_profits' and t['quantity'] > 0),
+                 key=lambda t: sign * _decimal(t['price']))
+    stops = sorted((t for t in targets if t['kind'] == 'partial_stops' and t['quantity'] > 0),
+                   key=lambda t: -sign * _decimal(t['price']))
+    sequences = [('TP_STOP', tps), ('SL_STOP', stops),
+                 ('TP1_SL', tps[:1] + stops), ('SL1_TP', stops[:1] + tps)]
+    paths = []
+    for sequence_id, ordered in sequences:
+        remaining, gross, legs, fee_legs = quantity, Decimal(0), [], []
+        applied_kinds = set()
+        for target in ordered:
+            qty = min(remaining, _decimal(target['quantity']))
+            if qty <= 0 or qty < minimum:
+                continue
+            remaining -= qty
+            gross += sign * (_decimal(target['price']) - basis) * qty
+            legs.append([target['id'], float(qty)])
+            applied_kinds.add(target['kind'])
+            fee_legs.append(fees(target['price'], qty))
+        # Name only legs that survive quantity caps/minimums, not the template.
+        if not applied_kinds:
+            sequence_id = 'STOP'
+        elif applied_kinds == {'take_profits'}:
+            sequence_id = 'TP1_STOP' if sequence_id == 'TP1_SL' else 'TP_STOP'
+        elif applied_kinds == {'partial_stops'}:
+            sequence_id = 'SL1_STOP' if sequence_id == 'SL1_TP' else 'SL_STOP'
+        residual = remaining
+        if remaining > 0:
+            gross += sign * (_decimal(plan['hard_stop']) - basis) * remaining
+            legs.append([None, float(remaining)])
+            fee_legs.append(fees(plan['hard_stop'], remaining))
+        existing = next((p for p in paths if p[1] == legs), None)
+        if existing is not None:
+            if sequence_id not in existing[0]:
+                existing[0].append(sequence_id)
+            continue
+        fee_view = None
+        if fee_legs and all(f.get('status') == 'AVAILABLE' for f in fee_legs):
+            fee_view = [float(sum((_decimal(f[field]) for f in fee_legs), Decimal(0)))
+                for field in ('assumed_entry_fee', 'assumed_exit_fee', 'estimated_net_before_unmodelled_costs')]
+        paths.append([[sequence_id], legs, float(residual), float(gross), fee_view])
+    # The versioned column/sequence meanings live once in SELECT_PROMPT, not
+    # repeated per candidate/path in the size-limited user payload.
+    return dict(version=2, paths=[[path[0], *path[2:]] for path in paths])
 
 
 def _gross_projection(plan, context, *, lots=None,
@@ -163,7 +259,7 @@ def _gross_projection(plan, context, *, lots=None,
                 gross_reward_to_reserved_risk_ratio=float(sign * (_decimal(row["price"]) - basis) / risk_per_btc)
                     if risk_per_btc > 0 else None))
     stop_gross = sign * (_decimal(plan["hard_stop"]) * quantity - notional)
-    return dict(assumption=assumption,
+    result = dict(assumption=assumption,
                 quantity=float(quantity), weighted_entry=float(basis),
                 notional=float(notional), gross_at_full_stop=float(stop_gross),
                 fee_only_projection_at_full_stop=fees(plan["hard_stop"], quantity, whole=True),
@@ -175,6 +271,10 @@ def _gross_projection(plan, context, *, lots=None,
                 ratio_semantics="GROSS_PRICE_REWARD_OVER_HOST_RESERVED_RISK_NOT_NET_EXPECTANCY",
                 actual_future_fees=None, actual_future_funding=None,
                 actual_net_pnl=None)
+    if (new_entry and plan.get('action') == 'OPEN' and lots is None
+            and not context.get('positions') and not context.get('pending_entries')):
+        result['joint_exit_paths'] = _joint_exit_paths(plan, targets, quantity, basis, minimum, fees)
+    return result
 
 
 def _holding_projection_values(plan, context):

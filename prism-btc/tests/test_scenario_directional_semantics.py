@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # Deployed v1 policy preserved; structured-goal instructions are v2-only.
-    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "807979497ffd29fe97f57715bca0a9565156642fd19b5a5e87ca2de20b408316"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "5deed47582696aa4dedd565ebf93cfb5dc97ca3eca618bf3e52e09ea64dad2ff"
+    # 2026-10-22 v4: compare applicable paths without a fictional reduction mandate.
+    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "95b941506d6b73138252036eefbb20f1fb96f51ed85177dc5add2d33cd1249d7"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "a77a977bb4ca2dcf8982a5045d68e017ca619c55064f52a3bd7bd625fe2b94fe"
