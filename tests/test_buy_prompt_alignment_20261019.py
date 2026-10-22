@@ -174,10 +174,15 @@ def test_us_trigger_names_are_the_real_us_triggers(buy_prompts):
     names = _us_trigger_names()
     credited = ["Volume Surge Top", "Gap Up Momentum Top", "Intraday Rise Top", "Closing Strength Top",
                 "Value-to-Cap Ratio Top", "Volume Surge Sideways"]
-    assert set(credited) | {"Macro Sector Leader", "Contrarian Value Pick"} == set(names)
+    # 2026-10-22: "Steady Leader Pullback" (T-B, default off) is a screening-only addition. The BUY
+    # prompts are unchanged on purpose: it gets no trigger-type momentum credit and no analysis
+    # points (a known gap, recorded in the T-B PR; fixing it is a separate BUY-layer decision).
+    no_prompt_guidance = {"Steady Leader Pullback"}
+    assert set(credited) | {"Macro Sector Leader", "Contrarian Value Pick"} | no_prompt_guidance == set(names)
     for key in ("US-ko", "US-en"):
         flat = " ".join(buy_prompts[key].split())
         assert " / ".join(credited) in flat, key
+        assert all(name not in flat for name in no_prompt_guidance), key
         assert '"Contrarian Value Pick"' in flat and '"Macro Sector Leader"' in flat, key
         for stale in ('"Volume Surge / Gap Up / Daily Rise', "Capital Inflow / Volume Surge Flat"):
             assert stale not in flat, key

@@ -182,6 +182,16 @@ One `trace_id` reads a decision end to end. Read it with `tools/clickstack_query
   `trigger_type="Pocket Pivot Base"`, `selected=0`, `trade_date` = the completed signal session
   (features: pivots, structural stop, depth, dry-up, kind, rank; `earnings_within_5d` stays null).
   The same block is in the trigger JSON as `metadata.pocket_pivot_observe`. It never feeds selection.
+- **Steady Leader Pullback (T-B, 2026-10-22, default off)**: with
+  `STEADY_LEADER_TRIGGER_MODE=observe` the KR/US afternoon batches write every detector pass
+  (`prism_core/steady_leader.py`) as a candidate-ledger row, `mode=steady_leader_observe`,
+  `trigger_type` = the market's trigger key (KR "꾸준 상승 주도주 눌림", US "Steady Leader Pullback"),
+  `selected=0`, `trade_date` = the completed signal session (features: MAs, 252-session high,
+  pullback date, steadiness, 120-session return, natural stop MA20 x 0.99, rank). With `live`
+  the rows use `mode=steady_leader_live` and the one pick has `selected=1`; a regular pick it
+  replaced loses its `selected` flag in the afternoon rows. The block, including the live
+  decision (`applied`, `reason`, `displaced_ticker`, `max_selections`), is in the trigger JSON as
+  `metadata.steady_leader`.
 - **Broker fill confirmation (2026-10-21)**: `tools/reconcile_fills.py --market KR|US`
   runs after the close. It reads each BUY in `order_intents`/`broker_orders` for that
   market-local day (read-only), queries the sending account's daily executions (KR

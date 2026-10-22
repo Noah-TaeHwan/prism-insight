@@ -255,6 +255,7 @@ TRIGGER_TYPE_KO = {
     "Intraday Rise Top": "일중 상승률 상위주",  # Intraday rise top stocks
     "Closing Strength Top": "장 마감 강세 상위주",  # Closing strength top stocks
     "Volume Surge Sideways": "거래량 급증 횡보주",  # Volume surge sideways stocks
+    "Steady Leader Pullback": "꾸준 상승 주도주 눌림",  # T-B steady leader pullback (default off)
 }
 
 
