@@ -1,4 +1,4 @@
-"""Core long-term holding LIVE wiring behind CORE_HOLD_LIVE_ENABLED (default off), H-1023-corehold."""
+"""Staged trust + core long-term holding LIVE wiring behind CORE_HOLD_LIVE_ENABLED (default off)."""
 import json
 import sqlite3
 from pathlib import Path
@@ -123,45 +123,108 @@ def _db(tmp_path, rows):
     return conn
 
 
-def _result(ticker, buy, date, *, share=0.5, ret=0.3, exit_=None):
-    return {"key": f"{ticker}|{buy[:16]}", "ticker": ticker, "open": True, "entry_avg": 100.0,
-            "a": {"date": date, "share": share, "ret": ret, "exit": exit_, "view": {}, "regime": {"regime": "sideways"}}}
+def _trend(n=300, step=0.004):
+    closes, price = [], 50.0
+    for _ in range(n):
+        closes.append(price)
+        price *= 1 + step
+    days, day = [], __import__("datetime").date(2025, 1, 1)
+    while len(days) < n:
+        if day.weekday() < 5:
+            days.append(day.isoformat())
+        day += __import__("datetime").timedelta(days=1)
+    return [{"date": d, "open": c, "high": c * 1.01, "low": c * 0.99, "close": c} for d, c in zip(days, closes)]
 
 
-def test_apply_live_promotes_within_the_cap_and_sets_stops(live, tmp_path, monkeypatch):
+def _row(row_id, ticker, bars, entry_index, first, scenario="{}", stop=None):
+    buy = f"{bars[entry_index]['date']} 23:30:00"            # KST evening = that New York session
+    return (row_id, ticker, buy, first, scenario, stop if stop is not None else first * 0.93)
+
+
+def _rows(conn):
+    return {r[0]: (json.loads(r[1]).get(C.SCENARIO_KEY), r[2])
+            for r in conn.execute("SELECT id, scenario, stop_loss FROM us_stock_holdings")}
+
+
+def test_proof_marks_proven_and_moves_the_stop_to_the_first_buy(live, tmp_path, monkeypatch):
     monkeypatch.setattr(L, "_emit", lambda *a, **k: None)
-    held = json.dumps({C.SCENARIO_KEY: BLOCK})
-    conn = _db(tmp_path, [(1, "OLD", "2026-01-01 10:00:00", 50.0, held, 50.0),
-                          (2, "AAA", "2026-03-01 10:00:00", 100.0, "{}", 120.0),
-                          (3, "AAA", "2026-03-01 10:00:00", 100.0, "{}", 120.0),     # second account
-                          (4, "BBB", "2026-03-02 10:00:00", 100.0, "{}", 95.0)])
-    results = [_result("AAA", "2026-03-01 10:00:00", "2026-05-01", share=0.9),
-               _result("BBB", "2026-03-02 10:00:00", "2026-05-01", share=0.1)]
-    bars = [{"date": f"d{i:03d}", "open": 150.0, "high": 151.0, "low": 149.0, "close": 150.0} for i in range(210)]
-    keyed = {r["key"]: bars for r in results} | {"OLD|2026-01-01 10:00": bars}
+    bars = _trend(300)
+    first = bars[275]["close"] / 1.16                        # +16% on session 25 of an entry at bar 275
+    conn = _db(tmp_path, [_row(1, "AAA", bars, 275, first, stop=bars[-1]["close"] * 0.95),     # raised trailing stop
+                          _row(2, "BBB", bars, 290, bars[290]["close"])])                       # 10 sessions: no proof
+    keyed = {f"AAA|{bars[275]['date']} 23:30": bars, f"BBB|{bars[290]['date']} 23:30": bars}
     sent = []
-    actions = L.apply_live(conn, "US", results, keyed, alert=sent.append)
-    kinds = sorted((a["action"], a["ticker"]) for a in actions)
-    assert ("cap_full", "BBB") in kinds and kinds.count(("promoted", "AAA")) == 2   # one slot left: AAA ranks first
-    rows = {r[0]: r for r in conn.execute("SELECT id, scenario, stop_loss FROM us_stock_holdings")}
-    block = json.loads(rows[2][1])[C.SCENARIO_KEY]
-    assert block["status"] == L.CORE and block["regime"]["regime"] == "sideways" and rows[2][2] == 100.0
-    assert json.loads(rows[4][1])[C.SCENARIO_KEY]["status"] == "CAP_SKIPPED" and rows[4][2] == 95.0  # stop kept
-    assert sent and "승격" in sent[0]
-    assert L.apply_live(conn, "US", results, keyed) == []                               # idempotent
+    actions = L.apply_live(conn, "US", keyed, alert=sent.append)
+    assert [(a["action"], a["ticker"]) for a in actions] == [("proven", "AAA")]
+    block, stop = _rows(conn)[1]
+    assert block["status"] == L.PROVEN and block["proven_on"] == bars[-1]["date"] and stop == pytest.approx(first)
+    assert _rows(conn)[2][0] is None and sent and "검증 통과" in sent[0]
+    stock = {"scenario": json.dumps({C.SCENARIO_KEY: block}), "ticker": "AAA"}
+    assert L.view(stock, "US")["status"] == L.PROVEN and L.exit_kind(stock, "US") == "proven_exit"
+    assert "단계적 신뢰 규칙" in L.prompt_block(dict(stock, current_price=100.0), market="US", language="ko")
+    assert "Staged-trust rule" in L.prompt_block(dict(stock, current_price=100.0), market="US", language="en")
+
+
+def test_two_closes_below_ma50_after_proof_leave_a_pending_exit_that_sells(live, tmp_path, monkeypatch):
+    monkeypatch.setattr(L, "_emit", lambda *a, **k: None)
+    monkeypatch.setattr(RL, "_emit", lambda *a, **k: None)
+    bars = _trend(300)
+    closes = C.closes_of(bars)
+    for j in (298, 299):
+        bars[j]["close"] = C.ma(closes, j, 50) * 0.97
+    first = bars[250]["close"] / 1.2
+    block = {"version": L.LIVE_VERSION, "status": L.PROVEN, "proven_on": bars[280]["date"], "entry_first": first}
+    conn = _db(tmp_path, [_row(1, "AAA", bars, 250, first, json.dumps({C.SCENARIO_KEY: block}), first)])
+    actions = L.apply_live(conn, "US", {f"AAA|{bars[250]['date']} 23:30": bars})
+    assert [a["action"] for a in actions] == ["exit_pending"]
+    stored, _ = _rows(conn)[1]
+    stock = {"ticker": "AAA", "current_price": 90.0, "stop_loss": first, "buy_price": first,
+             "scenario": json.dumps({C.SCENARIO_KEY: stored})}
+    view = RL.view_for_row("US", stock, 90.0, lambda t: [])
+    assert view["exit"] == L.PENDING_MA50
+    assert RL.guard_result(_Agent(), "US", stock, True, L.exit_reason(view, "US", "en"))[0] is True
+    import asyncio
+    assert asyncio.run(RL.review_holding(_Agent(), "US", dict(stock))).startswith(L.PENDING_MA50)
+    # one close below MA50 (or both before the proof day) is not an exit
+    assert not L.two_closes_below_ma50(bars, after=bars[299]["date"])
+
+
+def test_promotion_within_the_cap_and_skips_kept_proven(live, tmp_path, monkeypatch):
+    monkeypatch.setattr(L, "_emit", lambda *a, **k: None)
+    bars = _trend(300)
+    first = bars[240]["close"] / 1.35                         # session 60, +35%
+    proven = json.dumps({C.SCENARIO_KEY: {"version": L.LIVE_VERSION, "status": L.PROVEN,
+                                          "proven_on": bars[270]["date"], "entry_first": first}})
+    core = json.dumps({C.SCENARIO_KEY: {"version": L.LIVE_VERSION, "status": L.CORE, "entry_first": 10.0,
+                                        "promoted_on": "2026-01-01"}})
+    conn = _db(tmp_path, [_row(1, "OLD", bars, 100, 10.0, core, 10.0),
+                          _row(2, "AAA", bars, 240, first, proven, first),
+                          _row(3, "AAA", bars, 240, first, proven, first),          # a second account: one slot
+                          _row(4, "BBB", bars, 241, first * 1.004, proven, first)])
+    keyed = {f"{t}|{bars[i]['date']} 23:30": bars for t, i in (("OLD", 100), ("AAA", 240), ("BBB", 241))}
+    actions = L.apply_live(conn, "US", keyed, regimes=lambda day: {"regime": "sideways", "date": day})
+    kinds = sorted((a["action"], a["ticker"]) for a in actions if a["action"] != "stop_set")
+    assert kinds == [("cap_skipped", "BBB"), ("promoted", "AAA"), ("promoted", "AAA")]
+    rows = _rows(conn)
+    assert rows[2][0]["status"] == L.CORE and rows[2][0]["regime"]["regime"] == "sideways"
+    assert rows[4][0]["status"] == L.PROVEN and rows[4][0]["promotion_skipped"] == bars[-1]["date"]
+    again = L.apply_live(conn, "US", keyed, regimes=lambda day: None)
+    assert not [a for a in again if a["action"] in ("promoted", "cap_skipped")]                 # no replacement
 
 
 def test_apply_live_does_nothing_while_off(tmp_path, monkeypatch):
     monkeypatch.delenv("CORE_HOLD_LIVE_ENABLED", raising=False)
-    conn = _db(tmp_path, [(2, "AAA", "2026-03-01 10:00:00", 100.0, "{}", 120.0)])
-    assert L.apply_live(conn, "US", [_result("AAA", "2026-03-01 10:00:00", "2026-05-01")], {}) == []
-    assert conn.execute("SELECT stop_loss FROM us_stock_holdings").fetchone()[0] == 120.0
+    bars = _trend(300)
+    conn = _db(tmp_path, [_row(1, "AAA", bars, 275, bars[275]["close"] / 1.16, stop=1.0)])
+    assert L.apply_live(conn, "US", {f"AAA|{bars[275]['date']} 23:30": bars}) == []
+    assert _rows(conn)[1] == (None, 1.0)
 
 
 def test_every_sale_path_records_core_exit():
     kr = (ROOT / "stock_tracking_agent.py").read_text(encoding="utf-8")
     us = (ROOT / "prism-us/us_stock_tracking_agent.py").read_text(encoding="utf-8")
     assert kr.count('core_hold_live.exit_kind(stock_data, "KR") or exit_kind') == 2       # sell_stock + pending exit
+    assert L.EXIT_KIND == {"PROVEN": "proven_exit", "CORE": "core_exit"}
     assert us.count('core_hold_live.exit_kind(stock_data, "US") or exit_kind') == 1
     seller = (ROOT / "tools/trend_exit_seller.py").read_text(encoding="utf-8")
     assert "runner_hold_live.enabled(market) or core_hold_live.enabled(market)" in seller

@@ -1,20 +1,21 @@
-"""Core long-term holding, LIVE wiring (H-1023-corehold). Off unless CORE_HOLD_LIVE_ENABLED=true.
+"""Staged trust and core long-term holding, LIVE wiring (H-1023-exitfit E2-15 + H-1023-corehold).
 
-User decisions 2026-10-23: one or two Coca-Cola-like long uptrends per market are not sold before
-they break the 200-day line; the trailing stop stays in force before promotion; the breakeven stop
-is the first buy (as the runner rule); no bear-market guard yet (the regime is recorded at each
-promotion). LIVE needs the user's explicit approval; this module does nothing while the flag is off.
+Off unless CORE_HOLD_LIVE_ENABLED=true (one switch, one rollback). User approval 2026-10-23
+("단계적 신뢰 실전 투입 ㄱㄱ", relayed by the buy session) after the gate in the PR.
 
-Pieces:
-- the daily observer (tools/run_core_hold_observer.py) promotes after the close and manages the stop:
-  ``apply_live`` writes ``scenario["core_hold"]`` and ``stop_loss`` (fresh read under BEGIN IMMEDIATE);
-  the stop is the first buy, or that day's low after a completed close below the 200-day MA, so the
-  intraday hard stop (tools/hardstop_seller.py) executes both core exits the next session;
-- ``view`` marks a core row protected for the sell guards (prism_core/runner_hold_live.py): the AI
-  sell, the trend-exit loop (trailing, MA50, target), the runner exits and stop adjustments are
-  blocked; the hard stop and an official corporate event still sell;
-- ``exit_kind`` records such a sale as ``core_exit`` (not a stop-out for the re-entry watch);
-- ``prompt_block`` is the per-holding SELL appendix (non-core prompts stay byte-identical).
+Stages of a real holding (all on completed daily bars, written after the close by the daily
+observer tools/run_core_hold_observer.py; e1 = the first buy fill, entry session = 1):
+- before proof: today's rules unchanged (trailing stop, runner rule R5, hard stop, AI review);
+- PROVEN: the first close with session >= 20, close >= 1.15 x e1 and close > MA50 > MA200. From the next
+  session the trailing stop, R5 (MA20 / relative weakness), the loss-side MA50 exit, AI discretionary
+  sells and AI stop changes are off. Sells: two consecutive closes below MA50 -> sold the next session
+  (the trend-exit loop and the batch act on the pending exit), or the price at e1 (stop_loss = e1, the
+  intraday hard stop); an official corporate event still sells;
+- CORE: promotion (session >= 40, close >= 1.30 x e1, close > MA50 > MA200, MA200 rising over 20 sessions,
+  close <= 1.4 x MA50, no exit pending), at most CAP per market (rank = steady-leader score, no
+  replacement). Sells: a close below MA200 sets stop_loss to that day's low (the next session's low
+  under it sells, intraday hard stop), or the price at e1. The regime is recorded at the promotion.
+Sales record exit_kind proven_exit / core_exit (never the re-entry watch's stop-out).
 """
 from __future__ import annotations
 
@@ -27,8 +28,13 @@ from prism_core import core_hold as C
 
 _LOG = logging.getLogger(__name__)
 LIVE_VERSION = "core-hold-v1"
+PROVEN = "PROVEN"
 CORE = "CORE"
-EXIT_KIND = "core_exit"
+STATUSES = (PROVEN, CORE)
+EXIT_KIND = {PROVEN: "proven_exit", CORE: "core_exit"}
+PROVE_SESSIONS = 20
+PROVE_GAIN = 0.15
+PENDING_MA50 = "PROVEN_MA50_TWO_CLOSES"
 
 _ROWS_SQL = {
     "KR": "SELECT id, ticker, buy_date, buy_price, scenario, stop_loss FROM stock_holdings",
@@ -62,32 +68,51 @@ def _load(scenario):
     return loaded if isinstance(loaded, dict) else {}
 
 
-def record(scenario):
-    """The stored LIVE core block (status CORE) of a scenario (dict or JSON), or None."""
+def live_block(scenario):
+    """The stored LIVE block (status PROVEN or CORE) of a scenario (dict or JSON), or None."""
     block = _load(scenario).get(C.SCENARIO_KEY)
-    if isinstance(block, dict) and block.get("version") == LIVE_VERSION and block.get("status") == CORE:
+    if isinstance(block, dict) and block.get("version") == LIVE_VERSION and block.get("status") in STATUSES:
         return block
     return None
 
 
+def record(scenario):
+    """The stored CORE block, or None."""
+    block = live_block(scenario)
+    return block if block and block["status"] == CORE else None
+
+
 def view(stock, market):
-    """A protected-position view for the sell guards when the row is a LIVE core holding, else None."""
+    """The protected view for the sell guards (PROVEN or CORE, switch on), else None.
+
+    ``exit`` is the pending close-confirmed exit of a PROVEN holding (sold by the trend-exit loop / batch)."""
     if not isinstance(stock, dict) or not enabled(market):
         return None
-    block = record(stock.get("scenario"))
+    block = live_block(stock.get("scenario"))
     if block is None:
         return None
-    return {"kind": "core", "record": block, "phase": CORE, "exit": None}
+    pending = (block.get("exit_pending") or {}).get("code") if block["status"] == PROVEN else None
+    return {"kind": "core", "status": block["status"], "record": block, "phase": block["status"], "exit": pending}
 
 
 def exit_kind(stock, market):
-    """``core_exit`` for a sale of a LIVE core holding (any seller), else None (keep the caller's kind)."""
-    return EXIT_KIND if view(stock, market) else None
+    """proven_exit / core_exit for a sale of a protected holding (any seller), else None (keep the caller's)."""
+    protected = view(stock, market)
+    return EXIT_KIND[protected["status"]] if protected else None
+
+
+def exit_reason(protected, market, language):
+    """The sell reason for a pending PROVEN exit (two closes below MA50)."""
+    pending = protected["record"].get("exit_pending") or {}
+    if language == "en":
+        return (f"{PENDING_MA50}: staged-trust holding closed below the 50-day MA on two consecutive sessions "
+                f"(last {pending.get('date')}); the rule sells the next session")
+    return (f"{PENDING_MA50}: 단계적 신뢰 종목이 2거래일 연속 50일선 아래로 마감했습니다"
+            f"(마지막 {pending.get('date')}). 규칙에 따라 다음 거래일에 매도합니다")
 
 
 def stop_target(bars, first_entry):
-    """(stop, facts) after the latest completed bar: the first buy, or max(first buy, that day's low)
-    after a close below the 200-day MA (the next session's low under it sells). None when unknown."""
+    """CORE stop after the latest completed bar: e1, or max(e1, that day's low) after a close below MA200."""
     first = C._num(first_entry)
     if not bars or not first:
         return None, {}
@@ -104,6 +129,29 @@ def stop_target(bars, first_entry):
     return (max(first, low) if armed else first), facts
 
 
+def proof(bars, index, *, first, entry_session):
+    """The proof conditions on bar ``index``: True/False, None when unknown (never a proof)."""
+    closes = C.closes_of(bars)
+    close, m50, m200 = closes[index], C.ma(closes, index, 50), C.ma(closes, index, 200)
+    sessions = C.session_number(bars, index, entry_session)
+    if None in (close, m50, m200, sessions) or not first:
+        return None
+    return sessions >= PROVE_SESSIONS and close >= first * (1 + PROVE_GAIN) and close > m50 > m200
+
+
+def two_closes_below_ma50(bars, *, after):
+    """The latest two completed closes, both after the proof day, below their MA50."""
+    closes = C.closes_of(bars)
+    i = len(bars) - 1
+    if i < 1 or str(bars[i - 1]["date"]) <= str(after):
+        return False
+    for j in (i - 1, i):
+        m50 = C.ma(closes, j, 50)
+        if m50 is None or closes[j] is None or not closes[j] < m50:
+            return False
+    return True
+
+
 def _money(value, market, en):
     number = C._num(value)
     if number is None:
@@ -114,11 +162,70 @@ def _money(value, market, en):
 
 
 def prompt_block(stock, *, market, language):
-    """Per-holding SELL appendix for a LIVE core holding; '' otherwise."""
-    core = view(stock, market)
-    if core is None:
+    """Per-holding SELL appendix for a PROVEN or CORE holding; '' otherwise."""
+    protected = view(stock, market)
+    if protected is None:
         return ""
-    block, en = core["record"], language == "en"
+    if protected["status"] == CORE:
+        return _core_prompt(stock, protected["record"], market=market, language=language)
+    return _proven_prompt(stock, protected["record"], market=market, language=language)
+
+
+def _proven_prompt(stock, block, *, market, language):
+    en = language == "en"
+    price = C._num(stock.get("current_price"))
+    first = C._num(block.get("entry_first"))
+    last = block.get("last") or {}
+    gain = f"{(price / first - 1) * 100:+.1f}%" if price and first else ("unknown" if en else "미확인")
+    if en:
+        return (
+            "\n\n### Staged-trust rule (takes precedence for this holding)\n"
+            f"This holding proved itself on {block.get('proven_on')}: at least 20 sessions after the entry, a completed "
+            "close 15% or more above the first buy, close above the 50-day MA above the 200-day MA. PRISM now gives it "
+            "room to become a long winner instead of trailing it out on a pullback; at 40+ sessions and +30% it can be "
+            "promoted to a core long-term holding.\n"
+            f"- Facts: current price {_money(price, market, en)} ({gain} vs the first buy {_money(first, market, en)}), "
+            f"50-day MA on the latest completed close {_money(last.get('ma50'), market, en)} ({last.get('date') or 'unknown'}), "
+            f"stop {_money(stock.get('stop_loss'), market, en)} (the first buy price, breakeven).\n"
+            "- The only valid sells, all executed by the system: (1) two consecutive completed closes below the 50-day "
+            "MA (sold the next session), (2) the price falling to the first buy price (intraday hard stop), (3) an "
+            "officially confirmed corporate event (Core-0).\n"
+            "- Not sell reasons for this holding: target reached, overheating, a short-term surge or RSI, slowing "
+            "momentum, a single close below the 20-day or 50-day MA, the Tier-3 trend-weakness composite, a "
+            "trailing-stop break, weakness against the index, a market-regime change, holding period or time review, "
+            "sector weakness, a pullback from the peak. The stored BUY scenario sell_triggers and the matching parts of "
+            "the shared SELL instruction do not apply to this holding. A should_sell=true for such a reason is turned "
+            "into a hold by the system. Keep should_sell=false and write the hold rationale.\n"
+            "- The system manages the stop and target. Return portfolio_adjustment.needed=false with new_stop_loss "
+            "and new_target_price null; any adjustment is ignored.\n"
+            "- For a micro-split holding the next_session_add_plan request above stays valid: a proven holding is a "
+            "position to build up. Its sentence 'the sell decision, stop and portfolio_adjustment rules are "
+            "unchanged' is replaced by this rule for this holding.\n")
+    return (
+        "\n\n### 단계적 신뢰 규칙 (이 종목에 우선 적용)\n"
+        f"이 종목은 {block.get('proven_on')}에 검증을 통과했습니다. 매수 후 20거래일 이상, 확정 종가가 최초 매수가 대비 "
+        "+15% 이상, 종가가 200일선 위의 50일선 위에 있는 조건을 모두 충족했습니다. PRISM은 이제 눌림에 trailing stop으로 "
+        "털지 않고 크게 갈 여지를 줍니다. 40거래일 이상·+30%가 되면 장기 보유 종목으로 승격될 수 있습니다.\n"
+        f"- 현재 사실: 현재가 {_money(price, market, en)}(최초 매수가 {_money(first, market, en)} 대비 {gain}), 직전 확정 "
+        f"종가 기준 50일선 {_money(last.get('ma50'), market, en)}({last.get('date') or '미확인'}), 손절가 "
+        f"{_money(stock.get('stop_loss'), market, en)}(최초 매수가, 본전).\n"
+        "- 매도가 유효한 경우는 다음뿐이며 모두 시스템이 실행합니다. (1) 확정 종가가 2거래일 연속 50일선 아래로 마감한 "
+        "경우(다음 거래일 매도), (2) 가격이 최초 매수가(본전)까지 내려간 경우(장중 하드스탑), (3) 공식 확인된 법인 "
+        "이벤트(핵심-0).\n"
+        "- 이 종목에는 다음이 매도 사유가 아닙니다: 목표가 도달, 과열·단기 급등·RSI, 모멘텀 둔화, 20일선·50일선 1회 "
+        "이탈, 3단계 추세 약화 복합 조건, trailing stop 이탈, 지수 대비 약세, 시장 국면 변화, 보유 기간·시간 점검, 업종 "
+        "약세, 고점 대비 눌림. 저장된 매수 시나리오의 sell_triggers와 공유 매도 지침의 해당 항목은 이 종목에 적용하지 "
+        "않습니다. 이런 이유로 should_sell=true를 내도 시스템이 보유로 바꿉니다. should_sell은 false로 두고 보유 근거를 "
+        "쓰십시오.\n"
+        "- 손절가와 목표가는 시스템이 관리합니다. portfolio_adjustment는 needed=false, new_stop_loss와 "
+        "new_target_price는 null로 쓰십시오. 조정을 써도 반영되지 않습니다.\n"
+        "- 초분할 보유라면 위의 증액 계획(next_session_add_plan) 요청은 그대로 유효합니다. 검증된 종목은 비중을 키울 "
+        "대상입니다. 증액 블록의 '매도 판단, 손절가, portfolio_adjustment 기준은 바뀌지 않습니다' 문장은 이 종목에 한해 "
+        "이 규칙으로 대체됩니다.\n")
+
+
+def _core_prompt(stock, block, *, market, language):
+    en = language == "en"
     last = block.get("last") or {}
     price = C._num(stock.get("current_price"))
     first = C._num(block.get("entry_first"))
@@ -192,12 +299,43 @@ def _emit(event_type, *, market, ticker, row_id, scenario, attributes):
                attributes=attributes)
 
 
-def apply_live(conn, market, results, bars_by_key, *, now=None, alert=None):
-    """Promote LIVE core holdings and set their stops after the close. Returns a list of actions.
+def _write(conn, market, row_id, mutate):
+    """Fresh read under BEGIN IMMEDIATE; ``mutate(block, stop) -> (block, stop) | None``. Returns
+    (old block, new block, old stop, new stop, scenario json) or None when nothing changed."""
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        fresh = conn.execute(_ROW_SQL[market], (row_id,)).fetchone()
+        if fresh is None:
+            conn.rollback()
+            return None
+        scenario = _load(fresh[0])
+        old_block = scenario.get(C.SCENARIO_KEY) if isinstance(scenario.get(C.SCENARIO_KEY), dict) else None
+        old_stop = C._num(fresh[1])
+        out = mutate(live_block(scenario), old_stop)
+        if out is None:
+            conn.rollback()
+            return None
+        block, stop = out
+        same_stop = old_stop is not None and stop is not None and abs(old_stop - stop) <= abs(stop) * 1e-9
+        if block == old_block and same_stop:
+            conn.rollback()
+            return None
+        scenario[C.SCENARIO_KEY] = block
+        text = json.dumps(scenario, ensure_ascii=False)
+        conn.execute(_WRITE_SQL[market], (text, stop if stop is not None else fresh[1], row_id))
+        conn.commit()
+        return old_block, block, old_stop, stop, text
+    except Exception:
+        conn.rollback()
+        raise
 
-    ``results``: tools/run_core_hold_observer.py evaluations (variant a = promotion while held);
-    ``bars_by_key``: completed bars per result key. Promotion needs an open row, a promotion with no
-    core exit yet and a free slot (CAP minus core rows already held); same-day order = the rank score.
+
+def apply_live(conn, market, bars_by_key, *, regimes=None, now=None, alert=None):
+    """After the close: proof, pending PROVEN exits, promotion (cap) and CORE stops. Returns actions.
+
+    ``bars_by_key``: completed daily bars per "ticker|buy minute"; ``regimes``: callable(date) -> the
+    logged regime dict (or None), recorded at each promotion.
     """
     market = str(market).upper()
     now = now or _now()
@@ -207,123 +345,126 @@ def apply_live(conn, market, results, bars_by_key, *, now=None, alert=None):
     from prism_core import runner_hold as R
     rows = [dict(zip(("id", "ticker", "buy_date", "buy_price", "scenario", "stop_loss"), r))
             for r in conn.execute(_ROWS_SQL[market]).fetchall()]
-
-    def key_of(row):
-        return f"{row['ticker']}|{str(row['buy_date'])[:16]}"
-
-    held_core = {row["ticker"] for row in rows if record(row["scenario"])}
-    decided = {row["ticker"] for row in rows if _decided(row["scenario"])}   # core, or skipped for good
-    free = C.CAP - len(held_core)
-    by_key = {r["key"]: r for r in results}
-    candidates = [r for r in results
-                  if r.get("open") and r.get("a") and not r["a"].get("exit") and r["ticker"] not in decided]
-    ordered = []
-    for day in sorted({r["a"]["date"] for r in candidates}):
-        same = [r for r in candidates if r["a"]["date"] == day]
-        ordered += [c["r"] for c in C.rank([{"ticker": r["ticker"], "share": r["a"].get("share"),
-                                              "ret": r["a"].get("ret"), "r": r} for r in same])]
-    seen, unique = set(), []
-    for r in ordered:                                   # one slot per ticker (rows of several accounts)
-        if r["ticker"] not in seen:
-            seen.add(r["ticker"])
-            unique.append(r)
-    promote = {r["ticker"]: r for r in unique[:max(free, 0)]}
-    for r in unique[max(free, 0):]:                     # slots full on its promotion day: skipped for good
-        skipped = _mark_skipped(conn, market, rows, r, now)
-        actions.append({"action": "cap_full", "ticker": r["ticker"], "key": r["key"], "rows": skipped})
-        try:
-            _emit("core_hold.cap_skipped", market=market, ticker=r["ticker"], row_id=None, scenario=None,
-                  attributes={"contract": LIVE_VERSION, "date": r["a"]["date"], "held_core": sorted(held_core)})
-        except Exception as error:  # noqa: BLE001
-            _LOG.warning("[CORE_HOLD][%s] %s event failed: %s", market, r["ticker"], type(error).__name__)
+    state = {}
     for row in rows:
-        key = key_of(row)
-        block = record(row["scenario"])
-        if block is None and row["ticker"] not in promote:
+        bars = bars_by_key.get(f"{row['ticker']}|{str(row['buy_date'])[:16]}") or []
+        try:
+            session = R.entry_session(market, row["buy_date"]).isoformat()
+        except (TypeError, ValueError):
             continue
-        result = by_key.get(key) if block is None and (by_key.get(key) or {}).get("a") else promote.get(row["ticker"])
         first = R.entry_reference(row["scenario"], row["buy_price"])
-        target, facts = stop_target(bars_by_key.get(key) or [], first)
-        if target is None:
-            continue
-        conn.commit()
-        conn.execute("BEGIN IMMEDIATE")
+        if not bars or not first:
+            continue                                     # MISSING: nothing changes on unknown bars
+        state[row["id"]] = {"row": row, "bars": bars, "session": session, "first": first,
+                            "i": len(bars) - 1, "block": live_block(row["scenario"])}
+
+    def act(kind, row, written, **extra):
+        old_block, block, old_stop, stop, text = written
+        attributes = {"contract": LIVE_VERSION, "status": block.get("status"), "stop_loss": stop,
+                      "previous_stop_loss": old_stop, "entry_first": block.get("entry_first"),
+                      "last": block.get("last"), **extra}
+        actions.append({"action": kind, "ticker": row["ticker"], "row_id": row["id"], **attributes})
         try:
-            fresh = conn.execute(_ROW_SQL[market], (row["id"],)).fetchone()
-            if fresh is None:
-                conn.rollback()
-                continue
-            scenario = _load(fresh[0])
-            current = record(scenario)
-            promoted = current is None
-            if promoted:
-                cand = result["a"]
-                current = {"version": LIVE_VERSION, "status": CORE, "promoted_on": cand["date"],
-                           "promoted_at": now.isoformat(), "entry_first": first,
-                           "entry_avg": result.get("entry_avg"), "regime": cand.get("regime"),
-                           "rank": {"share": cand.get("share"), "ret": cand.get("ret")},
-                           "view": cand.get("view"), "contract": C.VERSION}
-            updated = dict(current, last=facts, stop=target)
-            old_stop = C._num(fresh[1])
-            if updated == current and old_stop is not None and abs(old_stop - target) <= target * 1e-9:
-                conn.rollback()
-                continue
-            scenario[C.SCENARIO_KEY] = updated
-            conn.execute(_WRITE_SQL[market], (json.dumps(scenario, ensure_ascii=False), target, row["id"]))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        kind = "promoted" if promoted else ("stop_armed" if facts.get("armed") else "stop_set")
-        attributes = {"contract": LIVE_VERSION, "stop_loss": target, "previous_stop_loss": old_stop,
-                      "entry_first": first, "facts": facts,
-                      **({"promoted_on": updated["promoted_on"], "regime": updated.get("regime")} if promoted else {})}
-        actions.append({"action": kind, "ticker": row["ticker"], "key": key, **attributes})
-        try:
-            _emit(f"core_hold.{kind}", market=market, ticker=row["ticker"], row_id=row["id"],
-                  scenario=json.dumps(scenario, ensure_ascii=False), attributes=attributes)
+            _emit(f"core_hold.{kind}", market=market, ticker=row["ticker"], row_id=row["id"], scenario=text,
+                  attributes=attributes)
         except Exception as error:  # noqa: BLE001 - an event never undoes a written stop
             _LOG.warning("[CORE_HOLD][%s] %s event failed: %s", market, row["ticker"], type(error).__name__)
-        if alert and (promoted or facts.get("armed")) and abs((old_stop or 0) - target) > target * 1e-9:
-            alert(_alert_text(market, row["ticker"], kind, updated, target, old_stop))
-    return actions
+        if alert and kind in ("proven", "promoted", "stop_armed", "exit_pending"):
+            alert(_alert_text(market, row["ticker"], kind, block, stop, old_stop))
 
-
-def _decided(scenario):
-    block = _load(scenario).get(C.SCENARIO_KEY)
-    return isinstance(block, dict) and block.get("version") == LIVE_VERSION
-
-
-def _mark_skipped(conn, market, rows, result, now):
-    """Write status CAP_SKIPPED on the ticker's rows (stop untouched) so the slot rule stays 'no replacement'."""
-    marked = 0
-    for row in rows:
-        if row["ticker"] != result["ticker"]:
+    # 1. proof (first close meeting it) and 2. a pending PROVEN exit (two closes below MA50 after the proof)
+    for s in state.values():
+        row, bars, i = s["row"], s["bars"], s["i"]
+        closes = C.closes_of(bars)
+        last = {"date": bars[i]["date"], "close": closes[i], "ma50": C.ma(closes, i, 50), "ma200": C.ma(closes, i, 200)}
+        if s["block"] is None and proof(bars, i, first=s["first"], entry_session=s["session"]):
+            block = {"version": LIVE_VERSION, "status": PROVEN, "proven_on": bars[i]["date"],
+                     "proven_at": now.isoformat(), "entry_first": s["first"], "contract": C.VERSION, "last": last}
+            written = _write(conn, market, row["id"],
+                             lambda cur, stop, b=block, f=s["first"]: None if cur is not None else (b, f))
+            if written:
+                s["block"] = written[1]
+                act("proven", row, written)
+        elif s["block"] and s["block"]["status"] == PROVEN and not s["block"].get("exit_pending"):
+            if two_closes_below_ma50(bars, after=s["block"]["proven_on"]):
+                def pend(cur, stop, last=last):
+                    if cur is None or cur["status"] != PROVEN or cur.get("exit_pending"):
+                        return None
+                    return dict(cur, last=last, exit_pending={"code": PENDING_MA50, "date": last["date"]}), stop
+                written = _write(conn, market, row["id"], pend)
+                if written:
+                    s["block"] = written[1]
+                    act("exit_pending", row, written)
+            else:                                        # keep the prompt facts current
+                written = _write(conn, market, row["id"], lambda cur, stop, last=last: None if cur is None or
+                                 cur["status"] != PROVEN else (dict(cur, last=last), stop))
+                if written:
+                    s["block"] = written[1]
+    # 3. promotion: PROVEN, no exit pending, not skipped, eligible today; CAP per market by ticker
+    held = {s["row"]["ticker"] for s in state.values() if s["block"] and s["block"]["status"] == CORE}
+    held |= {row["ticker"] for row in rows if record(row["scenario"])}
+    candidates = {}
+    for s in state.values():
+        block = s["block"]
+        if (not block or block["status"] != PROVEN or block.get("exit_pending") or block.get("promotion_skipped")
+                or s["row"]["ticker"] in held):
             continue
-        conn.commit()
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            fresh = conn.execute(_ROW_SQL[market], (row["id"],)).fetchone()
-            scenario = _load(fresh[0]) if fresh else None
-            if scenario is None or _decided(scenario):
-                conn.rollback()
-                continue
-            scenario[C.SCENARIO_KEY] = {"version": LIVE_VERSION, "status": "CAP_SKIPPED",
-                                        "eligible_on": result["a"]["date"], "at": now.isoformat()}
-            conn.execute(_WRITE_SQL[market], (json.dumps(scenario, ensure_ascii=False), fresh[1], row["id"]))
-            conn.commit()
-            marked += 1
-        except Exception:
-            conn.rollback()
-            raise
-    return marked
+        view_ = C.promotion(s["bars"], s["i"], entry=s["first"], entry_session=s["session"])
+        if view_["eligible"]:
+            share, ret = C.rank_inputs(s["bars"], s["i"])
+            candidates.setdefault(s["row"]["ticker"], {"ticker": s["row"]["ticker"], "share": share, "ret": ret,
+                                                       "view": view_, "states": []})["states"].append(s)
+    ranked = C.rank(list(candidates.values()))
+    free = max(C.CAP - len(held), 0)
+    for n, cand in enumerate(ranked):
+        seat = n < free
+        for s in cand["states"]:
+            row, view_ = s["row"], cand["view"]
+            regime = regimes(view_["date"]) if callable(regimes) else None
+
+            def promote(cur, stop, seat=seat, view_=view_, regime=regime, cand=cand, s=s):
+                if cur is None or cur["status"] != PROVEN:
+                    return None
+                if not seat:
+                    return dict(cur, promotion_skipped=view_["date"]), stop
+                target, facts = stop_target(s["bars"], s["first"])
+                return dict(cur, status=CORE, promoted_on=view_["date"], promoted_at=now.isoformat(), regime=regime,
+                            rank={"share": cand["share"], "ret": cand["ret"]},
+                            view={k: view_[k] for k in ("sessions", "gain", "close", "ma50", "ma200", "ma200_lag")},
+                            last=facts), target
+            written = _write(conn, market, row["id"], promote)
+            if written:
+                s["block"] = written[1]
+                act("promoted" if seat else "cap_skipped", row, written, regime=regime)
+    # 4. CORE stops (first buy, or that day's low after a close below MA200)
+    for s in state.values():
+        if not s["block"] or s["block"]["status"] != CORE:
+            continue
+        target, facts = stop_target(s["bars"], s["first"])
+        if target is None:
+            continue
+
+        def restop(cur, stop, target=target, facts=facts):
+            if cur is None or cur["status"] != CORE:
+                return None
+            return dict(cur, last=facts), target
+        written = _write(conn, market, s["row"]["id"], restop)
+        if written and (written[2] is None or abs(written[2] - target) > target * 1e-9):
+            act("stop_armed" if facts.get("armed") else "stop_set", s["row"], written)
+    return actions
 
 
 def _alert_text(market, ticker, kind, block, stop, old_stop):
     name = {"KR": "한국", "US": "미국"}.get(market, market)
+    if kind == "proven":
+        return (f"[단계적 신뢰] {name} {ticker} 검증 통과({block.get('proven_on')}). 손절가 {old_stop} → {stop}(최초 매수가). "
+                "이제 50일선 2일 연속 이탈 또는 본전에서만 팝니다.")
+    if kind == "exit_pending":
+        return (f"[단계적 신뢰] {name} {ticker} 50일선 아래 2일 연속 마감({(block.get('exit_pending') or {}).get('date')}). "
+                "다음 거래일에 매도합니다.")
     if kind == "promoted":
         regime = (block.get("regime") or {}).get("regime") or "미확인"
-        return (f"[장기 보유] {name} {ticker} 승격({block['promoted_on']}, 국면 {regime}). 손절가 {old_stop} → {stop}"
-                "(최초 매수가). 200일선 이탈 확인 전에는 다른 매도를 막습니다.")
+        return (f"[장기 보유] {name} {ticker} 승격({block.get('promoted_on')}, 국면 {regime}). 손절가 {stop}(최초 매수가). "
+                "200일선 이탈 확인 전에는 다른 매도를 막습니다.")
     return (f"[장기 보유] {name} {ticker} 200일선 아래 마감({(block.get('last') or {}).get('date')}). 손절가 {old_stop} → "
             f"{stop}(그날 저가). 다음 거래일 이 아래로 내려가면 하드스탑이 매도합니다.")
