@@ -176,8 +176,9 @@ def _candidate(bars, index, view, entry, first):
     return {"date": view["date"], "index": index, "view": {k: view[k] for k in ("sessions", "gain", "close", "ma50",
                                                                                  "ma200", "ma200_lag")},
             "share": share, "ret": ret,
-            "exit": C.core_exit(bars, start_index=index, entry=entry),
-            "exit_first_basis": C.core_exit(bars, start_index=index, entry=first)}
+            # breakeven on the first buy (user decision 10/23, as the runner rule); the average basis is a record
+            "exit": C.core_exit(bars, start_index=index, entry=first),
+            "exit_avg_basis": C.core_exit(bars, start_index=index, entry=entry)}
 
 
 def _corporate(dates, bars, out):
@@ -381,7 +382,7 @@ def _emit(market, result, before, after):
 def _brief(cand):
     if not cand:
         return None
-    return {k: cand.get(k) for k in ("date", "slot", "exit", "exit_first_basis", "share", "ret", "regime")} | {
+    return {k: cand.get(k) for k in ("date", "slot", "exit", "exit_avg_basis", "share", "ret", "regime")} | {
         "view": cand.get("view")}
 
 
