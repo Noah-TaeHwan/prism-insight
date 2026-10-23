@@ -184,6 +184,7 @@ jobs:
             tests/test_market_data_preopen_flows.py \
             tests/test_market_data_mcp_server.py tests/test_prefetch_auth_outage.py \
             tests/test_trigger_provider_outage.py -q
+          python -m pytest tests/test_us_market_data.py tests/test_yfinance_import_allowlist.py -q
 
       - name: Stance and LLM component suites
         env:

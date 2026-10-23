@@ -21,6 +21,12 @@ instead of returning an empty or zero frame.
 The trading client is borrowed, not re-authenticated, for the same reason as
 ``cores/market_data/kis_source.py``: one token per app key, and ``kis_auth``
 keeps global state. Nothing here places orders.
+
+Providers are adapters behind the Korean market-data contract
+(``cores/market_data/source.py``: ``SourceChain``, ``Unsupported``, ``Unavailable``).
+``PRISM_US_MARKET_DATA_SOURCES`` picks them in order (default ``kis``; e.g.
+``kis,yfinance``). A new vendor is one class with ``daily_history`` and
+``current_quote`` plus one entry in ``_SOURCES``; callers do not change.
 """
 
 from __future__ import annotations
@@ -58,10 +64,33 @@ _RATE_LIMIT_WAITS = (0.5, 1.0)
 
 _client = None
 _client_lock = threading.Lock()
+_chain = None
+_DEFAULT_ORDER = "kis"
 
 
-class UsMarketDataUnavailable(RuntimeError):
-    """KIS could not answer; the caller treats the value as unknown."""
+def _load_source_contract():
+    """The Korean provider contract, without importing ``cores`` (prism-us/cores shadows it in US runs)."""
+    loaded = sys.modules.get("cores.market_data.source")
+    if loaded is not None:
+        return loaded
+    module = sys.modules.get("prism_market_data_source")
+    if module is None:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "cores", "market_data", "source.py")
+        spec = importlib.util.spec_from_file_location("prism_market_data_source", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules["prism_market_data_source"] = module
+    return module
+
+
+_contract = _load_source_contract()
+SourceChain, Unavailable, Unsupported = _contract.SourceChain, _contract.Unavailable, _contract.Unsupported
+
+
+class UsMarketDataUnavailable(Unavailable, RuntimeError):
+    """No configured US provider could answer; the caller treats the value as unknown."""
 
 
 def _us_trading_class():
@@ -147,11 +176,16 @@ def daily_history(symbol: str, start, end, *, adjusted: bool = False) -> pd.Data
     """Daily OHLCV for [start, end] (inclusive), oldest first, tz-naive ``Date`` index.
 
     ``symbol`` uses the yfinance spelling (``AAPL``, ``BRK-B``, ``^GSPC``).
-    Raises ``UsMarketDataUnavailable`` when KIS fails or returns no row.
+    Raises ``UsMarketDataUnavailable`` when no configured provider can answer.
     """
     symbol = str(symbol or "").strip().upper()
     if not symbol:
         raise ValueError("symbol is required")
+    return _ask("daily_history", symbol, start, end, adjusted=adjusted)
+
+
+def _kis_daily_history(symbol: str, start, end, *, adjusted: bool = False) -> pd.DataFrame:
+    """KIS adapter body of ``daily_history`` (symbol already normalised)."""
     first, last = _yyyymmdd(start), _yyyymmdd(end)
     index_code = INDEX_CODES.get(symbol)
     if symbol.startswith("^") and not index_code:
@@ -264,8 +298,12 @@ def frame_from_rows(rows: list[dict], fields=_STOCK_FIELDS, *, is_index: bool = 
 
 def current_quote(symbol: str, *, allow_previous_close: bool = False):
     """Last trade price; with ``allow_previous_close`` the previous close when there is no trade
-    (yfinance ``regularMarketPrice or previousClose``). None when KIS has neither."""
-    quote = _trading().get_current_price(str(symbol).strip().upper(), strict=not allow_previous_close)
+    (yfinance ``regularMarketPrice or previousClose``). None when the provider has neither."""
+    return _ask("current_quote", str(symbol).strip().upper(), allow_previous_close=allow_previous_close)
+
+
+def _kis_current_quote(symbol: str, *, allow_previous_close: bool = False):
+    quote = _trading().get_current_price(symbol, strict=not allow_previous_close)
     price = (quote or {}).get("current_price")
     return float(price) if isinstance(price, (int, float)) and math.isfinite(price) and price > 0 else None
 
@@ -283,3 +321,71 @@ def download(symbols, **history_kwargs) -> pd.DataFrame:
         except UsMarketDataUnavailable as error:
             logger.warning("KIS daily prices unavailable for %s: %s", symbol, error)
     return pd.concat(frames, axis=1) if frames else pd.DataFrame()
+
+
+class KisUsSource:
+    """KIS overseas quotations (the production provider)."""
+
+    name = "kis"
+
+    def daily_history(self, symbol, start, end, *, adjusted=False):
+        return _kis_daily_history(symbol, start, end, adjusted=adjusted)
+
+    def current_quote(self, symbol, *, allow_previous_close=False):
+        return _kis_current_quote(symbol, allow_previous_close=allow_previous_close)
+
+
+class YFinanceUsSource:
+    """yfinance, limited to what US runtime code used before KIS (opt-in only, unlicensed)."""
+
+    name = "yfinance"
+
+    def daily_history(self, symbol, start, end, *, adjusted=False):
+        import yfinance as yf
+        stop = pd.Timestamp(_yyyymmdd(end)) + pd.Timedelta(days=1)
+        frame = yf.Ticker(symbol).history(start=pd.Timestamp(_yyyymmdd(start)).strftime("%Y-%m-%d"),
+                                          end=stop.strftime("%Y-%m-%d"), auto_adjust=adjusted)
+        if frame is None or frame.empty:
+            raise Unavailable(f"yfinance returned no daily rows for {symbol}")
+        out = frame[["Open", "High", "Low", "Close", "Volume"]].copy()
+        if not symbol.startswith("^"):
+            out["Stock Splits"] = frame["Stock Splits"] if "Stock Splits" in frame else 0.0
+        out.index = pd.DatetimeIndex(frame.index.tz_localize(None).normalize(), name="Date")
+        return out
+
+    def current_quote(self, symbol, *, allow_previous_close=False):
+        import yfinance as yf
+        info = yf.Ticker(symbol).info or {}
+        price = info.get("regularMarketPrice") or (info.get("previousClose") if allow_previous_close else None)
+        return float(price) if isinstance(price, (int, float)) and math.isfinite(price) and price > 0 else None
+
+
+_SOURCES = {"kis": KisUsSource, "yfinance": YFinanceUsSource}
+
+
+def default_chain():
+    """Providers from ``PRISM_US_MARKET_DATA_SOURCES`` (default ``kis``), built once per process."""
+    global _chain
+    if _chain is None:
+        names = [n.strip().lower() for n in os.getenv("PRISM_US_MARKET_DATA_SOURCES", _DEFAULT_ORDER).split(",")]
+        unknown = [n for n in names if n not in _SOURCES]
+        if unknown or not any(names):
+            raise ValueError(f"unknown US market data source(s): {unknown or names}")
+        _chain = SourceChain([_SOURCES[n]() for n in names])
+        logger.info("US market data sources: %s", " -> ".join(_chain.names))
+    return _chain
+
+
+def set_default_chain(chain) -> None:
+    """Replace the process chain. For tests and deliberate reconfiguration."""
+    global _chain
+    _chain = chain
+
+
+def _ask(capability, *args, **kwargs):
+    try:
+        return default_chain().fetch(capability, *args, **kwargs)
+    except UsMarketDataUnavailable:
+        raise
+    except Unavailable as exc:
+        raise UsMarketDataUnavailable(str(exc)) from exc

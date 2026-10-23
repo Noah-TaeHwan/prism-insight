@@ -747,6 +747,27 @@ class StockTrackingAgent:
                            type(error).__name__)
             return float(current_slots)
 
+    async def _buy_risk_facts_block(self, ticker: str, sector, trend_facts: str, holdings: list) -> str:
+        """BUY risk facts (prism_core.buy_risk_facts): the prompt block while PRISM_BUY_RISK_FACTS is on,
+        the decision-ledger copy while decision-input capture is on, '' otherwise. Fail-open, read-only."""
+        from observability.decision_inputs import enabled as decision_inputs_enabled
+        from prism_core import buy_risk_facts
+        if not (buy_risk_facts.enabled() or decision_inputs_enabled()):
+            return ""
+        try:
+            from prism_core.sector_names import sectors_overlap
+            from tracking.helpers import MIN_HOLDINGS_FOR_RATIO_CHECK
+            # The regime the final gate reads: the scenario stamp (trigger-batch regime, then the live one).
+            regime = self._stamp_scenario_market_regime({}).get("_deterministic_market_regime")
+            allowed = await self._check_sector_diversity(sector) if sector else None
+            return buy_risk_facts.collect(
+                self, ticker, market="KR", language=self.language, regime=regime, trend_facts=trend_facts,
+                sector=sector, holding_scenarios=[h.get("scenario") for h in holdings], sector_allowed=allowed,
+                same_sector=sectors_overlap, ratio_min_holdings=MIN_HOLDINGS_FOR_RATIO_CHECK)
+        except Exception as error:  # noqa: BLE001 - optional input must never fail a BUY decision
+            logger.warning("[BUY_RISK_FACTS][KR] %s unavailable: %s", ticker, type(error).__name__)
+            return ""
+
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector (delegates to tracking.helpers)"""
         account_key, _ = self._account_scope()
@@ -1109,6 +1130,10 @@ class StockTrackingAgent:
             except Exception as _hfe:
                 logger.warning(f"[BreakoutFacts] {ticker} failed, fail-open: {_hfe}")
                 lines.append("- 52주 확정 최고가: 계산 불가 → 2a (a)·(c) 미확정")
+            # The BUY risk facts repeat these verdicts instead of recomputing them (never raises).
+            from prism_core.buy_risk_facts import remember_trend_inputs
+            remember_trend_inputs(self, ticker, price=close, volume=locals().get("_vf"),
+                                  high52=locals().get("_hf"), dates=df.index)
             # Market Pulse (O'Neil M) 상태 + 분산일 카운트를 프롬프트 정보로 주입.
             # 프로세스당 1회 계산(regime_policy 모듈 캐시); fail-open.
             try:
@@ -1210,6 +1235,7 @@ class StockTrackingAgent:
             journal_context = ""
             trend_facts = ""
             decision_facts = ""
+            risk_facts = ""
             score_adjustment_info = ""
             adjustment, reasons = 0, []
             if ticker:
@@ -1217,6 +1243,7 @@ class StockTrackingAgent:
                 trend_facts = self._get_trend_facts(ticker)
                 from observability.decision_inputs import prompt_facts
                 decision_facts = prompt_facts(self, ticker, market="KR", language=self.language)
+                risk_facts = await self._buy_risk_facts_block(ticker, sector, trend_facts, holdings)
                 journal_context = self._get_relevant_journal_context(
                     ticker=ticker,
                     sector=sector,
@@ -1291,7 +1318,7 @@ class StockTrackingAgent:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {trend_facts}
-                {decision_facts}
+                {decision_facts}{risk_facts}
                 {journal_context}
 
                 ### Report Content:
@@ -1308,7 +1335,7 @@ class StockTrackingAgent:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {trend_facts}
-                {decision_facts}
+                {decision_facts}{risk_facts}
                 {journal_context}
 
                 ### Report Content:
