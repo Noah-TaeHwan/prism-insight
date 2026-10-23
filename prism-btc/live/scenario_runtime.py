@@ -798,7 +798,7 @@ class ScenarioRuntime:
                                 rejection_receipt=rejected)
                 payload = validate_wire_proposal(
                     review_envelope["outcome"]["result"]["selected"]["raw_proposal"], ctx)
-                payload["rationale"] = review_envelope["outcome"]["result"]["selection"]["rationale"]
+                # Persist the candidate's own rationale; selection prose stays in the review tape.
             elif self.recovery_enabled:
                 with recovery.capture_wire(self.conn, slot, self.clock):
                     payload = self.propose(snap, ctx)

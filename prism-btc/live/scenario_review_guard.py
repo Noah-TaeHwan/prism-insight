@@ -141,7 +141,7 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
         # Samples may advance without replacing the original premise. A newly
         # confirmed failure still invalidates any non-EXIT reviewed action.
         validate_metadata(payload, fresh)
-    payload["rationale"] = result["selection"]["rationale"]
+    # Keep the selected candidate's rationale; selection prose remains separate audit evidence.
     core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
     if core.get('pending_renewal') is None:
         core.pop('pending_renewal', None)
