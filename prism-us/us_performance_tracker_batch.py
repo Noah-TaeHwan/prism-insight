@@ -52,13 +52,6 @@ logger = logging.getLogger(__name__)
 # Database path
 DB_PATH = PROJECT_ROOT / "stock_tracking_db.sqlite"
 
-# Import yfinance for price data
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-except ImportError:
-    YFINANCE_AVAILABLE = False
-    logger.warning("yfinance not installed. Price fetching will be unavailable.")
 
 # Import US market day checker
 try:
@@ -180,7 +173,7 @@ class USPerformanceTrackerBatch:
 
     def get_current_price(self, ticker: str) -> Optional[float]:
         """
-        Get current stock price using yfinance.
+        Get current stock price from KIS (last trade, else the latest daily close).
 
         Args:
             ticker: Stock ticker symbol (e.g., 'AAPL', 'MSFT')
@@ -188,23 +181,16 @@ class USPerformanceTrackerBatch:
         Returns:
             Current price in USD or None if unavailable
         """
-        if not YFINANCE_AVAILABLE:
-            logger.error("yfinance not available. Cannot fetch price.")
-            return None
-
         try:
-            stock = yf.Ticker(ticker)
+            from prism_core.us_market_data import current_quote, history
 
-            # Try to get current price from info
-            info = stock.info
-            current_price = info.get('regularMarketPrice') or info.get('currentPrice')
-
+            current_price = current_quote(ticker)
             if current_price:
                 return float(current_price)
 
             # Fallback: Get last close from history
-            hist = stock.history(period="5d")
-            if not hist.empty:
+            hist = history(ticker, period="5d")
+            if not hist.empty and hist['Close'].notna().iloc[-1]:
                 return float(hist['Close'].iloc[-1])
 
             logger.warning(f"[{ticker}] No price data available")

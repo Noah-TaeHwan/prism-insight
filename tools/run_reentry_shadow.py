@@ -8,7 +8,6 @@ Usage (db-server cron, after the market close):
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import logging
 import math
@@ -67,23 +66,20 @@ def _frame_rows(frame, end):
 
 
 def collect_us(tickers, completed):
+    """KIS overseas daily bars (split-adjusted, not dividend-adjusted), one symbol at a time."""
     import pandas as pd
-    import yfinance as yf
 
-    start = (pd.Timestamp(completed) - pd.Timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
-    end = (pd.Timestamp(completed) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    from prism_core.us_market_data import UsMarketDataUnavailable, daily_history
+
+    start = pd.Timestamp(completed) - pd.Timedelta(days=HISTORY_DAYS)
     symbols = list(dict.fromkeys(list(tickers) + ["SPY"]))
-    with contextlib.redirect_stdout(sys.stderr):
-        data = yf.download(symbols, start=start, end=end, interval="1d", auto_adjust=False, actions=False,
-                           progress=False, threads=False, timeout=15, group_by="ticker")
     out = {}
     for symbol in symbols:
         try:
-            frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
-            rows = _frame_rows(frame, completed)
+            rows = _frame_rows(daily_history(symbol, start, completed), completed)
             if rows and rows[-1]["date"] == completed:
                 out[symbol] = rows
-        except (KeyError, TypeError, ValueError):
+        except (UsMarketDataUnavailable, KeyError, TypeError, ValueError):
             continue
     spy = out.pop("SPY", [])
     out["__benchmark_rows"] = {t: spy for t in tickers} if spy else {}

@@ -376,7 +376,7 @@ def extract_ticker_info(report_path: str) -> Tuple[str, str]:
 
 async def get_current_stock_price(cursor, ticker: str, account_key: str | None = None) -> float:
     """
-    Get current US stock price using yfinance.
+    Get current US stock price from KIS (last trade, else previous close).
 
     Args:
         cursor: SQLite cursor
@@ -386,18 +386,16 @@ async def get_current_stock_price(cursor, ticker: str, account_key: str | None =
         float: Current stock price in USD
     """
     import asyncio
-    import yfinance as yf
+    from prism_core.us_market_data import current_quote
 
-    # yfinance can intermittently fail/throttle. Retry a few times before falling
+    # The quote can intermittently fail/throttle. Retry a few times before falling
     # back, so a momentary blip does not silently drop a fresh buy candidate whose
     # price is not yet in the DB (last-price fallback returns 0 → report skipped).
     # Mirrors the KR tracking/helpers.py retry logic.
     MAX_RETRIES = 3
     for attempt in range(MAX_RETRIES):
         try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            current_price = info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
+            current_price = await asyncio.to_thread(current_quote, ticker, allow_previous_close=True) or 0
 
             if current_price > 0:
                 logger.info(f"{ticker} current price: ${current_price:.2f}")
@@ -1860,9 +1858,8 @@ class USStockTrackingAgent:
     async def _refresh_buy_quote(self, ticker: str) -> float:
         """Fetch independent market data, never a saved/previous-close fallback."""
         def fetch() -> float:
-            import yfinance as yf
-            value = yf.Ticker(ticker).info.get("regularMarketPrice")
-            return self._validated_buy_quote(value)
+            from prism_core.us_market_data import current_quote
+            return self._validated_buy_quote(current_quote(ticker))
 
         return await asyncio.to_thread(fetch)
 

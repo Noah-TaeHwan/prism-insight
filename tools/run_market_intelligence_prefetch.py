@@ -26,16 +26,19 @@ def collect(reference_date):
     except (OSError, ValueError):
         pass
     import pandas_market_calendars as mcal
-    import yfinance as yf
+
+    from prism_core.us_market_data import download
     market_days = [day.date().isoformat() for day in mcal.get_calendar("NYSE").valid_days(
         start_date=(day - timedelta(days=150)).strftime("%Y-%m-%d"),
         end_date=(day - timedelta(days=1)).strftime("%Y-%m-%d"))]
-    frame = yf.download(list(ETF_LABELS), start=(day - timedelta(days=150)).strftime("%Y-%m-%d"),
-                        end=day.strftime("%Y-%m-%d"), auto_adjust=True, progress=False, threads=4, timeout=5)
+    import contextlib
+    with contextlib.redirect_stdout(sys.stderr):  # stdout carries only the JSON packet
+        frame = download(list(ETF_LABELS), start=(day - timedelta(days=150)).strftime("%Y-%m-%d"),
+                         end=day.strftime("%Y-%m-%d"), auto_adjust=True)
     series = {}
     for symbol in ETF_LABELS:
         try:
-            series[symbol] = [(str(date.date()), float(value)) for date, value in frame["Close"][symbol].items()]
+            series[symbol] = [(str(date.date()), float(value)) for date, value in frame[symbol]["Close"].items()]
         except (KeyError, TypeError, ValueError):
             series[symbol] = []
     packet = build_etf_packet(series, reference_date, market_days)

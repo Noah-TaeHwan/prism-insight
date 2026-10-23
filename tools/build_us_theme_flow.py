@@ -2,7 +2,7 @@
 
     python tools/build_us_theme_flow.py --mode morning|afternoon
 
-Read-only: yfinance quotes for the theme map members and the local US headline store. No model call, no orders,
+Read-only: KIS daily quotes for the theme map members and the local US headline store. No model call, no orders,
 no channel sends. The US alert renders the file when it is fresh (prism_core/us_theme_flow.py).
 """
 import argparse
@@ -25,11 +25,10 @@ NY = ZoneInfo("America/New_York")
 
 def quote_changes(tickers, trade_date):
     """{ticker: % change of the latest bar vs the previous close} for bars dated `trade_date` (New York)."""
-    import yfinance as yf
+    from prism_core.us_market_data import download
     day = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}"
     symbols = {t: t.replace(".", "-") for t in tickers}
-    data = yf.download(list(symbols.values()), period="5d", interval="1d", auto_adjust=False, actions=False,
-                       progress=False, threads=True, timeout=20, group_by="ticker")
+    data = download(list(symbols.values()), period="5d", auto_adjust=False)
     out = {}
     for ticker, symbol in symbols.items():
         try:
