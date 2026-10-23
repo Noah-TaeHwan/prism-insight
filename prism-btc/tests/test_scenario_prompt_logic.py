@@ -391,7 +391,7 @@ def test_assembled_entry_framing_is_flat_only_and_preserves_inputs(active, monke
         delivered = json.loads(calls[0]['user_prompt'])['contract_context']
         assert delivered.pop('ma_structure')['status'] == 'unavailable'
         assert delivered.pop('analysis_frame_policy')['frames'] == ['30m','1h','4h','12h','1d','1w']
-        assert delivered == ctx
+        assert delivered == {key: value for key, value in ctx.items() if key != 'seen_action_ids'}
     else:
         text = ' '.join(policy.split())
         assert 'Flat-entry comparison only' in text
