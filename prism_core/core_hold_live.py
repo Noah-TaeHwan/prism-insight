@@ -380,24 +380,18 @@ def apply_live(conn, market, bars_by_key, *, regimes=None, now=None, alert=None)
         if s["block"] is None and proof(bars, i, first=s["first"], entry_session=s["session"]):
             block = {"version": LIVE_VERSION, "status": PROVEN, "proven_on": bars[i]["date"],
                      "proven_at": now.isoformat(), "entry_first": s["first"], "contract": C.VERSION, "last": last}
-            written = _write(conn, market, row["id"],
-                             lambda cur, stop, b=block, f=s["first"]: None if cur is not None else (b, f))
+            written = _write(conn, market, row["id"], _set_new(block, s["first"]))
             if written:
                 s["block"] = written[1]
                 act("proven", row, written)
         elif s["block"] and s["block"]["status"] == PROVEN and not s["block"].get("exit_pending"):
             if two_closes_below_ma50(bars, after=s["block"]["proven_on"]):
-                def pend(cur, stop, last=last):
-                    if cur is None or cur["status"] != PROVEN or cur.get("exit_pending"):
-                        return None
-                    return dict(cur, last=last, exit_pending={"code": PENDING_MA50, "date": last["date"]}), stop
-                written = _write(conn, market, row["id"], pend)
+                written = _write(conn, market, row["id"], _set_pending(last))
                 if written:
                     s["block"] = written[1]
                     act("exit_pending", row, written)
             else:                                        # keep the prompt facts current
-                written = _write(conn, market, row["id"], lambda cur, stop, last=last: None if cur is None or
-                                 cur["status"] != PROVEN else (dict(cur, last=last), stop))
+                written = _write(conn, market, row["id"], _set_last(last))
                 if written:
                     s["block"] = written[1]
     # 3. promotion: PROVEN, no exit pending, not skipped, eligible today; CAP per market by ticker
@@ -421,18 +415,15 @@ def apply_live(conn, market, bars_by_key, *, regimes=None, now=None, alert=None)
         for s in cand["states"]:
             row, view_ = s["row"], cand["view"]
             regime = regimes(view_["date"]) if callable(regimes) else None
-
-            def promote(cur, stop, seat=seat, view_=view_, regime=regime, cand=cand, s=s):
-                if cur is None or cur["status"] != PROVEN:
-                    return None
-                if not seat:
-                    return dict(cur, promotion_skipped=view_["date"]), stop
+            if seat:
                 target, facts = stop_target(s["bars"], s["first"])
-                return dict(cur, status=CORE, promoted_on=view_["date"], promoted_at=now.isoformat(), regime=regime,
-                            rank={"share": cand["share"], "ret": cand["ret"]},
-                            view={k: view_[k] for k in ("sessions", "gain", "close", "ma50", "ma200", "ma200_lag")},
-                            last=facts), target
-            written = _write(conn, market, row["id"], promote)
+                changes = {"status": CORE, "promoted_on": view_["date"], "promoted_at": now.isoformat(),
+                           "regime": regime, "rank": {"share": cand["share"], "ret": cand["ret"]},
+                           "view": {k: view_[k] for k in ("sessions", "gain", "close", "ma50", "ma200", "ma200_lag")},
+                           "last": facts}
+            else:
+                target, changes = None, {"promotion_skipped": view_["date"]}
+            written = _write(conn, market, row["id"], _promote(changes, target))
             if written:
                 s["block"] = written[1]
                 act("promoted" if seat else "cap_skipped", row, written, regime=regime)
@@ -443,15 +434,39 @@ def apply_live(conn, market, bars_by_key, *, regimes=None, now=None, alert=None)
         target, facts = stop_target(s["bars"], s["first"])
         if target is None:
             continue
-
-        def restop(cur, stop, target=target, facts=facts):
-            if cur is None or cur["status"] != CORE:
-                return None
-            return dict(cur, last=facts), target
-        written = _write(conn, market, s["row"]["id"], restop)
+        written = _write(conn, market, s["row"]["id"], _restop(facts, target))
         if written and (written[2] is None or abs(written[2] - target) > target * 1e-9):
             act("stop_armed" if facts.get("armed") else "stop_set", s["row"], written)
     return actions
+
+
+# Mutators for _write: (current LIVE block or None, current stop) -> (new block, new stop) or None (no change).
+def _set_new(block, first):
+    return lambda cur, stop: None if cur is not None else (block, first)
+
+
+def _set_pending(last):
+    def mutate(cur, stop):
+        if cur is None or cur["status"] != PROVEN or cur.get("exit_pending"):
+            return None
+        return dict(cur, last=last, exit_pending={"code": PENDING_MA50, "date": last["date"]}), stop
+    return mutate
+
+
+def _set_last(last):
+    return lambda cur, stop: None if cur is None or cur["status"] != PROVEN else (dict(cur, last=last), stop)
+
+
+def _promote(changes, target):
+    def mutate(cur, stop):
+        if cur is None or cur["status"] != PROVEN:
+            return None
+        return dict(cur, **changes), (stop if target is None else target)
+    return mutate
+
+
+def _restop(facts, target):
+    return lambda cur, stop: None if cur is None or cur["status"] != CORE else (dict(cur, last=facts), target)
 
 
 def _alert_text(market, ticker, kind, block, stop, old_stop):
