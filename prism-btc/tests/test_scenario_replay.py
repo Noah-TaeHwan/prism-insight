@@ -57,6 +57,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from test_scenario_replay import inputs
 from analysis.scenario_replay import network_boundary, run_replay
+assert 'live.scenario_entry_display' in sys.modules
 assert 'live.scenario_contract' not in sys.modules
 root = Path(sys.argv[1])
 mode = sys.argv[2]

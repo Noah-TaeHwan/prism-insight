@@ -273,6 +273,7 @@ def forbidden(*args, **kwargs):
 socket.socket.connect = forbidden
 socket.getaddrinfo = forbidden
 from live import scenario_runner, scenario_broker, scenario_provenance
+assert "live.scenario_entry_display" in sys.modules
 assert "live.scenario_contract" not in sys.modules
 assert "live.scenario_accounting" not in sys.modules
 before = scenario_provenance._manifest()

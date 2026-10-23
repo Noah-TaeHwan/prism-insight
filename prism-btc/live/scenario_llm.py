@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 
 from engine.scenario_ma_context import build_ma_structure_context
+from live.scenario_entry_display import project_entry_display_input
 from live.scenario_position_flow import project_position_flow_input
 
 MODEL = "gpt-6-luna"
@@ -983,7 +984,6 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
                "response_contract": response_contract}
     try:
         if flat_entry:
-            from live.scenario_entry_display import project_entry_display_input
             payload, projection_audit = project_entry_display_input(payload)
         else:
             payload, projection_audit = project_position_flow_input(payload)
