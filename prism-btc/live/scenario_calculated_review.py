@@ -509,6 +509,9 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
             "quantity": "BTC", "gross_pnl": "USDT_FOR_THIS_TARGET_QUANTITY_BEFORE_COSTS",
             "gross_reward_per_btc": "USDT_PER_BTC_NOT_TOTAL_PNL",
             "gross_reward_to_reserved_risk_ratio": "DIMENSIONLESS_NOT_USDT"}}
+    if context.get('scenario_id') is None:
+        from live.scenario_entry_display import project_entry_display_input
+        return project_entry_display_input(payload)[0]
     return project_position_flow_input(payload)[0]
 
 

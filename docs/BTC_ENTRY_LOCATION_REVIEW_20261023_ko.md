@@ -51,3 +51,32 @@ v2 실제 진단은 동일20건 원자료를 현재 조립기에 스텁으로 �
 기준/후보 user 입력·schema·receipt가 같고 승인된 FLAT system 문단만 달라야 한다.
 이 receipt는 당시 원래 receipt가 아니라 현재 계산 결과다. 사례/순서/최대10 HTTP/무재시도,
 중대한 오류와 필수 비교 미관측의 HOLD 기준은 v1보다 완화하지 않는다. 수익 개선은 미입증이다.
+
+## v2 HOLD와 v3 입력 표시 경계
+v2(b7c3c3be)는 전체4872 PASS/12 SKIP/CI8 SUCCESS에도 SELECT04의 확정/형성 및 TP/MA
+순서 오류로 HOLD다. 원문과 판정을 보존하며, 동일 문구를 반복 호출해 통과시키지 않는다.
+v3는 구현 전에 `btc_entry_location_prereg_v3_20261023.md`를 읽고 동결했다.
+
+추가 logical 입력은 flat의 `contract_context.entry_display` 한 필드뿐이다.
+- confirmed_close_tail은 기존 검증된 ma_structure.primary의 CONFIRMED point 최대3개에서
+  [봉 종료시각ms,close]를 그대로 복사한다. 형성값은 기존 별도 facts에 남고, 누락은 null이다.
+- candidate_price_order는 [후보ID,receipt SHA,status,가격순 그룹]이다. 그룹은 [가격,refs]이며
+  E#/T#는 해당 effective_plan의 entries/take_profits 인덱스, M:id는 기존 MA level 키다.
+  동가는 한 그룹에 묶고 전체 가격순은 상승순이다. 시간·체결 순서·지지저항 강도를 뜻하지 않는다.
+- 후보 최대2, entries/TP 각각20, 기존 상위 MA level16개를 넘으면 명시적으로 표시 불가다.
+  무TP도 허용하며, 수량·분할비율은 표시 순서나 원래 계산에 영향을 주지 않는다.
+  receipt 해시가 다르거나 값이 유효하지 않으면 해당 표시만 UNAVAILABLE이다.
+
+기존 position_flow 축약을 먼저 완료하고 그 최종 입력을 복원한 뒤 표시만 추가한다.
+이후 기존 lossless projection/v7만 사용하며 history를 한 번 더 줄이지 않는다.
+표시 추가만으로100KB를 넘고 기존 입력은 맞으면 기존 projected 입력과 audit를 그대로
+반환한다. entry_display 부재는 표시 미제공이지 사실 없음이 아니며 원자료를 사용한다.
+기존 입력 자체가 초과한 경우는 실패를 유지한다. 고정 모델 검증 사례에는 표시가 실제로
+존재하는지 호출 전에 확인한다. 최초 개발 검사에서 추가 표시로 history축약이
+달라진3건을 확인해 순서를 고쳤다. 후속 작업트리 검사40요청은 새 표시 외 logical차이0,
+최대99725B였고2후보 pressure의 기존 초과2건도 그대로다. 최종 head 검증과는 별도 기록이다.
+
+새 helper는 기존 policy source/loaded parity manifest에 포함한다. 보유/대기/계약·receipt·
+schema·위험·집행은 바꾸지 않는다. 기존 두 FLAT 문단에는 표시 필드 참조만 연결했다.
+새 heading·추가 판단 관문·확률·방향 추천·자동 MA 장벽은 없다. 자유서술 정확성은 여전히
+보장되지 않으며 사전등록된 최대10회 진단과 독립 검토를 통과해야 제한적 데모 배포를 검토한다.

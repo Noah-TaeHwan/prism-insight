@@ -400,7 +400,13 @@ def test_market_account_candidates_preserved_and_each_phase_uses_its_own_schema(
     payloads = [json.loads(c["user_prompt"]) for c in calls]
     restored = [restore_model_input(p) for p in payloads]
     assert restored[0]["market_snapshot"] == restored[1]["market_snapshot"]
-    assert restored[0]["contract_context"] == restored[1]["contract_context"]
+    contexts = [deepcopy(p['contract_context']) for p in restored]
+    displays = [ctx.pop('entry_display') for ctx in contexts]
+    assert contexts[0] == contexts[1]
+    assert displays[0]['confirmed_close_tail'] == displays[1]['confirmed_close_tail']
+    assert 'candidate_price_order' not in displays[0]
+    assert displays[1]['candidate_price_order'][0][:2] == [
+        result['candidates']['candidates'][0]['id'], result['candidates']['candidates'][0]['receipt_sha256']]
     assert restored[1]["calculated_candidates"] == result["candidates"]
     assert all("research_response_contract" not in p for p in payloads)
     assert restored[0]["response_contract"] == response_contract(context())
