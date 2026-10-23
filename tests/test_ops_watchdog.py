@@ -86,6 +86,18 @@ def test_scan_finds_order_failures_tracebacks_and_skips_logging_slips():
     assert not any("sell success=True" in f["text"] for f in failures)
 
 
+def test_untagged_broker_lines_take_the_market_from_the_logger():
+    # 10/24 04:56 KST: a US price query rate-limit line in the shared trend-exit log was filed under trend_exit_kr.
+    now = datetime(2026, 10, 24, 5, 0, tzinfo=KST)
+    lines = ['2026-10-24 04:56:07,907 - trading.us_stock_trading - ERROR - Price query failed: 500 - {"msg_cd":"EGW00201"}',
+             "2026-10-24 04:56:08,000 - trading.domestic_stock_trading - ERROR - Failed to get current price: 500",
+             "2026-10-24 04:56:09,000 - cores.market_data - ERROR - price_history: no source could answer"]
+    markets = [f["market"] for f in W.scan_lines(_job("trend_exit_kr"), lines, now)[1]]
+    assert markets == ["US", "KR", "KR"]
+    tagged = ["2026-10-24 04:56:10,000 - trading.us_stock_trading - ERROR - [KR] mixed line"]
+    assert W.scan_lines(_job("trend_exit_us"), tagged, now)[1][0]["market"] == "KR"   # an explicit tag wins
+
+
 def test_known_non_failures_are_ignored():
     now = datetime(2026, 10, 21, 3, 0, tzinfo=KST)
     lines = ["2026-10-21 03:00:00,000 - yfinance - ERROR - $SVA: possibly delisted; no price data found",

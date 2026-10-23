@@ -115,6 +115,9 @@ FAILURES = (
 IGNORED = re.compile(r"possibly delisted|below one share|quantity is 0|budget unavailable")
 _EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Interrupt|Exit|Timeout)\b")
 _MARKET_TAG = re.compile(r"\[(KR|US)\]|\((KR|US)\)|market=(KR|US)\b|\b(KR|US) (summary|trading context)")
+# Broker client lines carry no market tag; their logger names it (a shared log's owner is the KR job, 2026-10-24).
+_LOGGER_MARKET = ((re.compile(r" - trading\.us_stock_trading - "), "US"),
+                  (re.compile(r" - trading\.domestic_stock_trading - "), "KR"))
 _STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 _REASON_CODE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 
@@ -137,7 +140,7 @@ def _clean(text):
 def _market_of(line, job):
     m = _MARKET_TAG.search(line)
     found = next((g for g in (m.groups() if m else ()) if g in ("KR", "US")), None)
-    return found or job.market
+    return found or next((market for pattern, market in _LOGGER_MARKET if pattern.search(line)), job.market)
 
 
 def _stamp(line, now_kst):
