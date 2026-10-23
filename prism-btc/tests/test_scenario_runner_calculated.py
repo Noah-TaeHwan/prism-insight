@@ -77,6 +77,7 @@ def test_operational_row_factory_records_real_review_without_legacy_fallback(tmp
 
     def generate(**request):
         requests.append(request)
+        assert (request['model'], request['reasoning_effort']) == ('gpt-6.1-sol', 'low')
         assert request["retry_transport"] is False
         assert 0 < request["timeout"] <= 75
         assert conn.execute("SELECT COUNT(*) FROM llm_scenario_review_events").fetchone()[0] > 0
@@ -89,7 +90,9 @@ def test_operational_row_factory_records_real_review_without_legacy_fallback(tmp
     # Runtime's default clock was bound at import, so use its real current time.
     from live.scenario_runtime import ScenarioRuntime
     real_clock = ScenarioRuntime.__init__.__kwdefaults__["clock"]
-    now = real_clock()
+    # Whole seconds round-trip through snapshot milliseconds without becoming
+    # fractionally future-dated relative to the fixture's frozen review clock.
+    now = float(int(real_clock()))
     broker.ctx["account_captured_at"] = now
     monkeypatch.setattr(scenario_oauth, "generate_scenario", generate)
     monkeypatch.setattr(runner, "operational_calculated_propose", callback)
@@ -106,6 +109,15 @@ def test_operational_row_factory_records_real_review_without_legacy_fallback(tmp
         assert conn.execute("SELECT COUNT(*) FROM llm_scenario_intents").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_operational_fixture_handles_millisecond_roundtrip_future(tmp_path, monkeypatch, failure):
+    from live.scenario_runtime import ScenarioRuntime
+    stamp = 1792713600.000005
+    assert stamp * 1000 / 1000 > stamp
+    monkeypatch.setitem(ScenarioRuntime.__init__.__kwdefaults__, "clock", lambda: stamp)
+    test_operational_row_factory_records_real_review_without_legacy_fallback(tmp_path, monkeypatch, failure)
 
 
 def test_known_rejection_health_is_not_error_wait_or_model_recovery(tmp_path):
@@ -149,6 +161,7 @@ def test_operational_holding_row_factory_keeps_prices_and_exits(tmp_path, monkey
 
     def generate(**request):
         calls.append(request)
+        assert (request['model'], request['reasoning_effort']) == ('gpt-6.1-sol', 'low')
         assert request["retry_transport"] is False
         if "wait_proposal" in request["response_schema"]["properties"]:
             raw = wire(captured, "OPEN" if action == "ADJUST" else "EXIT")

@@ -7,10 +7,11 @@ import time
 from collections.abc import Callable
 
 from engine.scenario_ma_context import build_ma_structure_context
+from live.scenario_entry_display import project_entry_display_input
 from live.scenario_position_flow import project_position_flow_input
 
-MODEL = "gpt-6-luna"
-EFFORT = "high"
+MODEL = "gpt-6.1-sol"
+EFFORT = "low"
 TIMEOUT_SECONDS = 75
 MAX_RESPONSE_BYTES = 24_000
 
@@ -22,6 +23,7 @@ Use only the provided timestamped snapshot and verified account context.
 For timeframe price/MA citations in explanatory prose, prefer references such as
 [[TF:1h:forming:close]] instead of rewriting the number. Allowed frames are
 15m,30m,1h,4h,12h,1d,1w; phases confirmed/forming; fields close/ma10/ma35.
+Attribute changes separately by frame/phase; combine transitions only when their respective before/after source values match.
 The host can display separately labelled facts from that same frozen input;
 this does not verify the surrounding interpretation. References are optional,
 add no output fields and never change trade prices, actions or protection rules.
@@ -533,8 +535,13 @@ momentum: an hours-old baseline price alone is not a momentum veto for either
 LONG or SHORT. Still cite required exact changed paths and assess their meaning;
 first observation remains WAIT and a numeric change alone never grants an edge.
 Judge current 30m/1h structure, MA slopes, observed forming progress and recent
-confirmed 15m bars. Ground price/MA claims in current_primary_frame_facts, derived
-from the same forming observations: bearish MA order is NOT price below both MAs;
+confirmed 15m bars. current_primary_frame_facts is FORMING_LAST_CLOSE, not confirmed
+OHLC; confirmed OHLC comes from timestamped recent_confirmed_bars or CONFIRMED points
+(entry_display.confirmed_close_tail shows their last three [bar_end_ms,close] pairs
+when available; absent entry_display means unavailable display, so use original sources).
+A confirmed-to-forming change is provisional progress, not a confirmed-bar rise/fall;
+do not invent a confirmed.close path. Keep each claim's timeframe, phase and source
+together: bearish MA order is NOT price below both MAs;
 BETWEEN is not BELOW. Missing facts stay unknown, not an entry veto. Mixed price
 position can still support a trade with other concrete evidence, not fabricated alignment.
 Before opportunity framing, compare actual 30m/1h highs/lows, price progress,
@@ -569,11 +576,23 @@ them. Do not claim that smaller exposure or a nearer TP makes a weak setup valid
 Higher-frame direction alone is not a veto; concrete current
 4h/longer-frame obstacles still matter through achievable TP/SL and costs and
 can justify WAIT when no executable net-of-cost opportunity remains.
-Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
+Separate directional evidence from executable entry location. Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
 for entry before the ORIGINAL next-decision deadline, and WAIT, symmetrically.
-If current evidence already justifies entry, do not demand a new low/high or retest
-by habit. Smaller quantity may express uncertainty in a valid setup, never repair
-an invalid setup. Neither immediate entry nor conditional entry is compulsory.
+A trigger is an activation condition, not a better entry price or proof against chasing.
+In DRAFT use the original proposed limit/worst permitted entry price; do not anticipate
+host price adjustments. In calculated SELECT use the supplied effective_plan entry price,
+not the trigger or current MarkPrice; entry_display.candidate_price_order groups the
+supplied prices numerically with source refs, not automatic obstacles. With an eligible flat OPEN, even when selecting WAIT,
+connect that entry cap, first TP and first evidenced reaction zone, if any, in the
+existing rationale as decision evidence: explain their actual relative order and any
+required passage. State when no intervening zone is evidenced or its evidence is unknown;
+never invent one.
+No candidate or first observation: do not invent a plan to compare. Distinguish already-travelled
+progress from remaining room using current evidence, not direction alone. Smaller quantity or a nearer
+TP does not repair an unsupported location. If current evidence justifies entry, a strong
+immediate break or valid numeric crossing remains allowed; do not demand another close,
+new low/high or retest by habit. No fixed distance, minimum reward/risk, or automatic
+MA/round-number wall is added. Neither immediate entry nor conditional entry is compulsory.
 Existing sizing cap: sum(new-entry risk) <= min(original_budget*confidence,
 budget remaining after consumed/reserved risk). Per-BTC risk is positive entry-to-SL
 distance + entry*estimated_cost_rate + hard_stop*slippage_bps/10000; round quantity
@@ -965,7 +984,10 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     payload = {"market_snapshot": snapshot, "contract_context": model_context,
                "response_contract": response_contract}
     try:
-        payload, projection_audit = project_position_flow_input(payload)
+        if flat_entry:
+            payload, projection_audit = project_entry_display_input(payload)
+        else:
+            payload, projection_audit = project_position_flow_input(payload)
         prompt = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (TypeError, ValueError):
         raise ScenarioModelError("invalid_input") from None

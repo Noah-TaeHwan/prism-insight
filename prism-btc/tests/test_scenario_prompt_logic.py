@@ -14,11 +14,11 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # 2026-10-22: optional explanation references; trading/goal policy unchanged.
+    # 2026-10-23 v3: flat source-labelled facts view; holding/risk/goal unchanged.
     expected = {
-        'SYSTEM_PROMPT': '8c5053072a5284eb25d26de88a21574711663eca794da52296ee071f0978eb81',
+        'SYSTEM_PROMPT': 'a0fc7fd8bc368ee578f2cac02add0059fcad64f754ded302a3c5330605b4c030',
         'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
-        'FLAT_ENTRY_PROMPT': '15f323b7af2c2e0a790f1c12ea819244d8722c8d7214b43a57560d557f98f193',
+        'FLAT_ENTRY_PROMPT': 'c0fbd35e3e020bab3c36bb21df30982025f82ae0c149f7ae9cc5d6e5a5e3a738',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
                          ('FLAT_ENTRY_PROMPT', FLAT_ENTRY_PROMPT)]:
@@ -396,7 +396,7 @@ def test_assembled_entry_framing_is_flat_only_and_preserves_inputs(active, monke
         assert 'hours-old baseline price alone is not a momentum veto' in text
         assert 'capped marketable LIMIT now' in text
         assert 'new low/high or retest by habit' in text
-        assert 'never repair an invalid setup' in text
+        assert 'Smaller quantity or a nearer TP does not repair an unsupported location' in text
         assert 'do not move its goalposts without fresh counterevidence' in text
         assert 'Never invent an omitted prior condition' in text
         assert "Keep recovery's first-observation WAIT" in text

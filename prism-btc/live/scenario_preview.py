@@ -17,6 +17,7 @@ import pandas as pd
 from core.llm_scenario import validate_scenario
 from engine.scenario_snapshot import TIMEFRAME_MS, build_scenario_snapshot, candle_start
 from live.scenario_llm import propose
+from live import scenario_llm
 
 
 def response_contract(context):
@@ -152,7 +153,7 @@ def preview(equity, *, snapshot=None, generate=None, clock=time.time):
     ctx["now"] = clock()
     validated = validate_scenario(payload, ctx)
     return {"mode":"ORDER_FREE_PREVIEW", "account_source":"HYPOTHETICAL_NOT_BROKER",
-            "orders_submitted":0, "model":"gpt-6-luna", "effort":"high", "tier":"fast",
+            "orders_submitted":0, "model":scenario_llm.MODEL, "effort":scenario_llm.EFFORT, "tier":"fast",
             "as_of_ms":snapshot["as_of_ms"], "proposal":validated}
 
 
