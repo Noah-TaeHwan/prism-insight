@@ -9,6 +9,7 @@ import pytest
 from engine.scenario_ma_context import build_ma_structure_context
 from live.scenario_llm import ScenarioModelError, _current_primary_frame_facts, propose
 from live.scenario_model_input import project_model_input, restore_model_input
+from live.scenario_analysis_frames import analysis_model_view
 from live.scenario_preview import response_contract
 from live.scenario_recovery import numeric_market
 from tests.test_scenario_llm import context, wire
@@ -196,7 +197,7 @@ def test_actual_assembled_payload_retains_projection_and_original_objects(monkey
     assert journal[0]['user_prompt'] == calls[0]['user_prompt']
     assert journal[0]['input_projection']['projected_sha256'] == hashlib.sha256(calls[0]['user_prompt'].encode()).hexdigest()
     assert 'model_input_projection' in sent
-    assert restore_model_input(sent)['contract_context']['recovery'] == ctx['recovery']
+    assert restore_model_input(sent)['contract_context']['recovery'] == analysis_model_view({'contract_context':ctx})['contract_context']['recovery']
     assert (market, ctx) == original
 
 
@@ -217,10 +218,12 @@ def test_followthrough_facts_survive_exact_input_cap_without_evidence_truncation
     propose(market, ctx, response_contract(ctx), generate=generate, clock=lambda: ctx['now'])
     assert len(calls[-1]['user_prompt'].encode()) == 100_000
     restored = restore_model_input(json.loads(calls[-1]['user_prompt']))
-    assert restored['market_snapshot'] == market
-    assert restored['contract_context']['recovery'] == ctx['recovery']
+    expected=analysis_model_view({'market_snapshot':market,'contract_context':dict(ctx,
+        ma_structure=build_ma_structure_context(market,ctx))})
+    assert restored['market_snapshot'] == expected['market_snapshot']
+    assert restored['contract_context']['recovery'] == expected['contract_context']['recovery']
     assert restored['contract_context']['retained_evidence'] == ctx['retained_evidence']
-    assert restored['contract_context']['ma_structure'] == build_ma_structure_context(market, ctx)
+    assert restored['contract_context']['ma_structure'] == expected['contract_context']['ma_structure']
     assert (market, ctx) == original
     ctx['retained_evidence'] += 'x'
     propose(market, ctx, response_contract(ctx), generate=generate, clock=lambda: ctx['now'])

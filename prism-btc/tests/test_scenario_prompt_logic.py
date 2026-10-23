@@ -9,6 +9,7 @@ from live.scenario_contract import response_schema, validate_wire_proposal
 from live.scenario_llm import SYSTEM_PROMPT, MA_STRUCTURE_PROMPT, propose, _current_primary_frame_facts
 from live.scenario_preview import response_contract
 from live.scenario_contract import identity_fields
+from live.scenario_analysis_frames import analysis_model_view
 
 
 def test_user_approved_flexible_management_prompt_version_is_pinned():
@@ -16,9 +17,9 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     from live.scenario_llm import FLAT_ENTRY_PROMPT
     # 2026-10-23: distinguish actual confirmed progression from a forming move.
     expected = {
-        'SYSTEM_PROMPT': 'a0fc7fd8bc368ee578f2cac02add0059fcad64f754ded302a3c5330605b4c030',
-        'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
-        'FLAT_ENTRY_PROMPT': 'e7e0971b32bf483b92f0405286ee7844a7d7b786beb6fbf26717be1797385c2e',
+        'SYSTEM_PROMPT': 'b3e5f9bbde5e68ef0d3e4241d46c7a9aa107bfb8721f4478081268d06c627531',
+        'MA_STRUCTURE_PROMPT': 'e133d909aaf1583ad364326732b3c7e8025b974ef87e7e18b4bd0ef9a78ab76f',
+        'FLAT_ENTRY_PROMPT': '2c3f2b4d7d985963eecd3bc934ef434363c30af61573d5171ec005347c9e93be',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
                          ('FLAT_ENTRY_PROMPT', FLAT_ENTRY_PROMPT)]:
@@ -272,8 +273,9 @@ def test_prompt_reassesses_zero_fill_without_imaginary_confirmation_orders():
 
 def test_management_framing_preserves_both_trend_runner_and_failure_responses():
     text = ' '.join(SYSTEM_PROMPT.split())
-    assert 'Minimum analysis frame is 15m' in text
-    assert '15m/30m/1h/4h/12h/1d/1w' in text
+    assert 'Minimum analysis frame is 30m' in text
+    assert '30m/1h/4h/12h/1d/1w' in text
+    assert 'Do not use 15m, including timing or management' in text
     assert 'five-minute evaluation cadence is not a candle timeframe' in text
     assert 'favorable LONG or favorable SHORT deserves the same opportunity-cost review' in text
     assert 'neither early profit-taking nor a distant all-size TP is mandatory' in text
@@ -388,6 +390,7 @@ def test_assembled_entry_framing_is_flat_only_and_preserves_inputs(active, monke
         assert policy == SYSTEM_PROMPT + MA_STRUCTURE_PROMPT
         delivered = json.loads(calls[0]['user_prompt'])['contract_context']
         assert delivered.pop('ma_structure')['status'] == 'unavailable'
+        assert delivered.pop('analysis_frame_policy')['frames'] == ['30m','1h','4h','12h','1d','1w']
         assert delivered == ctx
     else:
         text = ' '.join(policy.split())
@@ -493,7 +496,7 @@ def test_exact_oct8_mixed_price_positions_not_fabricated_bearish_alignment():
     snapshot = primary_snapshot()
     original = json.loads(json.dumps(snapshot))
     facts = _current_primary_frame_facts(snapshot)
-    assert facts['15m']['price_position'] == 'BETWEEN'
+    assert '15m' not in facts
     assert facts['30m']['price_position'] == 'BETWEEN'
     assert facts['1h']['price_position'] == 'BELOW'
     assert facts['30m']['ma_order'] == 'BEARISH'
@@ -560,7 +563,7 @@ def test_actual_model_payload_gets_same_primary_facts_as_request_record(monkeypa
     assert journal[0]['system_prompt'] == calls[0]['system_prompt']
     payload = json.loads(calls[0]['user_prompt'])
     assert payload['contract_context']['current_primary_frame_facts'] == _current_primary_frame_facts(snapshot)
-    assert payload['market_snapshot'] == snapshot
+    assert payload['market_snapshot'] == analysis_model_view({'market_snapshot':snapshot})['market_snapshot']
     assert json.dumps([ctx, snapshot], sort_keys=True) == original
 
 
@@ -640,8 +643,9 @@ def test_full_recovery_payload_with_seven_frames_preserves_headroom():
     assert len(encoded.encode()) < 95000
     from live.scenario_model_input import restore_model_input
     delivered = restore_model_input(json.loads(encoded))
-    assert delivered['market_snapshot'] == snapshot
-    assert delivered['contract_context']['recovery'] == ctx['recovery']
+    expected_view=analysis_model_view({'market_snapshot':snapshot,'contract_context':ctx})
+    assert delivered['market_snapshot'] == expected_view['market_snapshot']
+    assert delivered['contract_context']['recovery'] == expected_view['contract_context']['recovery']
     assert len(delivered['contract_context']['ma_structure']['levels']) == 16
     assert json.dumps([snapshot, ctx], sort_keys=True) == original_inputs
 

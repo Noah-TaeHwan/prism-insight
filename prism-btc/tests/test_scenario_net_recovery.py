@@ -22,7 +22,7 @@ def automatic_net(probe):  # noqa: F811
         if not first:
             p['chase']={'max_bps':0,'max_reprices':0}
         p['recovery']=dict(decision='OBSERVE' if first else 'PROBE',reason='test',
-            changed_evidence=[] if first else ['timeframes.15m.closed.close'],counterevidence='test',invalidation='test')
+            changed_evidence=[] if first else ['timeframes.30m.closed.close'],counterevidence='test',invalidation='test')
         recovery.record_model_wire(json.dumps(p))
         return p
     r.propose=model

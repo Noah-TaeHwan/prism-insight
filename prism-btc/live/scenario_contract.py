@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from live.scenario_analysis_frames import allowed_evidence_path
 
 
 def identity_fields(context):
@@ -76,7 +77,7 @@ def response_schema(context):
     if context.get("recovery_contract_version") in (1, 2):
         recovery = context.get("recovery") or {}
         changes = recovery.get("changed_evidence") or {}
-        paths = sorted(changes) if isinstance(changes, dict) else []
+        paths = sorted(k for k in changes if allowed_evidence_path(k)) if isinstance(changes, dict) else []
         evidence_item = {"type": "string"}
         if paths:
             evidence_item["enum"] = paths

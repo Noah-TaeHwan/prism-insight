@@ -44,7 +44,7 @@ def wire(ctx, action):
         rationale="구조 판단", leverage=10, review=None, stop_revision=None)
     if ctx.get("recovery_contract_version") in (1, 2):
         result["recovery"] = dict(decision="PROBE" if action == "OPEN" else "OBSERVE",
-            reason="관측한 가격 구조 변화", changed_evidence=["timeframes.15m.closed.close"] if action == "OPEN" else [],
+            reason="관측한 가격 구조 변화", changed_evidence=["timeframes.30m.closed.close"] if action == "OPEN" else [],
             counterevidence="반전 가능성", invalidation="구조적 손절선 이탈")
     return result
 
@@ -308,7 +308,7 @@ def observing_runtime(tmp_path):
     r, broker, calls = runtime(tmp_path, recovery=True)
     price = [100.]
     r.snapshot = lambda: dict(valid=True, as_of_ms=r.clock()*1000,
-        timeframes={"15m": {"closed": {"close": price[0], "ma10": 99.}}})
+        timeframes={"30m": {"closed": {"close": price[0], "ma10": 99.}}})
     state = r.state()
     state["breaker"] = dict(blocked=True, reasons=["three_losses"], consecutive_losses=3,
                             completed_ids=["old1", "old2", "old3"])
