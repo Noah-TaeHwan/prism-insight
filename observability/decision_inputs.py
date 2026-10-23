@@ -87,18 +87,21 @@ def peer_valuation_summary(packet):
         return {"status": "MISSING", "reason": "summary_error_" + type(error).__name__}
 
 
-def _quarterly_eps(meta, now):
-    """Report-stage quarterly_eps_v1 block (same run, collected before the decision); never refetched."""
-    block = meta.get("quarterly_eps")
+def report_block(meta, key, contract, now, *, missing_key):
+    """Report-stage block ``meta[key]`` (same run, collected before the decision); never refetched."""
+    block = meta.get(key)
     if not isinstance(block, dict):
-        return {"contract": "quarterly_eps_v1", "status": "MISSING", "missing": {"latest_quarter": "not_in_report_meta"}}
+        return {"contract": contract, "status": "MISSING", "missing": {missing_key: "not_in_report_meta"}}
     try:
         if datetime.fromisoformat(str(block.get("asof"))) > now:   # look-ahead guard
-            return {"contract": "quarterly_eps_v1", "status": "MISSING",
-                    "missing": {"latest_quarter": "collected_after_decision"}}
+            return {"contract": contract, "status": "MISSING", "missing": {missing_key: "collected_after_decision"}}
     except (TypeError, ValueError):
         pass
     return dict(block)
+
+
+def _quarterly_eps(meta, now):
+    return report_block(meta, "quarterly_eps", "quarterly_eps_v1", now, missing_key="latest_quarter")
 
 
 def _next_earnings(ticker, today):
@@ -177,6 +180,11 @@ def emit_decision_inputs(agent, *, market, ticker, decision_id, scenario, curren
         # The same buy_risk_facts_v1 dict the BUY prompt step built (prompt_included says if it was shown).
         result["buy_risk_facts"] = (getattr(agent, "_buy_risk_facts", {}) or {}).get(ticker) or {
             "contract": "buy_risk_facts_v1", "status": "NOT_COLLECTED", "reason": "not_built_for_this_decision"}
+        # KR buy_growth_facts_v1 as the BUY prompt step read it, else straight from the report step (same guard).
+        if market == "KR":
+            result["buy_growth_facts"] = (getattr(agent, "_buy_growth_facts", {}) or {}).get(ticker) or {
+                **report_block(meta, "growth_facts", "buy_growth_facts_v1", now, missing_key="report"),
+                "prompt_included": False}
         try:
             result["snapshot"] = _snapshot(captured if captured and captured.get("market") == market else None,
                                            market=market, now=now, current_price=current_price)
