@@ -53,7 +53,7 @@ class Response(BytesIO):
 def fake_factory(opened):
     def opener(request, timeout):
         opened.append(request)
-        return Response(json.dumps(dict(status="completed", model="gpt-6-luna", output=[
+        return Response(json.dumps(dict(status="completed", model=json.loads(request.data)['model'], output=[
             dict(type="message", role="assistant", content=[dict(type="output_text", text='{"action":"WAIT"}')])])).encode())
     return lambda guard, arm, record: study.GuardedModelCall(guard, arm, record, open_url=opener, monotonic=lambda: 0.)
 
@@ -74,6 +74,7 @@ def fake_replay(*, fail_arm=None, mismatch_arm=None, over_cap=False):
             return report
         output.mkdir()
         slots = kwargs["max_decisions"]
+        registry = json.loads((output.parent.parent / 'registry.json').read_text())
         call_count = slots if name.startswith("A_") else slots * 2
         if over_cap:
             call_count = slots * 6 + 1
@@ -82,8 +83,8 @@ def fake_replay(*, fail_arm=None, mismatch_arm=None, over_cap=False):
             schema = {"type": "object", "properties": {}}
             if name.startswith("B_"):
                 schema["properties"] = {"wait_proposal" if index % 2 == 0 else "selection_token": {}}
-            kwargs["model_generator"](system_prompt="fixture", user_prompt="fixture", model="gpt-6-luna",
-                reasoning_effort="high", fast_tier=True, timeout=10, retry_transport=False, response_schema=schema)
+            kwargs["model_generator"](system_prompt="fixture", user_prompt="fixture", model=registry['model'],
+                reasoning_effort=registry['reasoning'], fast_tier=True, timeout=10, retry_transport=False, response_schema=schema)
         contract = study.contract_for(bundle, kwargs["path"], 1., kwargs["initial_equity"],
             origin="luna", policy_profile=kwargs["policy_profile"], initial_state=kwargs["initial_state"],
             observed_manifest=study.ObservedScenarioData(kwargs["observed_packet"], kwargs["observed_packet_sha256"]).manifest(),
@@ -324,7 +325,7 @@ def test_real_runner_coordinator_zero_network_wait_http_artifacts_and_strict_com
                          no_candidate_reason="관측 fixture, 거래 없음") if "wait_proposal" in properties else wait)
         opened.append((request, timeout))
         wall[0] += 1.
-        return Response(json.dumps(dict(status="completed", model="gpt-6-luna", output=[
+        return Response(json.dumps(dict(status="completed", model=payload['model'], output=[
             dict(type="message", role="assistant", content=[dict(type="output_text", text=json.dumps(response))])])).encode())
     def factory(guard, arm, record):
         return study.GuardedModelCall(guard, arm, record, open_url=opener, monotonic=lambda: wall[0])
@@ -400,6 +401,21 @@ def prepare_stage_two(tmp_path, fixture):
     registry = study.prepare(root, market, observed, pin, "fixture-stage-two", stage=2,
         predecessor_root=previous, predecessor_registry_sha256=external_pin)
     return root, registry
+
+
+def test_predecessor_wrong_response_model_still_rejected_with_valid_response_hash(tmp_path):
+    import hashlib
+    _, _, _, previous, pin = stage_two_fixture(tmp_path)
+    path = previous / 'model_events.jsonl'
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    event = next(row for row in events if row['kind'] == 'HTTP_RESPONSE')
+    response = json.loads(event['raw_response'])
+    response['model'] = 'wrong-fixture-model'
+    event['raw_response'] = json.dumps(response)
+    event['raw_sha256'] = hashlib.sha256(event['raw_response'].encode()).hexdigest()
+    path.write_text(''.join(json.dumps(row)+'\n' for row in events))
+    with pytest.raises(ValueError, match='predecessor_wire_model_result_mismatch'):
+        study.predecessor_manifest(previous, pin)
 
 
 def test_stage_two_fixed_next24_pins_predecessor_read_only_and_no_prepare_calls(tmp_path):
