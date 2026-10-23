@@ -59,6 +59,14 @@ design that tradeoff before entry, without a fixed stop width or exit percentage
 For an active scenario keep its side and original risk budget. ADJUST entries are
 incremental only; exit targets are the complete replacement protection. Existing
 confirmed positions already reflect prior partial exits; never restore sold lots.
+When weakening evidence or a nearer TP changes a held trade, compare retaining the
+current protection with a structurally grounded conditional partial SL or full EXIT.
+A nearer TP alone does not repair the whole-trade payoff when the remaining stop
+loss stays large. Propose a coherent replacement plan for host calculation; judge
+exposure saved on further weakness against participation lost if price recovers.
+No reduction is mandatory without structural evidence; normal fluctuations and
+fees alone do not require a tighter stop or immediate exit. Confirmed failure
+still takes full EXIT, never a partial reduction to keep a failed premise alive.
 Pending quantities are unfilled reservations, not confirmed holdings; cancellation
 requests do not release them. An active scenario with only pending entries is not
 flat. Stop restoration still requires the original host stop_policy. EXIT is full
@@ -85,9 +93,10 @@ add these alternative projections together.
 Flat-entry gross target projections assume all proposed entries fill: a partial target is
 not whole-scenario profit, and unknown future fees/funding remain unknown.
 When supplied, joint_exit_paths compares bounded hypothetical exit sequences for
-new flat OPEN only. Compare whole-path payoff and remaining lots, not sums of
-independent target profits. These are full-entry/full-fill price assumptions,
-not probabilities or expected net profit; partial SL is optional, never risk
+new flat OPEN and confirmed remaining lots of a proposed ADJUST. Compare whole-path payoff and remaining lots, not sums of
+independent target profits. Flat paths assume full entry fills; active paths use
+only confirmed remaining lots. Both assume the displayed exit fills, not
+probabilities or expected net profit; partial SL is optional, never risk
 credit or a substitute for full EXIT on confirmed failure. No fixed payoff gate.
 Each path closes any remaining quantity at hard SL as a stress test, NOT the
 expected ending of a trend or the value of an open runner. Do not prefer liquidating upside simply because
@@ -100,7 +109,8 @@ TP1_STOP/SL1_STOP mean only the first TP/partial-SL leg; STOP means hard SL alon
 TP1_SL/SL1_TP mean first TP then partial SL / first partial SL then TP; both kinds
 actually apply. All paths close any remainder at hard SL. Compare only displayed
 paths: omitted/zero/subminimum/capped-out legs are NOT part of their names.
-Original projection.quantity and targets supply all quantities/prices for these
+The corresponding projection.quantity/targets (flat) or
+projection.confirmed_remaining.quantity/targets (ADJUST) supply quantities/prices for these
 sequences; no independent leg profits are added to path gross. Targets retain their
 initial revision quota (not a fraction of each new remainder), sorted by price
 crossing order; zero/subminimum legs are omitted and quantities capped at remaining.
@@ -108,8 +118,22 @@ This omission/clip is a modelling assumption, not proof of actual reduce-only fi
 Partial SL's Mark trigger is only a hypothetical exit price, not its market fill.
 fee_only=null means UNKNOWN; otherwise [assumed_entry_fee,assumed_exit_fee,
 estimated_net_before_unmodelled_costs], in USDT, uses historical taker-max estimates
-with total original entry quantity charged once. Gross is also USDT. Funding,
+with total original entry quantity charged once for version2 flat OPEN. Gross is also USDT. Funding,
 slippage, fill timing and revision races remain UNKNOWN/unmodelled, never zero.
+ADJUST confirmed_remaining joint paths version3 are supplied separately as
+contract_context.holding_exit_paths rows [candidate_id,receipt_sha256,paths].
+This optional view uses the same row columns and
+sequence rules but gross covers remaining lots ONLY. fee_only entry fee is zero:
+its net includes recorded net exactly once plus remaining gross minus assumed
+future exit fees. recorded_net already includes prior realized PnL and paid costs;
+never add it or subtract paid fees again. Missing recorded net or fee evidence
+makes path fee_only UNKNOWN, not zero. These paths are a proposed NEW revision,
+not existing live order quotas: never replay current_plan fractions against the
+remaining lots or resurrect filled targets. For WAIT compare existing
+runner_economics current-Mark/full-stop diagnostics; it has no invented TP path.
+Do not add confirmed paths to hypothetical_all_fills or call pending lots held.
+An absent optional holding view means unavailable, not no loss or no permission;
+use the original target/full-stop and runner_economics diagnostics when absent.
 For holdings distinguish confirmed_remaining projections from hypothetical_all_fills
 which additionally assume all pending and new entries fill. Never call hypothetical
 quantity held or add the two projections. Replacement target fractions start from
@@ -127,7 +151,7 @@ Current first_observation/recovery_eligible are in current_decision_state;
 baseline_kind is historical origin, not a current waiting restriction. Unknown
 state is not permission; fresh host recovery and execution checks still decide.
 No trade is mandatory. Explain the decisive evidence and invalidation briefly in
-Korean. When flat-OPEN joint paths are supplied, organize rationale as three short
+Korean. When flat-OPEN or confirmed ADJUST joint paths are supplied, organize rationale as three short
 items: '계획:' name the candidate (also when choosing WAIT) and the decisive evidence;
 '경로:' compare its displayed paths using supplied host results. Only if partial-SL
 legs actually apply, compare exposure saved on weakness versus participation lost
@@ -157,8 +181,13 @@ def _decimal(value):
     return Decimal(str(value))
 
 
-def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
+def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees, *, confirmed=False, recorded_net=None):
     """Reuse initial revision quotas; cap each hypothetical exit at live remainder."""
+    if confirmed:
+        try:
+            recorded_net = float(_decimal(recorded_net))
+        except (TypeError, ValueError, OverflowError):
+            recorded_net = None
     sign = Decimal(1 if plan['side'] == 'LONG' else -1)
     tps = sorted((t for t in targets if t['kind'] == 'take_profits' and t['quantity'] > 0),
                  key=lambda t: sign * _decimal(t['price']))
@@ -197,17 +226,26 @@ def _joint_exit_paths(plan, targets, quantity, basis, minimum, fees):
                 existing[0].append(sequence_id)
             continue
         fee_view = None
-        if fee_legs and all(f.get('status') == 'AVAILABLE' for f in fee_legs):
+        if (fee_legs and all(f.get('status') == 'AVAILABLE' for f in fee_legs)
+                and (not confirmed or recorded_net is not None)):
             fee_view = [float(sum((_decimal(f[field]) for f in fee_legs), Decimal(0)))
                 for field in ('assumed_entry_fee', 'assumed_exit_fee', 'estimated_net_before_unmodelled_costs')]
+            if confirmed:
+                fee_view[2] = float(_decimal(recorded_net) + _decimal(fee_view[2]))
         paths.append([[sequence_id], legs, float(residual), float(gross), fee_view])
     # The versioned column/sequence meanings live once in SELECT_PROMPT, not
     # repeated per candidate/path in the size-limited user payload.
-    return dict(version=2, paths=[[path[0], *path[2:]] for path in paths])
+    result = dict(version=2, paths=[[path[0], *path[2:]] for path in paths])
+    if confirmed:
+        result.update(version=3, recorded_net=recorded_net,
+            gross_scope='CONFIRMED_REMAINING_ONLY',
+            fee_net_scope='WHOLE_SCENARIO_RECORDED_NET_ONCE')
+    return result
 
 
 def _gross_projection(plan, context, *, lots=None,
-                      assumption="HYPOTHETICAL_ALL_ENTRIES_FILL_AT_LIMIT_NO_PRIOR_EXITS"):
+                      assumption="HYPOTHETICAL_ALL_ENTRIES_FILL_AT_LIMIT_NO_PRIOR_EXITS",
+                      holding_paths=False):
     """Separate confirmed/hypothetical lots; never exchange allocation evidence."""
     entries = plan["entries"] if lots is None else lots
     quantity = sum((_decimal(row["quantity"]) for row in entries), Decimal(0))
@@ -274,6 +312,9 @@ def _gross_projection(plan, context, *, lots=None,
     if (new_entry and plan.get('action') == 'OPEN' and lots is None
             and not context.get('positions') and not context.get('pending_entries')):
         result['joint_exit_paths'] = _joint_exit_paths(plan, targets, quantity, basis, minimum, fees)
+    elif holding_paths and confirmed and plan.get('action') == 'ADJUST':
+        result['joint_exit_paths'] = _joint_exit_paths(plan, targets, quantity, basis, minimum, fees,
+            confirmed=True, recorded_net=context.get('recorded_scenario_net'))
     return result
 
 
@@ -512,7 +553,43 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
     if context.get('scenario_id') is None:
         from live.scenario_entry_display import project_entry_display_input
         return project_entry_display_input(payload)[0]
-    return project_position_flow_input(payload)[0]
+    baseline, _ = project_position_flow_input(payload)
+    if not calculated_candidates or not context.get('positions') or context.get('accounting_status') != 'confirmed':
+        return baseline
+    # Select existing history before adding optional calculations, just as for
+    # entry_display. Neither the hash-bound receipts nor source facts are edited.
+    from live.scenario_model_input import restore_model_input, project_model_input
+    from live.scenario_position_flow import _size, _MODEL_INPUT_LIMIT
+    view = []
+    candidates = calculated_candidates.get('candidates', [])
+    if not isinstance(candidates, list) or len(candidates) > 2:
+        return baseline
+    for candidate in candidates:
+        plan = candidate.get('effective_plan', {})
+        if candidate.get('eligible') is not True or plan.get('action') != 'ADJUST':
+            continue
+        if receipt_hash({k: v for k, v in candidate.items() if k != 'receipt_sha256'}) != candidate.get('receipt_sha256'):
+            continue
+        try:
+            if plan.get('side') != context.get('side'):
+                continue
+            validation_now = candidate['pricing_basis']['validation_now']
+            _decimal(validation_now)
+            calculation_context = dict(context, now=validation_now)
+            if receipt_hash(calculation_context) != candidate.get('context_sha256'):
+                continue
+            projection = _gross_projection(plan, calculation_context, lots=context['positions'], holding_paths=True,
+                assumption='CONFIRMED_REMAINING_NEW_REVISION_NO_ADDITIONAL_FILLS')
+            if 'joint_exit_paths' in projection:
+                view.append([candidate['id'], candidate['receipt_sha256'], projection['joint_exit_paths']])
+        except (KeyError, TypeError, ValueError, OverflowError, ArithmeticError):
+            continue  # Optional diagnostics must not suppress an existing safe decision.
+    if not view:
+        return baseline
+    logical = restore_model_input(baseline)
+    logical['contract_context']['holding_exit_paths'] = view
+    augmented, _ = project_model_input(logical, allow_gap_rescue=True)
+    return augmented if _size(augmented) <= _MODEL_INPUT_LIMIT else baseline
 
 
 ALLOCATION_SINGLE_PROMPT = """

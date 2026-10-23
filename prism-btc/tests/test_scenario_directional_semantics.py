@@ -84,6 +84,6 @@ def test_non_boolean_recovery_metadata_stays_unknown():
 
 
 def test_interpretation_prompt_versions_pinned():
-    # 2026-10-22 v4: compare applicable paths without a fictional reduction mandate.
-    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "95b941506d6b73138252036eefbb20f1fb96f51ed85177dc5add2d33cd1249d7"
-    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "a77a977bb4ca2dcf8982a5045d68e017ca619c55064f52a3bd7bd625fe2b94fe"
+    # 2026-10-23: confirmed holding paths, recorded net once, optional partial SL.
+    assert hashlib.sha256(DRAFT_PROMPT.encode()).hexdigest() == "0c0ab78a2f2bed838ad1eca1519a1371f81cc8a5cb743731203f1457264ea886"
+    assert hashlib.sha256(SELECT_PROMPT.encode()).hexdigest() == "fddd16966c87e775708ab18e8a9c5850470454a0ce7ff584ccf79e10c514f9b5"

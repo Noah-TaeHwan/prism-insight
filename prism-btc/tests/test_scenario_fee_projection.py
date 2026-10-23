@@ -195,6 +195,10 @@ def test_full_holding_two_candidate_select_fee_views_fit_and_restore(target_coun
         else:
             sent=json.loads(kwargs['user_prompt'])
             restored=restore_model_input(sent)
+            view=restored['contract_context'].pop('holding_exit_paths',None)
+            if view is not None:
+                assert len(view)==2
+                assert all(row[2]['version']==3 for row in view)
             assert restored==originals[-1]
             assert len(kwargs['user_prompt'].encode())<=100_000
             assert restored['contract_context']['runner_economics']['fee_only_projection']['at_mark']['status']=='AVAILABLE'

@@ -576,7 +576,12 @@ them. Do not claim that smaller exposure or a nearer TP makes a weak setup valid
 Higher-frame direction alone is not a veto; concrete current
 4h/longer-frame obstacles still matter through achievable TP/SL and costs and
 can justify WAIT when no executable net-of-cost opportunity remains.
-Separate directional evidence from executable entry location. Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
+Separate directional evidence from executable entry location. Compare the
+actual recent confirmed-close sequence with the separate forming
+move. Price being above/below an MA is not evidence that confirmed closes are
+rising/falling; explain a reversal or continuation from its own timestamped facts.
+A contrary confirmed sequence is evidence to weigh, not a mandatory close/retest gate.
+Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
 for entry before the ORIGINAL next-decision deadline, and WAIT, symmetrically.
 A trigger is an activation condition, not a better entry price or proof against chasing.
 In DRAFT use the original proposed limit/worst permitted entry price; do not anticipate

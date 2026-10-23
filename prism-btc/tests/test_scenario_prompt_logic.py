@@ -14,11 +14,11 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # 2026-10-23 v3: flat source-labelled facts view; holding/risk/goal unchanged.
+    # 2026-10-23: distinguish actual confirmed progression from a forming move.
     expected = {
         'SYSTEM_PROMPT': 'a0fc7fd8bc368ee578f2cac02add0059fcad64f754ded302a3c5330605b4c030',
         'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
-        'FLAT_ENTRY_PROMPT': 'c0fbd35e3e020bab3c36bb21df30982025f82ae0c149f7ae9cc5d6e5a5e3a738',
+        'FLAT_ENTRY_PROMPT': 'e7e0971b32bf483b92f0405286ee7844a7d7b786beb6fbf26717be1797385c2e',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
                          ('FLAT_ENTRY_PROMPT', FLAT_ENTRY_PROMPT)]:

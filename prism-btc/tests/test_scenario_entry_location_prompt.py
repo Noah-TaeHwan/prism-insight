@@ -24,6 +24,9 @@ def test_flat_draft_and_selection_receive_price_basis_without_contract_changes(s
         prompt = ' '.join(call['system_prompt'].split())
         assert prompt.count(MARKER) == 1
         assert 'trigger is an activation condition, not a better entry price' in prompt
+        assert 'actual recent confirmed-close sequence with the separate forming' in prompt
+        assert 'not evidence that confirmed closes are rising/falling' in prompt
+        assert 'not a mandatory close/retest gate' in prompt
         assert 'In DRAFT use the original proposed limit/worst permitted entry price' in prompt
         assert 'do not anticipate host price adjustments' in prompt
         assert 'In calculated SELECT use the supplied effective_plan entry price' in prompt
