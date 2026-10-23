@@ -54,7 +54,7 @@ def test_flat_select_wait_still_explains_existing_eligible_plan_without_new_fiel
     prompt = ' '.join(calls[1]['system_prompt'].split())
     assert 'even when selecting WAIT' in prompt
     assert 'existing rationale as decision evidence' in prompt
-    assert 'No intervening zone or unknown zone evidence is valid' in prompt
+    assert 'State when no intervening zone is evidenced or its evidence is unknown' in prompt
     assert set(calls[1]['response_schema']['properties']) == {'selection_token', 'rationale'}
 
 

@@ -580,7 +580,8 @@ host price adjustments. In calculated SELECT use the supplied effective_plan ent
 not the trigger or current MarkPrice. With an eligible flat OPEN, even when selecting WAIT,
 connect that entry cap, first TP and first evidenced reaction zone, if any, in the
 existing rationale as decision evidence: explain their actual relative order and any
-required passage. No intervening zone or unknown zone evidence is valid; never invent one.
+required passage. State when no intervening zone is evidenced or its evidence is unknown;
+never invent one.
 No candidate or first observation: do not invent a plan to compare. Distinguish already-travelled
 progress from remaining room using current evidence, not direction alone. Smaller quantity or a nearer
 TP does not repair an unsupported location. If current evidence justifies entry, a strong
