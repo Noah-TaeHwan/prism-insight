@@ -201,7 +201,16 @@ def evaluate(market, row, bars, *, current_price, now=None, index_bars=None):
 
 
 def view_for_row(market, row, current_price, fetch, *, now=None, index_fetch=None):
-    """evaluate() with bars from ``fetch(ticker)`` only when the row needs them (trend-exit, read-only)."""
+    """evaluate() with bars from ``fetch(ticker)`` only when the row needs them (trend-exit, read-only).
+
+    A LIVE core holding (prism_core/core_hold_live.py) takes precedence: protected, no runner exit.
+    """
+    from prism_core import core_hold_live
+    core = core_hold_live.view(row, market)
+    if core is not None:
+        return core
+    if not R.enabled(market):
+        return None
     now = now or _now()
     if not needs_bars(market, row, now=now):
         return None
@@ -268,6 +277,11 @@ async def review_holding(agent, market, stock, *, logger=None, now=None):
     """
     log = logger or _LOG
     market = str(market).upper()
+    from prism_core import core_hold_live
+    core = core_hold_live.view(stock, market)
+    if core is not None and getattr(agent, "_no_order_effects", None) is None:
+        stock[CTX_KEY] = core                 # a core holding: the core rule replaces the runner rule
+        return None
     if not R.enabled(market) or getattr(agent, "_no_order_effects", None) is not None:
         return None
     ticker, row_id = stock.get("ticker"), stock.get("id")
@@ -360,8 +374,17 @@ def _queue_notice(agent, market, stock, block, view, written):
     return text
 
 
-def _protected(stock):
+def _protected(stock, market=None):
+    """The protecting view: a LIVE core holding first, else a protected runner (runner rule on), else None."""
+    from prism_core import core_hold_live
+    core = core_hold_live.view(stock, market) if market else None
+    if core is not None:
+        return core
+    if market and not R.enabled(market):
+        return None
     view = stock.get(CTX_KEY) if isinstance(stock, dict) else None
+    if isinstance(view, dict) and view.get("kind") == "core":
+        return None                               # a core view from a review while core LIVE is now off
     if view is None:
         block = R.record((stock or {}).get("scenario"))
         if block is None or block.get("status") != R.RUNNER:
@@ -385,9 +408,12 @@ def _price_facts(stock, block):
 def _block(market, stock, reason, code, source, log, view=None):
     ticker = stock.get("ticker")
     view = view or {}
-    log.warning("[RUNNER_HOLD] blocked sell reason=%s source=%s market=%s ticker=%s price=%s detail=%s", code, source,
-                market, ticker, stock.get("current_price"), " ".join(str(reason or "").split())[:200])
-    _emit("runner.sell_blocked", market=market, ticker=ticker, row_id=stock.get("id"), stock=stock,
+    core = view.get("kind") == "core"
+    log.warning("[%s] blocked sell reason=%s source=%s market=%s ticker=%s price=%s detail=%s",
+                "CORE_HOLD" if core else "RUNNER_HOLD", code, source, market, ticker, stock.get("current_price"),
+                " ".join(str(reason or "").split())[:200])
+    _emit("core_hold.sell_blocked" if core else "runner.sell_blocked", market=market, ticker=ticker,
+          row_id=stock.get("id"), stock=stock,
           attributes={"code": code, "source": source, "sell_reason": str(reason or "")[:300],
                       "phase": view.get("phase"), **_price_facts(stock, view.get("record"))})
 
@@ -395,10 +421,9 @@ def _block(market, stock, reason, code, source, log, view=None):
 def guard_result(agent, market, stock, should_sell, reason, *, logger=None):
     """Final deterministic guard at the tracker choke point: (should_sell, reason)."""
     market = str(market).upper()
-    if (not should_sell or not R.enabled(market)
-            or getattr(agent, "_no_order_effects", None) is not None):
+    if not should_sell or getattr(agent, "_no_order_effects", None) is not None:
         return should_sell, reason
-    view = _protected(stock)
+    view = _protected(stock, market)
     if view is None:
         return should_sell, reason
     allow, code = R.sell_verdict(protected=True, exit_code=view.get("exit"), current_price=stock.get("current_price"),
@@ -415,10 +440,9 @@ def guard_decision(agent, market, stock, decision, *, logger=None):
     A blocked sell becomes a hold; any portfolio_adjustment (trailing stop, target) is ignored while protected.
     """
     market = str(market).upper()
-    if (not isinstance(decision, dict) or not R.enabled(market)
-            or getattr(agent, "_no_order_effects", None) is not None):
+    if not isinstance(decision, dict) or getattr(agent, "_no_order_effects", None) is not None:
         return decision
-    view = _protected(stock)
+    view = _protected(stock, market)
     if view is None:
         return decision
     log = logger or _LOG
@@ -429,7 +453,8 @@ def guard_decision(agent, market, stock, decision, *, logger=None):
         log.warning("[RUNNER_HOLD] stop_adjust_ignored market=%s ticker=%s new_stop_loss=%s new_target_price=%s "
                     "(runner stop/target are system-managed)", market, stock.get("ticker"),
                     adjustment.get("new_stop_loss"), adjustment.get("new_target_price"))
-        _emit("runner.stop_adjust_ignored", market=market, ticker=stock.get("ticker"), row_id=stock.get("id"), stock=stock,
+        _emit("core_hold.stop_adjust_ignored" if view.get("kind") == "core" else "runner.stop_adjust_ignored",
+              market=market, ticker=stock.get("ticker"), row_id=stock.get("id"), stock=stock,
               attributes={"new_stop_loss": adjustment.get("new_stop_loss"),
                           "new_target_price": adjustment.get("new_target_price"),
                           "reason": str(adjustment.get("reason") or "")[:200]})
@@ -448,7 +473,11 @@ def guard_decision(agent, market, stock, decision, *, logger=None):
 
 
 def prompt_block(stock, *, market, language):
-    """Per-holding sell-review appendix for a protected runner; '' otherwise."""
+    """Per-holding sell-review appendix for a LIVE core holding or a protected runner; '' otherwise."""
+    from prism_core import core_hold_live
+    core = core_hold_live.prompt_block(stock, market=market, language=language)
+    if core:
+        return core
     if not R.enabled(market):
         return ""
     view = stock.get(CTX_KEY) if isinstance(stock, dict) else None

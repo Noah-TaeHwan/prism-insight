@@ -80,6 +80,9 @@ JOBS = (
         ("09:35", "16:00")),
     Job("reentry_kr", "재진입", "KR", "logs/reentry_v3_shadow_kr.log", r'"phase": "intraday"', deadline="14:30"),
     Job("reentry_us", "재진입", "US", "logs/reentry_v3_shadow_us.log", r'"phase": "intraday"', deadline="14:20"),
+    # Record-only core long-term holding observer (tools/run_core_hold_observer.py, cron 16:40 KST / 17:10 ET).
+    Job("core_hold_kr", "장기 보유 기록", "KR", "logs/core_hold_observer_kr.log", r"Core-hold KR summary", deadline="17:00"),
+    Job("core_hold_us", "장기 보유 기록", "US", "logs/core_hold_observer_us.log", r"Core-hold US summary", deadline="17:30"),
     # Failure scan only (no heartbeat): analysis/trading batches and their AI buy/sell decisions.
     Job("kr_batch", "분석·매매 배치", "KR", "orchestrator_{date}.log"),
     Job("kr_tracking", "매매 판단", "KR", "enhanced_stock_tracking_{date}.log"),

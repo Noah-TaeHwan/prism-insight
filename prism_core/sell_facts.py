@@ -131,7 +131,10 @@ def prompt_block(*, market, language, stock_data, highest_price, threshold_pct, 
     last_close = trend["close"] if trend else None
     held = sessions_held(bars, market, stock_data.get("buy_date")) if bars else None
     block = R.record(stock_data.get("scenario"))
-    runner = bool(block and block.get("status") == R.RUNNER and R.enabled(market))
+    from prism_core import core_hold_live
+    # the runner rule and a LIVE core holding replace the trailing stop: no trailing lines for them
+    runner = bool(block and block.get("status") == R.RUNNER and R.enabled(market)) or bool(
+        core_hold_live.view(stock_data, market))
     lines = []
     if trend:
         lines.append((f"- 기준 일봉: {trend['date']} 확정 종가 {m(trend['close'])}" if ko else

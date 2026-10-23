@@ -526,7 +526,10 @@ async def _run_market(market: str, run_id: str) -> Dict[str, Any]:
     # Runner hold rule (docs/RUNNER_HOLD_RULE_ko.md), read-only here: the batch persists
     # the runner block and raises the stop; this loop only skips TIER1.5/2/3 for a
     # protected runner and acts on its close-confirmed 50-day-MA / breakeven exit.
-    runner_on = runner_hold_live.enabled(market)
+    # A LIVE core holding (prism_core/core_hold_live.py) is protected the same way: view_for_row returns
+    # its view first and the hard stop (its stop_loss) executes the core exits.
+    from prism_core import core_hold_live
+    runner_on = runner_hold_live.enabled(market) or core_hold_live.enabled(market)
     runner_bars: Dict[str, List[Dict[str, Any]]] = {}
 
     def _runner_bars(symbol):
@@ -690,11 +693,13 @@ def _log_runner_hold(market: str, ticker: str, holding: Dict[str, Any], reason: 
     from prism_core.runner_hold import classify_reason
     from prism_core.runner_hold_live import _price_facts
     code = classify_reason(reason)
-    logger.info("[RUNNER_HOLD] blocked sell reason=%s source=trend_exit market=%s ticker=%s price=%s detail=%s",
-                code, market, ticker, current_price, reason)
     view = view or {}
+    core = view.get("kind") == "core"
+    logger.info("[%s] blocked sell reason=%s source=trend_exit market=%s ticker=%s price=%s detail=%s",
+                "CORE_HOLD" if core else "RUNNER_HOLD", code, market, ticker, current_price, reason)
     from observability.events import emit_event
-    emit_event("runner.sell_blocked", service=f"prism-{market.lower()}-runner-hold", market=market,
+    emit_event("core_hold.sell_blocked" if core else "runner.sell_blocked",
+               service=f"prism-{market.lower()}-{'core-hold' if core else 'runner-hold'}", market=market,
                ticker=ticker, position_id=f"legacy:{market}:{holding.get('id')}",
                attributes={"code": code, "source": "trend_exit", "sell_reason": str(reason)[:300],
                            "phase": view.get("phase"),
