@@ -74,3 +74,14 @@ def test_original_host_still_rejects_duplicate_action_after_model_projection():
     assert ctx == original
     with pytest.raises(ScenarioValidationError, match='duplicate action'):
         validate_scenario(proposal, ctx)
+
+
+def test_action_history_change_after_select_is_rejected_by_fresh_guard():
+    from tests.test_scenario_review_guard import taped, check
+    args = taped()
+    assert args[3]['calls'] == 2
+    assert check(args)['validated']['action'] == 'OPEN'
+    fresh = dict(args[1], now=1001, account_captured_at=1001,
+                 seen_action_ids=['newly_executed_action'])
+    with pytest.raises(ValueError, match='review_guard_context_changed:seen_action_ids'):
+        check(args, fresh)
