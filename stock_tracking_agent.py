@@ -768,6 +768,15 @@ class StockTrackingAgent:
             logger.warning("[BUY_RISK_FACTS][KR] %s unavailable: %s", ticker, type(error).__name__)
             return ""
 
+    def _buy_growth_facts_block(self, ticker: str) -> str:
+        """BUY growth facts (prism_core.buy_growth_facts) from the report step's frames: the prompt block while
+        PRISM_BUY_GROWTH_FACTS is on, the decision-ledger copy while decision-input capture is on, '' otherwise."""
+        from observability.decision_inputs import enabled as decision_inputs_enabled
+        from prism_core import buy_growth_facts
+        if not (buy_growth_facts.enabled() or decision_inputs_enabled()):
+            return ""
+        return buy_growth_facts.collect(self, ticker, language=self.language)
+
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector (delegates to tracking.helpers)"""
         account_key, _ = self._account_scope()
@@ -1236,6 +1245,7 @@ class StockTrackingAgent:
             trend_facts = ""
             decision_facts = ""
             risk_facts = ""
+            growth_facts = ""
             score_adjustment_info = ""
             adjustment, reasons = 0, []
             if ticker:
@@ -1244,6 +1254,7 @@ class StockTrackingAgent:
                 from observability.decision_inputs import prompt_facts
                 decision_facts = prompt_facts(self, ticker, market="KR", language=self.language)
                 risk_facts = await self._buy_risk_facts_block(ticker, sector, trend_facts, holdings)
+                growth_facts = self._buy_growth_facts_block(ticker)
                 journal_context = self._get_relevant_journal_context(
                     ticker=ticker,
                     sector=sector,
@@ -1318,7 +1329,7 @@ class StockTrackingAgent:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {trend_facts}
-                {decision_facts}{risk_facts}
+                {decision_facts}{risk_facts}{growth_facts}
                 {journal_context}
 
                 ### Report Content:
@@ -1335,7 +1346,7 @@ class StockTrackingAgent:
                 {rank_change_msg}
                 {score_adjustment_info}
                 {trend_facts}
-                {decision_facts}{risk_facts}
+                {decision_facts}{risk_facts}{growth_facts}
                 {journal_context}
 
                 ### Report Content:
@@ -2325,8 +2336,11 @@ class StockTrackingAgent:
                 else None if limit_price is None else float(limit_price)
             )
             try:
+                from prism_core import core_hold_live
                 from reentry_cooldown import classify_exit_kind
 
+                # a LIVE core holding's sale is a core exit, not a stop-out (re-entry watch)
+                exit_kind = core_hold_live.exit_kind(stock_data, "KR") or exit_kind
                 classified_exit_kind = classify_exit_kind(sell_reason, exit_kind)
             except Exception:
                 classified_exit_kind = exit_kind
@@ -3321,7 +3335,10 @@ class StockTrackingAgent:
 
             # Classify the exit (stop/trend_exit/target/ai) for the churn guard.
             try:
+                from prism_core import core_hold_live
                 from reentry_cooldown import classify_exit_kind
+                # a LIVE core holding's sale is a core exit, not a stop-out (re-entry watch)
+                exit_kind = core_hold_live.exit_kind(stock_data, "KR") or exit_kind
                 _exit_kind = classify_exit_kind(sell_reason, exit_kind)
             except Exception:
                 _exit_kind = exit_kind  # fail-open: store caller hint or None

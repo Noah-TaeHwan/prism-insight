@@ -148,7 +148,8 @@ def test_no_stale_alert_outside_session_or_window(tmp_path, monkeypatch):
     saturday = datetime(2026, 10, 24, 12, 0, tzinfo=KST)
     assert W.stale_jobs(state, saturday) == []
     evening = datetime(2026, 10, 21, 18, 0, tzinfo=KST)                   # KR closed, US not open yet
-    assert [j.key for j, _, _ in W.stale_jobs({"started": "2026-10-21T08:00:00+09:00"}, evening)] == ["reentry_kr"]
+    assert [j.key for j, _, _ in W.stale_jobs({"started": "2026-10-21T08:00:00+09:00"}, evening)] == ["reentry_kr",
+                                                                                                   "core_hold_kr"]
 
 
 def test_daily_reentry_deadline_and_morning_summary(tmp_path, monkeypatch):
