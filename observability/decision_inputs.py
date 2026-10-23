@@ -174,6 +174,9 @@ def emit_decision_inputs(agent, *, market, ticker, decision_id, scenario, curren
             result["earnings"] = {"status": "NOT_COLLECTED", "reason": "kr_earnings_calendar_not_in_v1"}
         result["prompt_flags"] = (shown or {}).get("flags")
         result["sector_comovement"] = {"status": "NOT_COLLECTED", "reason": "deferred_v2"}
+        # The same buy_risk_facts_v1 dict the BUY prompt step built (prompt_included says if it was shown).
+        result["buy_risk_facts"] = (getattr(agent, "_buy_risk_facts", {}) or {}).get(ticker) or {
+            "contract": "buy_risk_facts_v1", "status": "NOT_COLLECTED", "reason": "not_built_for_this_decision"}
         try:
             result["snapshot"] = _snapshot(captured if captured and captured.get("market") == market else None,
                                            market=market, now=now, current_price=current_price)
