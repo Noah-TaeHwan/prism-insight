@@ -18,6 +18,7 @@ from live.scenario_contract import _matches, _object, response_schema, validate_
 from live.scenario_entry_contract import strip_metadata
 from live.scenario_entry_goal import GoalConsistencyRejection, prepare_goal_source, validate_goal_pair
 from live.scenario_position_flow import project_position_flow_input
+from live.scenario_analysis_frames import analysis_model_view
 from live.scenario_runtime import snapshot_input_time
 
 
@@ -550,6 +551,7 @@ def _model_payload(snapshot, context, response_contract, *, calculated_candidate
             "quantity": "BTC", "gross_pnl": "USDT_FOR_THIS_TARGET_QUANTITY_BEFORE_COSTS",
             "gross_reward_per_btc": "USDT_PER_BTC_NOT_TOTAL_PNL",
             "gross_reward_to_reserved_risk_ratio": "DIMENSIONLESS_NOT_USDT"}}
+    payload = analysis_model_view(payload)
     if context.get('scenario_id') is None:
         from live.scenario_entry_display import project_entry_display_input
         return project_entry_display_input(payload)[0]

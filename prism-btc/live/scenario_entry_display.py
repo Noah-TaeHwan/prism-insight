@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+from live.scenario_analysis_frames import PRIMARY_FRAMES
 
 
 def _price(value):
@@ -28,7 +29,7 @@ def flat_entry_display(structure, bundle=None):
     """Caller supplies its freshly built ma_structure; never mutate a receipt."""
     tails = {}
     primary = structure.get('primary', {})
-    for frame in ('15m', '30m', '1h'):
+    for frame in PRIMARY_FRAMES:
         points = primary.get(frame, {}).get('points', [])
         tails[frame] = [[p['as_of_ms'], p['close']] for p in points
                         if p.get('phase') == 'CONFIRMED' and p.get('is_confirmed') is True][-3:] or None

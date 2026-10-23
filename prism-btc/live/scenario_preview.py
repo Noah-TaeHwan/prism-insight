@@ -148,7 +148,7 @@ def preview(equity, *, snapshot=None, generate=None, clock=time.time):
                positions=[],pending_entries=[],previous_hard_stop=None,realized_loss=0,
                fees_paid=0,funding_paid=0,estimated_cost_rate=0.0012,slippage_bps=10,
                new_risk_blocked=False,conditional_entry_version=1,
-               mark_price=snapshot.get("timeframes",{}).get("15m",{}).get("forming",{}).get("ohlcv",{}).get("close"))
+               mark_price=snapshot.get("timeframes",{}).get("30m",{}).get("forming",{}).get("ohlcv",{}).get("close"))
     payload = propose(snapshot, ctx, response_contract(ctx), generate=generate, clock=clock)
     ctx["now"] = clock()
     validated = validate_scenario(payload, ctx)

@@ -17,7 +17,7 @@ def probe(tmp_path):
     broker.ctx["accounting_status"] = "confirmed"
     conn = sqlite3.connect(tmp_path / "recovery.db")
     snapshot = lambda: {"valid": True, "as_of_ms": now[0] * 1000,
-        "timeframes": {"15m": {"closed": {"close": price[0], "ma10": 99.}}}}
+        "timeframes": {"30m": {"closed": {"close": price[0], "ma10": 99.}}}}
     r = ScenarioRuntime(conn, broker, lambda s, c: {}, snapshot,
                         clock=lambda: now[0], recovery_enabled=True)
     state = r.state()
@@ -32,7 +32,7 @@ def probe(tmp_path):
         if not first:
             p["chase"] = {"max_bps": 0, "max_reprices": 0}
         p["recovery"] = {"decision": "OBSERVE" if first else "PROBE",
-             "reason": "new structure", "changed_evidence": [] if first else ["timeframes.15m.closed.close"],
+             "reason": "new structure", "changed_evidence": [] if first else ["timeframes.30m.closed.close"],
              "counterevidence": "reversal remains possible", "invalidation": "price below initial stop"}
         recovery.record_model_wire(json.dumps(p))
         return p

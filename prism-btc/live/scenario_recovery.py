@@ -14,6 +14,7 @@ import json
 import math
 from pathlib import Path
 import uuid
+from live.scenario_analysis_frames import allowed_evidence_path
 
 RISK_FRACTION = .005
 STAGE_FRACTIONS = (.005, .01, .02)
@@ -492,7 +493,7 @@ def historical_outcomes(conn, state):
 
 
 def prepare_input(conn, state, context, snapshot, slot, now):
-    values = numeric_market(snapshot)
+    values = {k:v for k,v in numeric_market(snapshot).items() if allowed_evidence_path(k)}
     version_evidence = versions()
     recovery = state.setdefault("recovery", {"phase": "OBSERVING", "started_at": now})
     first = "baseline" not in recovery
@@ -563,7 +564,7 @@ def assess(conn, state, context, payload, slot, now):
         raise ValueError("recovery_action_mismatch")
     if data["first_observation"] or slot <= data["baseline_slot"]:
         raise ValueError("recovery_first_observation")
-    if not paths or any(path not in data["changed_evidence"] for path in paths):
+    if not paths or any(not allowed_evidence_path(path) or path not in data["changed_evidence"] for path in paths):
         raise ValueError("recovery_no_changed_evidence")
     if not conn.execute("SELECT 1 FROM llm_scenario_recovery_events WHERE slot=? AND kind='MODEL_RAW'", (slot,)).fetchone():
         raise ValueError("recovery_missing_raw")

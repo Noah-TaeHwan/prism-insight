@@ -27,7 +27,7 @@ def test_existing_symmetric_protection_and_timeframe_rules_remain():
     assert 'Symmetric rules apply to SHORT' in SYSTEM_PROMPT
     assert 'Immediate partial market reduction is unsupported' in SYSTEM_PROMPT
     assert 'Keep fixed 10x, the original' in SYSTEM_PROMPT
-    assert '30m/1h drive direction and 15m refines timing' in MA_STRUCTURE_PROMPT
+    assert '30m/1h drive direction; no shorter frame refines timing' in MA_STRUCTURE_PROMPT
 
 
 def test_entry_helper_is_in_policy_provenance():

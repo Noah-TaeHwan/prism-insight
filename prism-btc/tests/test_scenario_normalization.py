@@ -27,7 +27,7 @@ def automatic(probe, monkeypatch):  # noqa: F811 - pytest's imported fixture inj
         if not first:
             p["chase"] = {"max_bps": 0, "max_reprices": 0}
         p["recovery"] = {"decision": "OBSERVE" if first else "PROBE", "reason": "test",
-            "changed_evidence": [] if first else ["timeframes.15m.closed.close"],
+            "changed_evidence": [] if first else ["timeframes.30m.closed.close"],
             "counterevidence": "test", "invalidation": "test"}
         recovery.record_model_wire(json.dumps(p))
         return p
