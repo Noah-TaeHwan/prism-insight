@@ -425,7 +425,9 @@ def us_providers():
         response = fetch_quote(plan["symbol"])
         if response.get("exchange") in names:
             exchanges[plan["symbol"]] = names[response["exchange"]]
-        value = quote_input(plan=plan, position_id=position_id, response=response, now=now)
+        # Judge freshness when the response arrived: a trade printed during the 2-4s fetch is newer
+        # than the clock read before it, not a future quote (2026-10-23 BKH/HALO at the open).
+        value = quote_input(plan=plan, position_id=position_id, response=response, now=utc_now())
         return {k: value[k] for k in ("price", "observed_at", "source_ref")}
 
     def intraday(symbol, as_of, started):

@@ -231,3 +231,29 @@ def test_us_market_snapshot_timeout_is_retried_not_kept(monkeypatch):
         market()
     clock[0] += timedelta(seconds=61)
     assert market() == {"observed_at": "2026-10-22T13:31:00+00:00"}
+
+
+def test_us_quote_printed_during_the_fetch_is_not_a_future_quote(monkeypatch):
+    """2026-10-23: the clock was read before the 2-4s fetch, so a trade printed meanwhile failed as FUTURE."""
+    from prism_core import b3_ae_worker, oneil_runtime_inputs
+
+    before = datetime(2026, 10, 23, 13, 35, tzinfo=timezone.utc)
+    printed = before + timedelta(seconds=2)
+    clock = [before]
+
+    def fetch(symbol, timeout=15):
+        clock[0] = before + timedelta(seconds=3)  # the response arrives after the trade
+        return dict(symbol=symbol, currency="USD", regularMarketPrice=79.15,
+                    regularMarketTime=printed.timestamp(), exchange="NYQ")
+
+    monkeypatch.setattr(oneil_runtime_inputs, "fetch_quote", fetch)
+    monkeypatch.setattr(oneil_runtime_inputs, "_validate", lambda plan: None)
+    monkeypatch.setattr(b3_ae_worker, "datetime", type("Clock", (), {"now": staticmethod(lambda tz=None: clock[0])}))
+    plan = dict(symbol="BKH", source_decision_ref="d", setup=dict(price_basis_ref="p"))
+    quote = b3_ae_worker.us_providers()["quote"](plan, "legacy:US:1", before.isoformat())
+    assert quote["price"] == "79.15" and quote["observed_at"] == printed.isoformat()
+    with pytest.raises(ValueError, match="QUOTE_STALE_OR_FUTURE"):  # a stale quote still fails closed
+        clock[0] = before + timedelta(seconds=200)
+        oneil_runtime_inputs.quote_input(plan=plan, position_id="legacy:US:1",
+                                         response=fetch("BKH") | {"regularMarketTime": before.timestamp() - 200},
+                                         now=b3_ae_worker.utc_now())
