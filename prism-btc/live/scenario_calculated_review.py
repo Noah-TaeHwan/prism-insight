@@ -94,8 +94,9 @@ Flat-entry gross target projections assume all proposed entries fill: a partial 
 not whole-scenario profit, and unknown future fees/funding remain unknown.
 When supplied, joint_exit_paths compares bounded hypothetical exit sequences for
 new flat OPEN and confirmed remaining lots of a proposed ADJUST. Compare whole-path payoff and remaining lots, not sums of
-independent target profits. These are full-entry/full-fill price assumptions,
-not probabilities or expected net profit; partial SL is optional, never risk
+independent target profits. Flat paths assume full entry fills; active paths use
+only confirmed remaining lots. Both assume the displayed exit fills, not
+probabilities or expected net profit; partial SL is optional, never risk
 credit or a substitute for full EXIT on confirmed failure. No fixed payoff gate.
 Each path closes any remaining quantity at hard SL as a stress test, NOT the
 expected ending of a trend or the value of an open runner. Do not prefer liquidating upside simply because
@@ -108,7 +109,8 @@ TP1_STOP/SL1_STOP mean only the first TP/partial-SL leg; STOP means hard SL alon
 TP1_SL/SL1_TP mean first TP then partial SL / first partial SL then TP; both kinds
 actually apply. All paths close any remainder at hard SL. Compare only displayed
 paths: omitted/zero/subminimum/capped-out legs are NOT part of their names.
-Original projection.quantity and targets supply all quantities/prices for these
+The corresponding projection.quantity/targets (flat) or
+projection.confirmed_remaining.quantity/targets (ADJUST) supply quantities/prices for these
 sequences; no independent leg profits are added to path gross. Targets retain their
 initial revision quota (not a fraction of each new remainder), sorted by price
 crossing order; zero/subminimum legs are omitted and quantities capped at remaining.
