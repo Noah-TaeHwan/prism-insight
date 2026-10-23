@@ -27,10 +27,35 @@ def test_flat_draft_and_selection_receive_price_basis_without_contract_changes(s
         assert 'In DRAFT use the original proposed limit/worst permitted entry price' in prompt
         assert 'do not anticipate host price adjustments' in prompt
         assert 'In calculated SELECT use the supplied effective_plan entry price' in prompt
-        assert 'first evidenced reaction zone, if any, and TP' in prompt
+        assert 'entry cap, first TP and first evidenced reaction zone, if any' in prompt
         assert 'a strong immediate break or valid numeric crossing remains allowed' in prompt
         assert 'No fixed distance, minimum reward/risk, or automatic MA/round-number wall' in prompt
         assert len(call['user_prompt'].encode()) <= 100000
+
+
+def test_flat_phase_sources_and_no_candidate_do_not_invent_plans():
+    _, _, calls = run(candidates=[])
+    assert len(calls) == 1
+    prompt = ' '.join(calls[0]['system_prompt'].split())
+    assert 'current_primary_frame_facts is FORMING_LAST_CLOSE' in prompt
+    assert 'confirmed OHLC comes from timestamped recent_confirmed_bars or CONFIRMED points' in prompt
+    assert 'not a confirmed-bar rise/fall' in prompt
+    assert 'do not invent a confirmed.close path' in prompt
+    assert 'No candidate or first observation: do not invent a plan to compare' in prompt
+
+
+def test_flat_select_wait_still_explains_existing_eligible_plan_without_new_fields():
+    def choose_wait(reply, phase, request):
+        if phase == 2:
+            reply['selection_token'] = next(t for t in request['response_schema']['properties']['selection_token']['enum']
+                                           if t.startswith('WAIT:'))
+    result, _, calls = run(mutate=choose_wait)
+    assert result['selection']['selection'] == 'WAIT'
+    prompt = ' '.join(calls[1]['system_prompt'].split())
+    assert 'even when selecting WAIT' in prompt
+    assert 'existing rationale as decision evidence' in prompt
+    assert 'No intervening zone or unknown zone evidence is valid' in prompt
+    assert set(calls[1]['response_schema']['properties']) == {'selection_token', 'rationale'}
 
 
 @pytest.mark.parametrize('side', ['LONG', 'SHORT'])

@@ -32,3 +32,22 @@ DRAFT 두 건은 출력 계약·정책 보존을 점검하며, 후보 없음·�
 새 schema·기하 계산·차단 관문·호출·타임아웃을 추가하지 않는다. 부분손절, holding/pending,
 고정 거리·최소 손익비·의무 재시험·MA 자동 장벽, 위험·사이징·실행 권한은 변경하지 않는다.
 코드 구현·검증·CI·배포·자연 판단·수익성은 각각 별도 상태로 보고한다.
+
+## v1 결과 및 v2 사전 보완
+v1(3df49913)은 HOLD다. SELECT06에서 필수 위치 비교가 미관측됐고 DRAFT10에서
+확정/형성 가격 인용 오류가 발생했다. 이전 호출·판정은 보존하며 성공으로 소급하지 않는다.
+전체 검사에서 기존 시각 fixture의 부동소수점 미래 시각 문제도 발견했다. 기준/후보 모두
+동일하게 재현됐으며 운영 freshness는 완화하지 않고 테스트 시각만 별도로 고쳤다.
+
+v2는 `btc_entry_location_prereg_v2_20261023.md`를 구현 전에 읽고 고정했다.
+현재 운영 기준7d1cc8c9 대비 같은 FLAT_ENTRY 두 문단만 보완한다.
+current_primary_frame_facts는 형성 가격이며 확정 OHLC는 timestamped recent_confirmed_bars
+또는 CONFIRMED points에서 읽는다. 확정→형성 변화를 확정봉 진행이라고 부르지 않는다.
+eligible OPEN이 있는 SELECT는 WAIT를 선택해도 기존 rationale의 결정 근거에서 유효
+진입 가격·첫 TP·반응 구간의 실제 상대 위치를 연결한다. 구간이 없거나 미상이면 그대로
+말하며 후보 없음/최초 관측에 계획을 발명하지 않는다. 새 heading/schema/검증 관문은 없다.
+
+v2 실제 진단은 동일20건 원자료를 현재 조립기에 스텁으로 넣어 현재 계산 receipt를 생성한다.
+기준/후보 user 입력·schema·receipt가 같고 승인된 FLAT system 문단만 달라야 한다.
+이 receipt는 당시 원래 receipt가 아니라 현재 계산 결과다. 사례/순서/최대10 HTTP/무재시도,
+중대한 오류와 필수 비교 미관측의 HOLD 기준은 v1보다 완화하지 않는다. 수익 개선은 미입증이다.

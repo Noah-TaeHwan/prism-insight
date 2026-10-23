@@ -14,11 +14,11 @@ from live.scenario_contract import identity_fields
 def test_user_approved_flexible_management_prompt_version_is_pinned():
     import hashlib
     from live.scenario_llm import FLAT_ENTRY_PROMPT
-    # 2026-10-23: flat entry-location comparison only; holding/risk/goal unchanged.
+    # 2026-10-23 v2: flat entry-location/phase evidence; holding/risk/goal unchanged.
     expected = {
         'SYSTEM_PROMPT': '8c5053072a5284eb25d26de88a21574711663eca794da52296ee071f0978eb81',
         'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
-        'FLAT_ENTRY_PROMPT': '583e412be8406ad95514a10cb902397336a1fbaa243f7545ed0aa1e513fca0d5',
+        'FLAT_ENTRY_PROMPT': 'b63822d013f683b360fdf545ac22e10dbd5cf29d5649f440acaec99ff658d1df',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
                          ('FLAT_ENTRY_PROMPT', FLAT_ENTRY_PROMPT)]:

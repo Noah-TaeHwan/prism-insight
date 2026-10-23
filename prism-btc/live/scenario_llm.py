@@ -533,8 +533,11 @@ momentum: an hours-old baseline price alone is not a momentum veto for either
 LONG or SHORT. Still cite required exact changed paths and assess their meaning;
 first observation remains WAIT and a numeric change alone never grants an edge.
 Judge current 30m/1h structure, MA slopes, observed forming progress and recent
-confirmed 15m bars. Ground price/MA claims in current_primary_frame_facts, derived
-from the same forming observations: bearish MA order is NOT price below both MAs;
+confirmed 15m bars. current_primary_frame_facts is FORMING_LAST_CLOSE, not confirmed
+OHLC; confirmed OHLC comes from timestamped recent_confirmed_bars or CONFIRMED points.
+A confirmed-to-forming change is provisional progress, not a confirmed-bar rise/fall;
+do not invent a confirmed.close path. Keep each claim's timeframe, phase and source
+together: bearish MA order is NOT price below both MAs;
 BETWEEN is not BELOW. Missing facts stay unknown, not an entry veto. Mixed price
 position can still support a trade with other concrete evidence, not fabricated alignment.
 Before opportunity framing, compare actual 30m/1h highs/lows, price progress,
@@ -574,9 +577,12 @@ for entry before the ORIGINAL next-decision deadline, and WAIT, symmetrically.
 A trigger is an activation condition, not a better entry price or proof against chasing.
 In DRAFT use the original proposed limit/worst permitted entry price; do not anticipate
 host price adjustments. In calculated SELECT use the supplied effective_plan entry price,
-not the trigger or current MarkPrice. From that entry compare the first evidenced reaction
-zone, if any, and TP: distinguish already-travelled progress from remaining room and explain any
-required passage using current evidence, not direction alone. Smaller quantity or a nearer
+not the trigger or current MarkPrice. With an eligible flat OPEN, even when selecting WAIT,
+connect that entry cap, first TP and first evidenced reaction zone, if any, in the
+existing rationale as decision evidence: explain their actual relative order and any
+required passage. No intervening zone or unknown zone evidence is valid; never invent one.
+No candidate or first observation: do not invent a plan to compare. Distinguish already-travelled
+progress from remaining room using current evidence, not direction alone. Smaller quantity or a nearer
 TP does not repair an unsupported location. If current evidence justifies entry, a strong
 immediate break or valid numeric crossing remains allowed; do not demand another close,
 new low/high or retest by habit. No fixed distance, minimum reward/risk, or automatic
