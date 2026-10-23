@@ -36,7 +36,16 @@ if str(ROOT) not in sys.path:
 
 from prism_core import core_hold as C  # noqa: E402
 
-TABLES = {"KR": ("stock_holdings", "trading_history"), "US": ("us_stock_holdings", "us_trading_history")}
+_OPEN_SQL = {
+    "KR": "SELECT ticker, company_name, buy_date, buy_price, scenario FROM stock_holdings",
+    "US": "SELECT ticker, company_name, buy_date, buy_price, scenario FROM us_stock_holdings",
+}
+_CLOSED_SQL = {
+    "KR": ("SELECT ticker, company_name, buy_date, buy_price, scenario, sell_date, sell_price, exit_kind "
+           "FROM trading_history WHERE sell_date >= ? ORDER BY sell_date"),
+    "US": ("SELECT ticker, company_name, buy_date, buy_price, scenario, sell_date, sell_price, exit_kind "
+           "FROM us_trading_history WHERE sell_date >= ? ORDER BY sell_date"),
+}
 REGISTERED = "2026-10-23"             # H-1023-corehold registration: daily population starts here
 HISTORY_PAD_DAYS = 340                # calendar days before the entry: MA200 + 20-session slope at session 40
 
@@ -51,15 +60,11 @@ def db_path():
 
 def load_positions(market, since, path=None):
     """Open holdings plus trades sold on/after ``since``, one per (ticker, buy minute)."""
-    holdings, history = TABLES[market]
     conn = sqlite3.connect(f"file:{path or db_path()}?mode=ro", uri=True, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
-        rows = [dict(r, sell_date=None, sell_price=None, exit_kind=None) for r in conn.execute(
-            f"SELECT ticker, company_name, buy_date, buy_price, scenario FROM {holdings}")]  # noqa: S608
-        rows += [dict(r) for r in conn.execute(
-            f"SELECT ticker, company_name, buy_date, buy_price, scenario, sell_date, sell_price, exit_kind "  # noqa: S608
-            f"FROM {history} WHERE sell_date >= ? ORDER BY sell_date", (since,))]
+        rows = [dict(r, sell_date=None, sell_price=None, exit_kind=None) for r in conn.execute(_OPEN_SQL[market])]
+        rows += [dict(r) for r in conn.execute(_CLOSED_SQL[market], (since,))]
     finally:
         conn.close()
     seen, out = set(), []
