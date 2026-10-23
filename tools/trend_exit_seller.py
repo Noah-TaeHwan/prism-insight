@@ -611,8 +611,11 @@ async def _run_market(market: str, run_id: str) -> Dict[str, Any]:
                             should_sell, reason = evaluate_oneil_sell(inp)
                             if view is not None and view.get("phase"):
                                 if view.get("exit"):
-                                    signals.append((rows, h, runner_hold.exit_reason(
-                                        view, market, "en" if market == "US" else "ko"), True))
+                                    language = "en" if market == "US" else "ko"
+                                    reason_text = (core_hold_live.exit_reason(view, market, language)
+                                                   if view.get("kind") == "core"
+                                                   else runner_hold.exit_reason(view, market, language))
+                                    signals.append((rows, h, reason_text, True))
                                 elif bool(should_sell) and _is_trend_exit_signal(reason):
                                     summary["runner_held"] += 1
                                     _log_runner_hold(market, ticker, h, reason, cur_price, view)

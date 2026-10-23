@@ -280,7 +280,10 @@ async def review_holding(agent, market, stock, *, logger=None, now=None):
     from prism_core import core_hold_live
     core = core_hold_live.view(stock, market)
     if core is not None and getattr(agent, "_no_order_effects", None) is None:
-        stock[CTX_KEY] = core                 # a core holding: the core rule replaces the runner rule
+        stock[CTX_KEY] = core                 # staged trust / core: that rule replaces the runner rule
+        if core.get("exit"):
+            log.warning("[CORE_HOLD][%s] %s pending exit code=%s", market, stock.get("ticker"), core["exit"])
+            return core_hold_live.exit_reason(core, market, "en" if market == "US" else "ko")
         return None
     if not R.enabled(market) or getattr(agent, "_no_order_effects", None) is not None:
         return None
@@ -424,8 +427,8 @@ def guard_result(agent, market, stock, should_sell, reason, *, logger=None):
     if not should_sell or getattr(agent, "_no_order_effects", None) is not None:
         return should_sell, reason
     view = _protected(stock, market)
-    if view is None:
-        return should_sell, reason
+    if view is None or (view.get("kind") == "core" and view.get("exit")):
+        return should_sell, reason            # unprotected, or a pending staged-trust exit
     allow, code = R.sell_verdict(protected=True, exit_code=view.get("exit"), current_price=stock.get("current_price"),
                                  stop_loss=stock.get("stop_loss"), buy_price=stock.get("buy_price"), reason=reason)
     if allow:
@@ -459,7 +462,7 @@ def guard_decision(agent, market, stock, decision, *, logger=None):
                           "new_target_price": adjustment.get("new_target_price"),
                           "reason": str(adjustment.get("reason") or "")[:200]})
         decision["portfolio_adjustment"] = dict(adjustment, needed=False, new_stop_loss=None, new_target_price=None)
-    if not decision.get("should_sell"):
+    if not decision.get("should_sell") or (view.get("kind") == "core" and view.get("exit")):
         return decision
     reason = decision.get("sell_reason")
     allow, code = R.sell_verdict(protected=True, exit_code=view.get("exit"), current_price=stock.get("current_price"),

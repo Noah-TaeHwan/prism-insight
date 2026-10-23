@@ -434,7 +434,8 @@ def record(market, results, *, today, dry_run=False):
 
 
 def apply_live(market, results, *, dry_run=False):
-    """CORE_HOLD_LIVE_ENABLED only: promotions and stops on the holding rows (prism_core/core_hold_live.py).
+    """CORE_HOLD_LIVE_ENABLED only: staged trust, promotions and stops on the holding rows
+    (prism_core/core_hold_live.py).
 
     Returns None when LIVE is off for the market, else the list of actions. Never raises."""
     from prism_core import core_hold_live
@@ -443,8 +444,10 @@ def apply_live(market, results, *, dry_run=False):
     from prism_core.ops_alert import send_ops_alert_sync
     try:
         conn = sqlite3.connect(db_path(), timeout=30)
+        regimes = load_regimes(market)
         try:
-            actions = core_hold_live.apply_live(conn, market, results, {r["key"]: r.get("_bars") or [] for r in results},
+            actions = core_hold_live.apply_live(conn, market, {r["key"]: r.get("_bars") or [] for r in results},
+                                                regimes=lambda day: regime_at(regimes, market, day),
                                                 alert=send_ops_alert_sync)
         finally:
             conn.close()
