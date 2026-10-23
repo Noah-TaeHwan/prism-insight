@@ -270,3 +270,36 @@ def test_english_rendering_for_en_reports():
     assert "Target's revenue growth (latest quarter YoY) is 35.6%, 18.0pp above the peer median (17.6%)." in text
     assert "EV/Sales of 22.3x is a 193% premium to the peer median (7.6x)." in text
     assert not any("\uac00" <= ch <= "\ud7a3" for ch in text)
+
+
+def _fake_yfinance(monkeypatch, answers):
+    import sys
+    import types
+    calls = []
+
+    class Ticker:
+        def __init__(self, symbol):
+            calls.append(symbol)
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            self.info = answer
+
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=Ticker))
+    monkeypatch.setattr(peers, "_INFO_RETRY_DELAY", 0)
+    return calls
+
+
+def test_yf_info_refetches_a_quote_only_answer_after_a_crumb_rejection(monkeypatch):
+    """2026-10-23: a 401 Invalid Crumb left a peer with quote fields only (no sector or margins)."""
+    full = {"maxAge": 86400, "quoteType": "EQUITY", "sector": "Technology", "grossMargins": .4}
+    calls = _fake_yfinance(monkeypatch, [{"quoteType": "EQUITY", "marketCap": 1e10}, full])
+    assert peers._yf_info("MU") == full and calls == ["MU", "MU"]
+
+
+def test_yf_info_refetches_after_both_endpoints_failed_and_keeps_a_full_answer(monkeypatch):
+    full = {"maxAge": 1, "quoteType": "EQUITY"}
+    calls = _fake_yfinance(monkeypatch, [TypeError("'NoneType' is not iterable"), full])
+    assert peers._yf_info("AXTI") == full and calls == ["AXTI", "AXTI"]
+    calls = _fake_yfinance(monkeypatch, [full])
+    assert peers._yf_info("NET") == full and calls == ["NET"]  # no second lookup when complete

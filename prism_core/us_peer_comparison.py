@@ -24,6 +24,7 @@ _PERPLEXITY_TIMEOUT = 20
 _TICKER_TIMEOUT = 12
 _BUDGET_SECONDS = 40
 _CONCURRENCY = 3
+_INFO_RETRY_DELAY = 1.0
 _MAX_PEERS = 4
 _MAX_CANDIDATES = 6
 # US size window (differs from KR's 10% floor): real US rivals are often far smaller than
@@ -487,8 +488,23 @@ async def perplexity_candidates(ticker, company, asof, *, key=None, timeout=_PER
 
 
 def _yf_info(ticker):
+    """yfinance info, fetched once more when Yahoo rejected the shared crumb.
+
+    On a 401 (Invalid Crumb) yfinance logs the error and returns only the quote endpoint's
+    fields (no sector, industry, margins or revenue), or raises when both endpoints failed.
+    Concurrent lookups share one crumb, so a second lookup a moment later usually succeeds
+    (2026-10-23 AXTI/MU peers). Every quoteSummary module carries ``maxAge``; its absence
+    marks the partial answer.
+    """
     import yfinance as yf
-    return yf.Ticker(ticker).info or {}
+    try:
+        info = yf.Ticker(ticker).info or {}
+    except Exception:  # noqa: BLE001 - both endpoints rejected; fetched once more below
+        info = {}
+    if "maxAge" not in info:
+        time.sleep(_INFO_RETRY_DELAY)
+        info = yf.Ticker(ticker).info or {}
+    return info
 
 
 def _yf_statements(ticker):
