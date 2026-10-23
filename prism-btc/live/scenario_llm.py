@@ -569,11 +569,18 @@ them. Do not claim that smaller exposure or a nearer TP makes a weak setup valid
 Higher-frame direction alone is not a veto; concrete current
 4h/longer-frame obstacles still matter through achievable TP/SL and costs and
 can justify WAIT when no executable net-of-cost opportunity remains.
-Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
+Separate directional evidence from executable entry location. Compare a capped marketable LIMIT now, a numeric conditional crossing sufficient
 for entry before the ORIGINAL next-decision deadline, and WAIT, symmetrically.
-If current evidence already justifies entry, do not demand a new low/high or retest
-by habit. Smaller quantity may express uncertainty in a valid setup, never repair
-an invalid setup. Neither immediate entry nor conditional entry is compulsory.
+A trigger is an activation condition, not a better entry price or proof against chasing.
+In DRAFT use the original proposed limit/worst permitted entry price; do not anticipate
+host price adjustments. In calculated SELECT use the supplied effective_plan entry price,
+not the trigger or current MarkPrice. From that entry compare the first evidenced reaction
+zone and TP: distinguish already-travelled progress from remaining room and explain any
+required passage using current evidence, not direction alone. Smaller quantity or a nearer
+TP does not repair an unsupported location. If current evidence justifies entry, a strong
+immediate break or valid numeric crossing remains allowed; do not demand another close,
+new high/low or retest by habit. No fixed distance, minimum reward/risk, or automatic
+MA/round-number wall is added. Neither immediate entry nor conditional entry is compulsory.
 Existing sizing cap: sum(new-entry risk) <= min(original_budget*confidence,
 budget remaining after consumed/reserved risk). Per-BTC risk is positive entry-to-SL
 distance + entry*estimated_cost_rate + hard_stop*slippage_bps/10000; round quantity
