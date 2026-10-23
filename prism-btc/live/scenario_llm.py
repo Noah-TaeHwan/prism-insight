@@ -973,6 +973,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
     # Do not recycle retired-timeframe narratives into new-policy judgments.
     # Preserve the original audit context and all structured order/risk evidence.
     model_context = dict(context)
+    model_context.pop('seen_action_ids', None)
     model_context.pop('entry_goal_source', None)
     model_context.pop('entry_goal_decision_slot', None)
     model_context["ma_structure"] = build_ma_structure_context(snapshot, context)

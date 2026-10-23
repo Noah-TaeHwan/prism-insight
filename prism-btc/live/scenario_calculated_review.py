@@ -522,6 +522,7 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
 
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
     model_context = deepcopy(context)
+    model_context.pop('seen_action_ids', None)
     model_context.pop('entry_goal_source', None)
     model_context.pop('entry_goal_decision_slot', None)
     recovery = context.get("recovery") or {}
