@@ -1,7 +1,7 @@
 """Today's US theme flow for the US signal alert (roadmap U4, KR mirror: kr_market_theme_flow / kr_theme_brief).
 
 The US theme map (runtime/us_theme_map_vN.json, ~1,000 names) is too large to quote at alert time on the db-server
-(about three minutes through yfinance), so `tools/build_us_theme_flow.py` runs a few minutes before each US batch and
+(several minutes of KIS daily quotes), so `tools/build_us_theme_flow.py` runs a few minutes before each US batch and
 writes runtime/us_theme_flow.json. The alert renders that file when it is fresh and otherwise keeps the industry-ETF
 line (prism_core/us_sector_brief.py). Deterministic, no model call. Descriptive only: never a trading input, and a
 headline is shown as a related title, not as the cause.

@@ -6,7 +6,7 @@ Weekly Market Facts — 검증된 수치 근거 블록 생성
 웹 검색 결과에서 뽑으면 안 된다. 블로그·커뮤니티 글이 검색 상위에 올라오면
 LLM이 그 숫자를 그대로 인용해 사실과 다른 리포트가 나온다.
 
-이 모듈은 KIS / yfinance에서 직접 원천 데이터를 가져와
+이 모듈은 KIS(국내·해외 시세)에서 직접 원천 데이터를 가져와
 LLM에게 "이 숫자만 써라"라고 전달할 수 있는 텍스트 블록을 만든다.
 
 모든 조회는 fail-soft: 실패하면 해당 항목만 빠지고 리포트 생성은 계속된다.
@@ -378,15 +378,11 @@ def resolve_recent_us_sessions(
     KR 과 같은 이유로 달력 계산 대신 지수 인덱스를 신뢰한다. 미국 공휴일은
     한국과 겹치지 않으므로 시장별로 따로 풀어야 한다.
     """
-    try:
-        import yfinance as yf
-    except ImportError:
-        logger.warning("[facts] yfinance not installed — US session lookup skipped")
-        return None
+    from prism_core.us_market_data import history
 
     today = today or datetime.now().date()
     try:
-        hist = yf.Ticker("^GSPC").history(
+        hist = history("^GSPC",
             start=(today - timedelta(days=lookback_days)).strftime("%Y-%m-%d"),
             end=(today + timedelta(days=2)).strftime("%Y-%m-%d"),
         )
@@ -411,11 +407,7 @@ def build_us_facts(
     if kind not in _PERIOD_LABELS:
         raise ValueError(f"unknown kind {kind!r}; expected 'weekly' or 'daily'")
     labels = _PERIOD_LABELS[kind]
-    try:
-        import yfinance as yf
-    except ImportError:
-        logger.warning("[facts] yfinance not installed — US facts skipped")
-        return ""
+    from prism_core.us_market_data import history
 
     lines: list[str] = []
     # 미국장은 한국 대비 하루 늦게 마감되므로 여유를 둔다
@@ -424,7 +416,7 @@ def build_us_facts(
 
     for name, ticker in _US_TICKERS:
         try:
-            hist = yf.Ticker(ticker).history(start=fetch_start, end=fetch_end)
+            hist = history(ticker, start=fetch_start, end=fetch_end)
             if hist is None or hist.empty:
                 continue
 
@@ -458,7 +450,7 @@ def build_us_facts(
             logger.warning(f"[facts] {name} fetch failed: {e}")
 
     if not lines:
-        logger.warning("[facts] US facts empty — yfinance 조회 전부 실패")
+        logger.warning("[facts] US facts empty — KIS 해외 시세 조회 전부 실패")
         return ""
 
     period_text = (
@@ -466,7 +458,7 @@ def build_us_facts(
         else f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d}"
     )
     header = (
-        f"[검증된 시장 데이터 — yfinance 원천 조회, {period_text}]\n"
+        f"[검증된 시장 데이터 — KIS 해외 시세 원천 조회, {period_text}]\n"
         "아래 수치는 시장 데이터에서 직접 조회한 확정값이다.\n"
         "지수 레벨·등락률은 반드시 아래 값만 사용하고, 웹 검색 결과의 다른 숫자는 무시하라.\n"
     )

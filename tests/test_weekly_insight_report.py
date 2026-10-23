@@ -129,9 +129,9 @@ def test_invalid_sell_prices_are_unknown(report, tmp_path, monkeypatch, market, 
     table = "trading_history" if market == "KR" else "us_trading_history"
     with sqlite3.connect(path) as conn:
         conn.execute(f"INSERT INTO {table} VALUES ('DGX', 'Quest', 236, ?, -1.5, 1, ?, 'demo', NULL)", (sell_price, datetime.now().isoformat()))
-    yf = types.ModuleType("yfinance")
-    yf.download = lambda *a, **kw: {"Close": types.SimpleNamespace(iloc={-1: current_price})}
-    monkeypatch.setitem(sys.modules, "yfinance", yf)
+    import pandas as pd
+    import prism_core.us_market_data as us_market_data
+    monkeypatch.setattr(us_market_data, "history", lambda *a, **kw: pd.DataFrame({"Close": [current_price]}))
     helpers = types.ModuleType("tracking.helpers")
     helpers.get_requested_session_prices = lambda tickers: {"DGX": current_price}
     monkeypatch.setitem(sys.modules, "tracking.helpers", helpers)
@@ -151,15 +151,15 @@ def test_sell_observation_rendered_without_network(report, tmp_path, monkeypatch
     make_db(path)
     with sqlite3.connect(path) as conn:
         conn.execute("INSERT INTO us_trading_history VALUES ('DGX', 'Quest', 236, 232.46, -1.5, 1, ?, 'demo', NULL)", (datetime.now().isoformat(),))
-    yf = types.ModuleType("yfinance")
+    import pandas as pd
+    import prism_core.us_market_data as us_market_data
 
-    def download(*args, **kwargs):
+    def history(*args, **kwargs):
         if not price_available:
             raise RuntimeError("private diagnostic must not appear in message")
-        return {"Close": types.SimpleNamespace(iloc={-1: 236.32})}
+        return pd.DataFrame({"Close": [236.32]})
 
-    yf.download = download
-    monkeypatch.setitem(sys.modules, "yfinance", yf)
+    monkeypatch.setattr(us_market_data, "history", history)
     message = asyncio.run(report.generate_weekly_report(str(path)))
     assert "매도 후 가격 관측" in message
     assert "적절한 매도" not in message

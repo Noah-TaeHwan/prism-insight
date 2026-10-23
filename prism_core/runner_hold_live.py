@@ -62,14 +62,13 @@ def fetch_daily_bars(market, ticker, now=None):
     """Raw (unadjusted where the provider allows) daily OHLCV [{date, open, high, low, close, volume}].
 
     Blocking network call; callers run it in a thread. KR uses the repository KIS
-    market data, US uses yfinance with auto_adjust=False.
+    market data, US the KIS overseas daily prices (split-adjusted, not dividend-adjusted).
     """
     end = (now or _now()).date()
     start = end - timedelta(days=HISTORY_DAYS)
     if str(market).upper() == "US":
-        import yfinance as yf
-        frame = yf.Ticker(ticker).history(start=start.isoformat(), end=(end + timedelta(days=1)).isoformat(),
-                                          auto_adjust=False)
+        from prism_core.us_market_data import daily_history
+        frame = daily_history(ticker, start, end)
     else:
         from cores import market_data
         frame = market_data.get_market_ohlcv_by_date(start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), ticker,
@@ -97,14 +96,13 @@ def _frame_bars(frame):
 
 
 def fetch_index_bars(market, now=None):
-    """Daily index closes for the relative-weakness exit: KR KOSPI (KIS 1001), US SPY (yfinance)."""
+    """Daily index closes for the relative-weakness exit: KR KOSPI (KIS 1001), US SPY (KIS overseas)."""
     end = (now or _now()).date()
     start = end - timedelta(days=HISTORY_DAYS)
     symbol = R.INDEX_SYMBOL[str(market).upper()]
     if str(market).upper() == "US":
-        import yfinance as yf
-        return _frame_bars(yf.Ticker(symbol).history(start=start.isoformat(),
-                                                     end=(end + timedelta(days=1)).isoformat(), auto_adjust=False))
+        from prism_core.us_market_data import daily_history
+        return _frame_bars(daily_history(symbol, start, end))
     from cores import market_data
     return _frame_bars(market_data.get_index_ohlcv_by_date(start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), symbol))
 

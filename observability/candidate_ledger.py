@@ -499,11 +499,11 @@ def _default_fetcher(market: str) -> Callable[[str, str, str], pd.DataFrame]:
             return get_market_ohlcv_by_date(start.replace("-", ""), end.replace("-", ""), ticker)
         return fetch_kr
 
-    import yfinance as yf
+    from prism_core.us_market_data import history
 
     def fetch_us(ticker, start, end):
         stop = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
-        return yf.Ticker(ticker).history(start=start, end=stop, auto_adjust=True)
+        return history(ticker, start=start, end=stop, auto_adjust=True)
     return fetch_us
 
 

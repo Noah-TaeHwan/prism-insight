@@ -1,8 +1,8 @@
 """Today's strong US industries for the US signal alert (quick version before roadmap U1~U4).
 
 KR shows "오늘 돈이 몰린 테마" from its own news store and theme map (prism_core/kr_theme_brief.py). US has
-neither yet, so this block uses industry ETFs: their change versus the previous close at alert time, from one
-yfinance download. Deterministic, no model call; any failure returns "" and the alert goes out without it.
+neither yet, so this block uses industry ETFs: their change versus the previous close at alert time, from KIS
+daily quotes. Deterministic, no model call; any failure returns "" and the alert goes out without it.
 """
 from __future__ import annotations
 
@@ -45,9 +45,8 @@ ETFS = {
 
 
 def _download(tickers):
-    import yfinance as yf
-    return yf.download(tickers, period="5d", interval="1d", auto_adjust=False, actions=False,
-                       progress=False, threads=False, timeout=15, group_by="ticker")
+    from prism_core.us_market_data import download
+    return download(tickers, period="5d", auto_adjust=False)
 
 
 def etf_changes(trade_date: str, download=_download) -> list[tuple[str, float]]:

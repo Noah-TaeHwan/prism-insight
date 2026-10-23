@@ -86,9 +86,13 @@ def test_invalid_fresh_buy_quote_is_rejected(value):
 
 @pytest.mark.asyncio
 async def test_independent_quote_has_no_previous_close_or_db_fallback(monkeypatch):
-    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(
-        Ticker=lambda ticker: types.SimpleNamespace(info={"previousClose": 100})
-    ))
+    import prism_core.us_market_data as market_data
+
+    def current_quote(symbol, allow_previous_close=False):
+        # Only a previous close exists; the BUY refresh must not accept it.
+        return 100.0 if allow_previous_close else None
+
+    monkeypatch.setattr(market_data, "current_quote", current_quote)
     agent = Agent.__new__(Agent)
     with pytest.raises(ValueError):
         await agent._refresh_buy_quote("AAPL")
