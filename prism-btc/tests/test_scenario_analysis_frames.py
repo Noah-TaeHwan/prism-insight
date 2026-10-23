@@ -18,7 +18,8 @@ def source():
             'recovery': {key: {'timeframes.15m.forming.close': 777, 'timeframes.30m.forming.close': 100}
                          for key in ('baseline','current','changed_evidence')}},
         response_contract={'properties': {'frame': {'enum':['15m','30m','1h']},
-            'changed_evidence':{'items':{'enum':['timeframes.15m.forming.close','timeframes.30m.forming.close']}}}})
+            'recovery':{'anyOf':[{'properties':{'changed_evidence':{'items':{
+                'enum':['timeframes.15m.forming.close','timeframes.30m.forming.close']}}}}]}}})
 
 
 def test_model_view_removes_direct_and_derived_15m_without_source_mutation():
@@ -37,7 +38,7 @@ def test_model_view_removes_direct_and_derived_15m_without_source_mutation():
     assert '15m' not in ctx['current_primary_frame_facts']
     assert all('timeframes.15m.forming.close' not in ctx['recovery'][key] for key in ('baseline','current','changed_evidence'))
     assert view['response_contract']['properties']['frame']['enum']==['30m','1h']
-    assert view['response_contract']['properties']['changed_evidence']['items']['enum']==['timeframes.30m.forming.close']
+    assert view['response_contract']['properties']['recovery']['anyOf'][0]['properties']['changed_evidence']['items']['enum']==['timeframes.30m.forming.close']
 
 
 def test_lower_frame_perturbation_cannot_change_current_judgment_facts():
@@ -239,3 +240,25 @@ def test_collection_issue_details_are_not_signals_and_invalid_source_stays_inval
     assert view['valid'] is False and view['as_of_ms']==123
     assert view['issues']==['NON_ANALYSIS_COLLECTION_ISSUE_DETAIL_OMITTED','30m:missing_forming']
     assert raw==before
+
+
+def test_frame_policy_never_filters_opaque_identity_enums():
+    raw=source()
+    identities={'input_id':{'enum':['15m']},'action_id':{'enum':['timeframes.15m.forming.close']},
+        'scenario_id':{'enum':['same_progress_profile']}}
+    raw['response_contract']={'properties':dict(identities,candidates={'items':{'properties':deepcopy(identities)}})}
+    before=deepcopy(raw)
+    result=analysis_model_view(raw)['response_contract']['properties']
+    for key, value in identities.items():
+        assert result[key]==value
+        assert result['candidates']['items']['properties'][key]==value
+    assert raw==before
+
+
+def test_only_recovery_changed_evidence_enum_is_filtered():
+    item={'items':{'enum':['timeframes.15m.forming.close','timeframes.30m.forming.close']}}
+    recovery={'anyOf':[{'properties':{'changed_evidence':deepcopy(item)}}]}
+    raw={'response_contract':{'properties':{'changed_evidence':deepcopy(item),'recovery':recovery}}}
+    result=analysis_model_view(raw)['response_contract']['properties']
+    assert result['changed_evidence']==item
+    assert result['recovery']['anyOf'][0]['properties']['changed_evidence']['items']['enum']==['timeframes.30m.forming.close']

@@ -30,16 +30,23 @@ def allowed_evidence_path(path):
             and (not path.startswith('timeframes.') or len(parts) > 1 and parts[1] in ANALYSIS_FRAMES))
 
 
-def _schema_frames(value):
+def _schema_frames(value, *, field=None, recovery=False):
     if isinstance(value, dict):
-        if isinstance(value.get('enum'), list):
-            value['enum'] = [v for v in value['enum'] if v != '15m'
-                             and (not isinstance(v, str) or allowed_evidence_path(v))]
-        for child in value.values():
-            _schema_frames(child)
+        if field == 'frame' and isinstance(value.get('enum'), list):
+            value['enum'] = [v for v in value['enum'] if v != '15m']
+        if recovery and field == 'changed_evidence':
+            items = value.get('items')
+            if isinstance(items, dict) and isinstance(items.get('enum'), list):
+                items['enum'] = [v for v in items['enum'] if allowed_evidence_path(v)]
+        for key, child in value.items():
+            if key == 'properties' and isinstance(child, dict):
+                for name, schema in child.items():
+                    _schema_frames(schema, field=name, recovery=recovery or name == 'recovery')
+            else:
+                _schema_frames(child, field=field, recovery=recovery or key == 'recovery')
     elif isinstance(value, list):
         for child in value:
-            _schema_frames(child)
+            _schema_frames(child, field=field, recovery=recovery)
 
 
 def analysis_model_view(payload):
