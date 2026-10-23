@@ -32,7 +32,9 @@ def test_prior_opinion_is_bounded_detached_and_survives_both_review_phases():
                             source="HISTORICAL_MODEL_OPINION")
     for candidates in (None, {}):
         payload = _model_payload(dict(valid=True), ctx, {}, calculated_candidates=candidates)
-        assert restore_model_input(payload)["contract_context"]["previous_thesis_assessment"] == previous
+        assert restore_model_input(payload)["contract_context"]["previous_thesis_assessment"] == dict(
+            previous, reason='OMITTED_RETIRED_TIMEFRAME_OPINION')
+        assert previous['reason'] == original['last_thesis_assessment']['reason']
     previous["reason"] = "changed copy"
     assert state == original
 

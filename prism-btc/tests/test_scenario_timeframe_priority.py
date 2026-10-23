@@ -18,7 +18,8 @@ def test_priority_and_missing_frames_are_explicit_in_model_payload():
     data = restore_model_input(_model_payload(snap, ctx, {}))['contract_context']['ma_structure']
     assert data['decision_priority'] == dict(
         descending=['1h', '30m', '4h', '12h', '1d', '1w'],
-        timing_only='15m', interpretation='QUALITATIVE_EMPHASIS_NOT_PROBABILITY_OR_VETO')
+        timing_only=[], interpretation='QUALITATIVE_EMPHASIS_NOT_PROBABILITY_OR_VETO')
+    assert '15m' not in data['primary']
     for frame in ('4h', '12h', '1d', '1w'):
         higher = data['higher_frames'][frame]
         assert higher['status'] == 'available'
@@ -37,7 +38,7 @@ def test_missing_higher_frames_not_invented_from_priority():
 
 def test_order_is_shared_instruction_without_higher_frame_veto():
     assert '1h > 30m > 4h > 12h > 1d > 1w' in SYSTEM_PROMPT
-    assert '15m is a timing aid, not the highest directional weight' in SYSTEM_PROMPT
+    assert 'Do not use 15m, including timing or management' in SYSTEM_PROMPT
     assert 'not calibrated numeric weights or independent votes' in SYSTEM_PROMPT
     assert 'NOT a veto' in SYSTEM_PROMPT
     assert 'especially 1h with 30m confirmation/conflict' in MA_STRUCTURE_PROMPT

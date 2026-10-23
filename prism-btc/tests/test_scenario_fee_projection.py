@@ -170,6 +170,9 @@ def test_full_holding_two_candidate_select_fee_views_fit_and_restore(target_coun
     wait['expires_at']=now+300
     originals=[]
     sizes=[]
+    if target_count==20:
+        # Keep this overflow fixture above the cap after retiring lower-frame input.
+        ctx['capacity_fixture_padding']='x'*64
     def without_fee_additions(value):
         if isinstance(value,list):
             return [without_fee_additions(item) for item in value]
@@ -211,7 +214,7 @@ def test_full_holding_two_candidate_select_fee_views_fit_and_restore(target_coun
             body=dict(selection_token=f"{choice['id']}:{choice['receipt_sha256']}",rationale='cost review')
         return SimpleNamespace(text=json.dumps(body))
     if target_count==20:
-        # The legal array bound was already too large for this full market shape.
+        # This padded legal-array fixture exceeds the existing input cap.
         # Retain the cap; do not truncate financial facts or call SELECT anyway.
         with pytest.raises(ValueError,match='research_input_size'):
             review.research_review(market,ctx,response_contract(ctx),generate=generate,record=lambda event:None,clock=lambda:now)
