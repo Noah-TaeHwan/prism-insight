@@ -18,7 +18,7 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     expected = {
         'SYSTEM_PROMPT': '8c5053072a5284eb25d26de88a21574711663eca794da52296ee071f0978eb81',
         'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
-        'FLAT_ENTRY_PROMPT': 'ff314429dda77d2808713f27da1aaf6d8a1bd803de90be8adf7b0583faf21dc1',
+        'FLAT_ENTRY_PROMPT': '583e412be8406ad95514a10cb902397336a1fbaa243f7545ed0aa1e513fca0d5',
     }
     for name, prompt in [('SYSTEM_PROMPT', SYSTEM_PROMPT), ('MA_STRUCTURE_PROMPT', MA_STRUCTURE_PROMPT),
                          ('FLAT_ENTRY_PROMPT', FLAT_ENTRY_PROMPT)]:
@@ -396,7 +396,7 @@ def test_assembled_entry_framing_is_flat_only_and_preserves_inputs(active, monke
         assert 'hours-old baseline price alone is not a momentum veto' in text
         assert 'capped marketable LIMIT now' in text
         assert 'new low/high or retest by habit' in text
-        assert 'never repair an invalid setup' in text
+        assert 'Smaller quantity or a nearer TP does not repair an unsupported location' in text
         assert 'do not move its goalposts without fresh counterevidence' in text
         assert 'Never invent an omitted prior condition' in text
         assert "Keep recovery's first-observation WAIT" in text

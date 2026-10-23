@@ -575,11 +575,11 @@ A trigger is an activation condition, not a better entry price or proof against 
 In DRAFT use the original proposed limit/worst permitted entry price; do not anticipate
 host price adjustments. In calculated SELECT use the supplied effective_plan entry price,
 not the trigger or current MarkPrice. From that entry compare the first evidenced reaction
-zone and TP: distinguish already-travelled progress from remaining room and explain any
+zone, if any, and TP: distinguish already-travelled progress from remaining room and explain any
 required passage using current evidence, not direction alone. Smaller quantity or a nearer
 TP does not repair an unsupported location. If current evidence justifies entry, a strong
 immediate break or valid numeric crossing remains allowed; do not demand another close,
-new high/low or retest by habit. No fixed distance, minimum reward/risk, or automatic
+new low/high or retest by habit. No fixed distance, minimum reward/risk, or automatic
 MA/round-number wall is added. Neither immediate entry nor conditional entry is compulsory.
 Existing sizing cap: sum(new-entry risk) <= min(original_budget*confidence,
 budget remaining after consumed/reserved risk). Per-BTC risk is positive entry-to-SL
