@@ -26,6 +26,13 @@ agentmemory와 과거 채팅은 이 문서로 찾아오는 안내일 뿐, 현재
 
 ## 2. 현재 위치
 
+2026-10-23 M0/M3/M4 거래 품질 후속(구현·검증 중): 사용자 승인으로 행동과 설명의
+귀속 경계 수리를 전략 자료 보완과 분리한다. 진입에서는 확정 종가열과 형성 움직임을
+구분하고, 보유 ADJUST에서는 실제 잔량의 TP/선택적 부분SL 경로에 기록 순손익을
+한 번만 반영하는 optional view를 검토한다. `BTC_ACTION_RATIONALE_BOUNDARY_20261023_ko.md`,
+`BTC_HOLDING_EXIT_PATHS_20261023_ko.md`를 따른다. 기존 위험·보호·FAILED EXIT·flat v2와
+미체결 예약을 보존한다. 부분SL 의무화·수익성 입증·배포 완료를 의미하지 않는다.
+
 2026-10-20 M0/M3/M4 구조화 목표 후속: 설명 지침만으로 원래 목표와 TP의 모순 인지가
 입증되지 않아 신규 opt-in OPEN에 entry contract v2 목표를 도입한다. 원래 입력의
 MA 값·시각·slot·해시와 host 공식 목표 문장을 고정하고 raw/effective 계획을 대조한다.
