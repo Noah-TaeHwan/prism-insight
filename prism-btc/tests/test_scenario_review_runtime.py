@@ -49,7 +49,8 @@ def wire(ctx, action):
     return result
 
 
-def runtime(tmp_path, *, change=None, tape_change=None, fail_second=False, empty=False, recovery=False):
+def runtime(tmp_path, *, change=None, tape_change=None, fail_second=False, empty=False, recovery=False,
+            candidate_action='OPEN', selection_reason='검산 확인'):
     now = [1800000000.]
     path = tmp_path / "runtime.db"
     broker = Broker(now[0])
@@ -66,14 +67,14 @@ def runtime(tmp_path, *, change=None, tape_change=None, fail_second=False, empty
         if "wait_proposal" in request["response_schema"]["properties"]:
             first = captured.get("recovery", {}).get("first_observation", False)
             result = dict(wait_proposal=wire(captured, "WAIT"),
-                candidates=[] if empty or first else [wire(captured, "OPEN")],
+                candidates=[] if empty or first else [wire(captured, candidate_action)],
                 no_candidate_reason="첫 관측 또는 구조 부족" if empty or first else "")
         else:
             if fail_second:
                 raise RuntimeError("model failed")
             data = json.loads(request["user_prompt"])["calculated_candidates"]
             chosen = data["candidates"][0]
-            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale="검산 확인")
+            result = dict(selection_token=f"{chosen['id']}:{chosen['receipt_sha256']}", rationale=selection_reason)
         return SimpleNamespace(text=json.dumps(result))
 
     adapter = make_calculated_review_proposer(generate=generate, clock=lambda: now[0])
@@ -93,6 +94,12 @@ def runtime(tmp_path, *, change=None, tape_change=None, fail_second=False, empty
         calculated_review_enabled=True, calculated_review_propose=proposed,
         recovery_enabled=recovery)
     r.test_clock = now
+    if candidate_action == 'EXIT':
+        state = r.state()
+        state['active'] = dict(scenario_id='existing', initial_equity=10000, side='LONG',
+            hard_stop=90, revision=0, created_at=now[0]-600, expires_at=now[0]+900)
+        r._save(state)
+        broker.ctx.update(positions=[dict(price=100, quantity=1)], previous_hard_stop=90)
     return r, broker, calls
 
 
@@ -105,13 +112,29 @@ def test_optin_complete_proof_before_simulated_intent(tmp_path):
     proposal = json.loads(r.conn.execute("SELECT proposal FROM llm_scenario_decisions").fetchone()[0])
     assert tape["outcome"]["status"] == "COMPLETE"
     assert proposal["action"] == "OPEN" and "operations" not in proposal
-    assert proposal["rationale"] == "검산 확인"
-    assert broker.executed[0]["rationale"] == "검산 확인"
+    assert proposal["rationale"] == "구조 판단"
+    assert broker.executed[0]["rationale"] == "구조 판단"
+    assert tape['outcome']['result']['selection']['rationale'] == '검산 확인'
     assert tape["outcome"]["result"]["selected"]["raw_proposal"]["rationale"] == "구조 판단"
     assert r.conn.execute("SELECT COUNT(*) FROM llm_scenario_intents").fetchone()[0] == 1
     final_receipt = json.loads(r.conn.execute("SELECT body FROM llm_scenario_review_events ORDER BY sequence DESC LIMIT 1").fetchone()[0])
     assert final_receipt["kind"] == "FINAL_FRESH_REVIEW_RECEIPT"
     assert final_receipt["atomic_with_intent"] is True
+
+
+def test_exit_with_hold_selection_prose_keeps_candidate_reason_in_saved_plan_and_intent(tmp_path):
+    reason='잔여 물량과 기존 보호 주문을 유지합니다.'
+    r,broker,calls=runtime(tmp_path,candidate_action='EXIT',selection_reason=reason)
+    assert r.tick()['status']=='intent_pending'
+    assert len(calls)==2
+    tape=json.loads(r.conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()[0])
+    selected=tape['outcome']['result']['selected']['raw_proposal']
+    proposal=json.loads(r.conn.execute('SELECT proposal FROM llm_scenario_decisions').fetchone()[0])
+    intent=json.loads(r.conn.execute('SELECT payload FROM llm_scenario_intents').fetchone()[0])
+    for plan in (proposal,intent,broker.executed[0]):
+        assert plan['action']=='EXIT'
+        assert plan['rationale']==selected['rationale']=='구조 판단'
+    assert tape['outcome']['result']['selection']['rationale']==reason
 
 
 def test_pre_call_oversize_keeps_failed_tape_but_reports_actual_input_error(tmp_path):

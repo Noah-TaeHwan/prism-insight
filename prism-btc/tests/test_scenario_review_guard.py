@@ -238,6 +238,7 @@ def test_final_explanation_returned_without_mutating_original_candidate():
     original_hash = receipt_hash(selected["raw_proposal"])
     assert selected["raw_proposal"]["rationale"] == "구조와 계산 검토"
     result = check(args)
-    assert result["payload"]["rationale"] == "계산 검토 완료"
-    assert result["validated"]["rationale"] == "계산 검토 완료"
+    assert result["payload"]["rationale"] == selected["raw_proposal"]["rationale"]
+    assert result["validated"]["rationale"] == selected["raw_proposal"]["rationale"]
+    assert args[3]['outcome']['result']['selection']['rationale'] == "계산 검토 완료"
     assert receipt_hash(selected["raw_proposal"]) == original_hash == selected["raw_sha256"]
