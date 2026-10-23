@@ -48,6 +48,8 @@ _ROWS = {
     "영업이익": "operating_income",
     "영업이익(발표기준)": "operating_income_reported",
     "당기순이익(지배)": "net_income_controlling",
+    "자본총계": "total_equity",
+    "부채비율": "debt_ratio",
     "영업이익률": "op_margin",
     "ROE(%)": "roe",
     "EPS(원)": "eps",

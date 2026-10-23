@@ -466,6 +466,15 @@ async def analyze_stock(company_code: str = "000660", company_name: str = "SK하
             financial_summary = await collect_wisereport_financial_summary(company_code, reference_date)
         except Exception as e:  # noqa: BLE001 - optional chart data
             logger.warning(f"Annual financial summary unavailable: {type(e).__name__}")
+        if report_meta is not None:
+            # buy_growth_facts_v1 from the quarterly and annual frames above (no extra fetch): decision ledger,
+            # and the BUY prompt only while PRISM_BUY_GROWTH_FACTS is on. Never a gate.
+            try:
+                from prism_core.buy_growth_facts import build as build_growth_facts
+                report_meta['growth_facts'] = build_growth_facts(quarterly_frame, financial_summary,
+                                                                 quarterly_reason=quarterly_reason)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Growth facts unavailable: {type(e).__name__}")
         market_cap_chart_is_earnings = False
 
         try:
