@@ -205,8 +205,9 @@ def test_runtime_one_logical_decision_one_order_with_two_attempts(monkeypatch, t
             calls.append(1)
             if len(calls) == 1:
                 raise http_error()
-            return Response(result([{'type': 'message', 'role': 'assistant',
-                'content': [{'type': 'output_text', 'text': json.dumps(output)}]}]))
+            return Response(dict(result([{'type': 'message', 'role': 'assistant',
+                'content': [{'type': 'output_text', 'text': json.dumps(output)}]}]),
+                model=json.loads(args[0].data)['model']))
         return propose(snapshot, context, response_contract(context), clock=lambda: 1800000000.,
             generate=partial(generate_scenario, retry_transport=True, open_url=open_url))
     runtime = ScenarioRuntime(conn, broker, proposal,
@@ -261,6 +262,77 @@ class Response:
     def read(self,limit):return json.dumps(self.result).encode()
 
 
+@pytest.mark.parametrize('model,effort', [('gpt-6.1-sol','low'), ('gpt-6-luna','high'), ('gpt-6-luna','xhigh')])
+def test_exact_approved_model_effort_pairs_keep_no_tools_and_no_default_retry(monkeypatch, model, effort):
+    monkeypatch.delenv('PRISM_BTC_SCENARIO_OAUTH_URL', raising=False)
+    calls = []
+    def open_url(request, timeout):
+        body = json.loads(request.data)
+        calls.append(body)
+        assert body['model'] == model and body['reasoning']['effort'] == effort
+        assert body['tools'] == [] and body['tool_choice'] == 'none'
+        assert timeout <= 75
+        return Response(dict(result(), model=model))
+    assert generate_scenario(system_prompt='test', user_prompt='test', model=model,
+        reasoning_effort=effort, fast_tier=True, timeout=75, open_url=open_url,
+        response_schema={'type':'object'}).text == '{}'
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('model,effort', [('gpt-6.1-sol','high'), ('gpt-6.1-sol','xhigh'),
+    ('gpt-6-luna','low'), ('gpt-6.1-sol','medium'), ('other','low')])
+def test_crossed_model_effort_pairs_are_rejected_before_transport(model, effort):
+    with pytest.raises(ValueError, match='scenario_model_policy'):
+        generate_scenario(system_prompt='test', user_prompt='test', model=model,
+            reasoning_effort=effort, fast_tier=True, timeout=75,
+            open_url=lambda *_args, **_kw: pytest.fail('transport must not run'), response_schema={'type':'object'})
+
+
+def test_sol_response_model_must_match_without_fallback(monkeypatch):
+    monkeypatch.delenv('PRISM_BTC_SCENARIO_OAUTH_URL', raising=False)
+    calls=[]
+    def open_url(*_args, **_kwargs):
+        calls.append(1)
+        return Response(result())  # Legacy Luna response cannot satisfy a Sol request.
+    with pytest.raises(ValueError, match='scenario_oauth_failed'):
+        generate_scenario(system_prompt='test', user_prompt='test', model='gpt-6.1-sol',
+            reasoning_effort='low', fast_tier=True, timeout=75, open_url=open_url, response_schema={'type':'object'})
+    assert len(calls)==1
+
+
+def test_operating_default_is_sol_low_for_both_calculated_phases():
+    from live.scenario_llm import MODEL, EFFORT, TIMEOUT_SECONDS
+    from tests.test_scenario_calculated_review import run
+    assert (MODEL, EFFORT, TIMEOUT_SECONDS) == ('gpt-6.1-sol', 'low', 75)
+    _, _, calls = run()
+    assert len(calls) == 2
+    assert all((c['model'], c['reasoning_effort'], c['retry_transport']) == ('gpt-6.1-sol','low',False) for c in calls)
+    assert all('combine transitions only when their respective before/after source values match' in c['system_prompt'] for c in calls)
+
+
+def test_sol_transport_failure_does_not_retry_or_fallback(monkeypatch):
+    monkeypatch.delenv('PRISM_BTC_SCENARIO_OAUTH_URL', raising=False)
+    calls=[]
+    def open_url(request, **_kwargs):
+        calls.append(json.loads(request.data)['model'])
+        raise http_error()
+    with pytest.raises(ValueError, match='scenario_oauth_failed'):
+        generate_scenario(system_prompt='test', user_prompt='test', model='gpt-6.1-sol',
+            reasoning_effort='low', fast_tier=True, timeout=75, open_url=open_url, response_schema={'type':'object'})
+    assert calls == ['gpt-6.1-sol']
+
+
+@pytest.mark.parametrize('override,code', [({'timeout':76},'scenario_timeout_policy'),
+    ({'fast_tier':False},'scenario_model_policy'), ({'mcp_profile':'tools'},'scenario_model_policy')])
+def test_sol_does_not_expand_timeout_or_tool_authority(override, code):
+    arguments=dict(system_prompt='test',user_prompt='test',model='gpt-6.1-sol',reasoning_effort='low',
+        fast_tier=True,timeout=75,response_schema={'type':'object'},
+        open_url=lambda *_a, **_kw: pytest.fail('transport must not run'))
+    arguments.update(override)
+    with pytest.raises(ValueError,match=code):
+        generate_scenario(**arguments)
+
+
 def result(output=None):
     return dict(model='gpt-6-luna',status='completed',output=output or [dict(type='message',role='assistant',content=[dict(type='output_text',text='{}')])])
 
@@ -282,7 +354,7 @@ def test_request_has_no_tools_no_keys_and_exact_model_tier(monkeypatch):
 @pytest.mark.parametrize('effort', ['high', 'xhigh'])
 def test_same_model_supports_only_approved_high_and_xhigh_payload(monkeypatch, effort):
     from live.scenario_llm import EFFORT
-    assert EFFORT == 'high'  # Adapter capability does not change operating policy.
+    assert EFFORT == 'low'  # Legacy adapter capability does not change operating policy.
     monkeypatch.delenv('PRISM_BTC_SCENARIO_OAUTH_URL', raising=False)
     calls = []
     def opener(request, timeout):

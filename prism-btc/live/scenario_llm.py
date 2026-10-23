@@ -10,8 +10,8 @@ from engine.scenario_ma_context import build_ma_structure_context
 from live.scenario_entry_display import project_entry_display_input
 from live.scenario_position_flow import project_position_flow_input
 
-MODEL = "gpt-6-luna"
-EFFORT = "high"
+MODEL = "gpt-6.1-sol"
+EFFORT = "low"
 TIMEOUT_SECONDS = 75
 MAX_RESPONSE_BYTES = 24_000
 
@@ -23,6 +23,7 @@ Use only the provided timestamped snapshot and verified account context.
 For timeframe price/MA citations in explanatory prose, prefer references such as
 [[TF:1h:forming:close]] instead of rewriting the number. Allowed frames are
 15m,30m,1h,4h,12h,1d,1w; phases confirmed/forming; fields close/ma10/ma35.
+Attribute changes separately by frame/phase; combine transitions only when their respective before/after source values match.
 The host can display separately labelled facts from that same frozen input;
 this does not verify the surrounding interpretation. References are optional,
 add no output fields and never change trade prices, actions or protection rules.

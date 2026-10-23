@@ -80,3 +80,27 @@ v3는 구현 전에 `btc_entry_location_prereg_v3_20261023.md`를 읽고 동결�
 schema·위험·집행은 바꾸지 않는다. 기존 두 FLAT 문단에는 표시 필드 참조만 연결했다.
 새 heading·추가 판단 관문·확률·방향 추천·자동 MA 장벽은 없다. 자유서술 정확성은 여전히
 보장되지 않으며 사전등록된 최대10회 진단과 독립 검토를 통과해야 제한적 데모 배포를 검토한다.
+
+## Sol low 운영 전환 검증
+사용자가 gpt-6.1-sol/low 운영 전환과 검증된 PR 배포를 승인했다.
+구현 전에 `btc_sol_release_prereg_20261023.md`를 읽고 고정했다. 이전 v1/v2/v3 및
+high/xhigh/Sol 단독 비교의 실패·미관측·HOLD는 변경하지 않는다.
+
+BTC 판단의 공통 MODEL/EFFORT만 Sol/low로 바꾼다. 초안·선택·보유·예약 판단은 같은
+상수를 사용하며, preview와 새 replay metadata도 현행 상수를 참조한다. 과거 저장된
+tape·등록·결과는 재작성하지 않는다. OAuth capability는 Sol/low와 명시적 이전 연구용
+Luna/high·xhigh 세 조합만 허용하며 교차 조합은 거부한다. 자동 fallback은 없다.
+기존 SYSTEM 인용 문단에 시간봉/phase별 수치 변화는 따로 귀속하고 각 원값이 같을 때만
+묶어 표현한다는 한 문장을 추가한다. 새 schema·검증 관문은 없다.
+
+고정 실제 연결은 flat5975519, flat5974593, holding5975523, pending5975511 순이다.
+과거 DRAFT를 주입하지 않고 각 원자료에서 새 DRAFT→호스트→SELECT를 운영 코드로 연결한다.
+원 context.now에 실제 monotonic 경과를 더한 하나의75초 예산을 지키며 HTTP 최대8회,
+재시도0·주문0·첫 기술 실패 중단이다. 정상 WAIT/후보 없음은 SELECT를 강제하지 않는다.
+flat 최소1건과 active 최소1건의 실제2단계 연결이 필요하며, 미관측 분기는 별도로 남긴다.
+출처·가격·시간봉·phase·권한 오류와 유효 OPEN의 위치 비교 누락을 통과로 채우지 않는다.
+실제 holding/pending 행동이 없으면 해당 분기의 offline 검증과 구분한다.
+
+75초·크기 한도·계산·위험·부분손절·FAILED 전량 EXIT·명시적 예약 갱신·보호는 유지한다.
+모니터링 모델/스케줄과 실자금은 변경하지 않는다. 정확한 head의 관련/전체 검사·CI·서버
+격리·독립 검토를 거쳐 Bybit demo만 배포하며 자연 판단과 수익성은 별도 확인한다.

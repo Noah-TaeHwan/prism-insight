@@ -16,7 +16,7 @@ def test_user_approved_flexible_management_prompt_version_is_pinned():
     from live.scenario_llm import FLAT_ENTRY_PROMPT
     # 2026-10-23 v3: flat source-labelled facts view; holding/risk/goal unchanged.
     expected = {
-        'SYSTEM_PROMPT': '8c5053072a5284eb25d26de88a21574711663eca794da52296ee071f0978eb81',
+        'SYSTEM_PROMPT': 'a0fc7fd8bc368ee578f2cac02add0059fcad64f754ded302a3c5330605b4c030',
         'MA_STRUCTURE_PROMPT': '6d87ac46b2c99eaf530d0ff8ee189a2feb5d3cbcb9c9ebf4f57cb4f47681b285',
         'FLAT_ENTRY_PROMPT': 'c0fbd35e3e020bab3c36bb21df30982025f82ae0c149f7ae9cc5d6e5a5e3a738',
     }
