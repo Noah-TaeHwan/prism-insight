@@ -270,7 +270,8 @@ def report(results, market, since):
             actual, rule, still = outcome(r, variant)
             rows.append((r, st, actual, rule, still))
         lines += [f"### {label}: {len(rows)} trades changed by the rule", "",
-                  "| ticker | buy | status | actual exit | rule exit | actual | rule | diff |", "|---|---|---|---|---|---|---|---|"]
+                  "| ticker | buy | status | promoted (regime) | actual exit | rule exit | actual | rule | diff |",
+                  "|---|---|---|---|---|---|---|---|---|"]
         for r, st, actual, rule, still in rows:
             cand = r.get(variant) or {}
             rule_exit = (cand.get("exit") if cand.get("slot")
@@ -278,7 +279,8 @@ def report(results, market, since):
             rule_txt = (f"{rule_exit['date']} {rule_exit['code']}" if rule_exit else "still holding")
             act = r.get("actual_exit")
             diff = None if actual is None or rule is None else rule - actual
-            lines.append(f"| {r['ticker']} | {str(r['buy_date'])[:10]} | {st} | "
+            promo = (f"{cand['date']} ({(cand.get('regime') or {}).get('regime') or 'MISSING'})" if cand else "")
+            lines.append(f"| {r['ticker']} | {str(r['buy_date'])[:10]} | {st} | {promo} | "
                          f"{act['date'] + ' ' + str(act.get('exit_kind')) if act else 'open'} | {rule_txt} | "
                          f"{_pct(actual)} | {_pct(rule)}{' (open)' if still else ''} | {_pct(diff)} |")
         groups = [("actual", 2, rows), ("rule", 3, rows)]
@@ -299,7 +301,44 @@ def report(results, market, since):
     return "\n".join(lines) + "\n"
 
 
-def run(market, *, since, today, fetch=fetch_bars, path=None, pause=0.0):
+REGIME_CLOSE = {"KR": ("Asia/Seoul", "15:30"), "US": ("America/New_York", "16:00")}
+REGIME_MAX_AGE = timedelta(days=4)
+
+
+def load_regimes(market, path=None):
+    """[(KST timestamp, row)] of the market's logged regime snapshots (logs/regime_history.jsonl)."""
+    rows = []
+    try:
+        with open(path or ROOT / "logs/regime_history.jsonl", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                    if str(row.get("market") or "").upper() == market:
+                        rows.append((datetime.strptime(str(row["ts"])[:19], "%Y-%m-%d %H:%M:%S"), row))
+                except (ValueError, KeyError, TypeError):
+                    continue
+    except OSError:
+        return []
+    return sorted(rows, key=lambda item: item[0])
+
+
+def regime_at(rows, market, session_date):
+    """The system regime logged by the promotion close (KST rows), or None (MISSING) when none is recent."""
+    from zoneinfo import ZoneInfo
+    tz, hhmm = REGIME_CLOSE[market]
+    close = datetime.strptime(f"{session_date} {hhmm}", "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo(tz))
+    close_kst = close.astimezone(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
+    found = None
+    for ts, row in rows:
+        if ts > close_kst:
+            break
+        found = (ts, row)
+    if found is None or close_kst - found[0] > REGIME_MAX_AGE:
+        return None
+    return {"regime": found[1].get("regime"), "confidence": found[1].get("confidence"), "ts": str(found[0])}
+
+
+def run(market, *, since, today, fetch=fetch_bars, path=None, pause=0.0, regimes=None):
     results = []
     for position in load_positions(market, since, path):
         if pause:
@@ -315,6 +354,11 @@ def run(market, *, since, today, fetch=fetch_bars, path=None, pause=0.0):
         results.append(evaluate(position, market, bars, corporate, today=today))
     allocate(results, "a")
     allocate(results, "b")
+    rows = load_regimes(market) if regimes is None else regimes
+    for r in results:                                   # the market regime on each promotion (bear-regime question)
+        for variant in ("a", "b"):
+            if r.get(variant):
+                r[variant]["regime"] = regime_at(rows, market, r[variant]["date"])
     return results
 
 
@@ -332,7 +376,7 @@ def _emit(market, result, before, after):
 def _brief(cand):
     if not cand:
         return None
-    return {k: cand.get(k) for k in ("date", "slot", "exit", "exit_first_basis", "share", "ret")} | {
+    return {k: cand.get(k) for k in ("date", "slot", "exit", "exit_first_basis", "share", "ret", "regime")} | {
         "view": cand.get("view")}
 
 

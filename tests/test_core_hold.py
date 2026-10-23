@@ -140,7 +140,7 @@ def test_observer_records_both_variants_and_never_writes_the_database(tmp_path, 
                [("HOLD", "Hold Co", buy, entry / 1.3 * 0.95, "{}")],
                [("TRAIL", "Trail Co", buy, entry, "{}", f"{sold} 23:00:00", entry * 1.06, "stop")])
     fetch = lambda market, ticker, start, end: ([dict(b) for b in bars], [])  # noqa: E731
-    results = O.run("US", since="2025-01-01", today=date(2026, 12, 31), fetch=fetch, path=path)
+    results = O.run("US", since="2025-01-01", today=date(2026, 12, 31), fetch=fetch, path=path, regimes=[])
     by = {r["ticker"]: r for r in results}
     assert O.status(by["HOLD"], "a") in ("CORE", "CORE_EXITED")
     assert O.status(by["TRAIL"], "a") == "SOLD_BEFORE_PROMOTION"
@@ -156,7 +156,7 @@ def test_observer_records_both_variants_and_never_writes_the_database(tmp_path, 
 def test_missing_bars_stay_unknown(tmp_path):
     path = _db(tmp_path, [("X", "X", "2026-10-01 10:00:00", 10.0, "{}")], [])
     results = O.run("US", since="2026-10-23", today=date(2026, 10, 23),
-                    fetch=lambda *a: ([], None), path=path)
+                    fetch=lambda *a: ([], None), path=path, regimes=[])
     assert results[0]["error"] == "bars" and O.status(results[0], "a") == "UNKNOWN"
     assert O.outcome(results[0], "a") == (None, None, True) or results[0].get("last_close") is None
 
@@ -194,3 +194,19 @@ def test_the_watchdog_heartbeat_matches_the_summary_line():
         assert re.search(job.heartbeat, line) and job.deadline
     src = (O.ROOT / "tools/run_core_hold_observer.py").read_text(encoding="utf-8")
     assert 'f"Core-hold {args.market} summary: positions=' in src
+
+
+def test_promotion_records_the_logged_regime_or_missing(tmp_path):
+    from datetime import datetime
+    log = tmp_path / "regime.jsonl"
+    log.write_text("\n".join(json.dumps(r) for r in (
+        {"ts": "2026-10-20 10:00:00", "market": "KR", "regime": "moderate_bull", "confidence": 0.7},
+        {"ts": "2026-10-20 23:20:00", "market": "US", "regime": "sideways", "confidence": 0.6},
+        {"ts": "2026-10-23 13:25:54", "market": "KR", "regime": "strong_bear", "confidence": 0.9})) + "\n")
+    kr, us = O.load_regimes("KR", log), O.load_regimes("US", log)
+    assert kr[0][0] == datetime(2026, 10, 20, 10, 0)
+    assert O.regime_at(kr, "KR", "2026-10-23")["regime"] == "strong_bear"      # logged before the 15:30 close
+    assert O.regime_at(kr, "KR", "2026-10-22")["regime"] == "moderate_bull"
+    assert O.regime_at(us, "US", "2026-10-20")["regime"] == "sideways"         # logged in the New York session (KST evening)
+    assert O.regime_at(kr, "KR", "2026-11-30") is None                          # too old -> MISSING
+    assert O.regime_at([], "US", "2026-10-20") is None
