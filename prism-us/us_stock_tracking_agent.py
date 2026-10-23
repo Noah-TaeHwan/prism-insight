@@ -3509,7 +3509,10 @@ Use yahoo_finance and sqlite tools to check latest data, then decide whether to 
 
             # Classify the exit (stop/trend_exit/target/ai) for the churn guard.
             try:
+                from prism_core import core_hold_live
                 from reentry_cooldown import classify_exit_kind
+                # a LIVE core holding's sale is a core exit, not a stop-out (re-entry watch)
+                exit_kind = core_hold_live.exit_kind(stock_data, "US") or exit_kind
                 _exit_kind = classify_exit_kind(sell_reason, exit_kind)
             except Exception:
                 _exit_kind = exit_kind  # fail-open: store caller hint or None

@@ -17,7 +17,9 @@ file only remembers statuses for change events. Outputs:
 - runtime/core_hold_{kr,us}.json      positions[key] = {status, status_b, ...} (add side reads status)
 - runtime/core_hold_journal_{kr,us}.jsonl   one line per position per run
 - events core_hold.observed on a status change (trace_id = the position's trade trace)
-Switch: CORE_HOLD_OBSERVER_ENABLED (default true; off = exit 0).
+Switch: CORE_HOLD_OBSERVER_ENABLED (default true; off = exit 0). With CORE_HOLD_LIVE_ENABLED=true
+(default false, user approval required) the same run also promotes real holdings and sets their stops
+(prism_core/core_hold_live.py); otherwise it never writes a holding.
 """
 from __future__ import annotations
 
@@ -275,7 +277,11 @@ def report(results, market, since):
                 continue                                  # a skipped real position keeps its real exit
             actual, rule, still = outcome(r, variant)
             rows.append((r, st, actual, rule, still))
-        lines += [f"### {label}: {len(rows)} trades changed by the rule", "",
+        promoted = [r for r in results if (r.get(variant) or {}).get("slot")]
+        holding = [r for r in promoted if not r[variant].get("exit")]
+        lines += [f"### {label}: promoted {len(promoted)}, still held under the core rule today {len(holding)} "
+                  f"{[r['ticker'] for r in holding]}", "",
+                  f"{len(rows)} trades changed by the rule", "",
                   "| ticker | buy | status | promoted (regime) | actual exit | rule exit | actual | rule | diff |",
                   "|---|---|---|---|---|---|---|---|---|"]
         for r, st, actual, rule, still in rows:
@@ -357,7 +363,9 @@ def run(market, *, since, today, fetch=fetch_bars, path=None, pause=0.0, regimes
         except Exception as error:  # noqa: BLE001 - one ticker's outage stays MISSING
             print(f"[core_hold][{market}] {position['ticker']} bars unavailable: {type(error).__name__}: {error}")
             bars, corporate = [], None
-        results.append(evaluate(position, market, bars, corporate, today=today))
+        result = evaluate(position, market, bars, corporate, today=today)
+        result["_bars"] = bars                         # for the LIVE stop (not journaled)
+        results.append(result)
     allocate(results, "a")
     allocate(results, "b")
     rows = load_regimes(market) if regimes is None else regimes
@@ -425,6 +433,29 @@ def record(market, results, *, today, dry_run=False):
     return positions
 
 
+def apply_live(market, results, *, dry_run=False):
+    """CORE_HOLD_LIVE_ENABLED only: promotions and stops on the holding rows (prism_core/core_hold_live.py).
+
+    Returns None when LIVE is off for the market, else the list of actions. Never raises."""
+    from prism_core import core_hold_live
+    if dry_run or not core_hold_live.enabled(market):
+        return None
+    from prism_core.ops_alert import send_ops_alert_sync
+    try:
+        conn = sqlite3.connect(db_path(), timeout=30)
+        try:
+            actions = core_hold_live.apply_live(conn, market, results, {r["key"]: r.get("_bars") or [] for r in results},
+                                                alert=send_ops_alert_sync)
+        finally:
+            conn.close()
+    except Exception as error:  # noqa: BLE001 - reported; the hard stop keeps the stored stops
+        print(f"[core_hold][{market}] CRITICAL live apply failed: {type(error).__name__}: {error}")
+        return []
+    for action in actions:
+        print(f"[core_hold][{market}] {action['action']} {action['ticker']} stop={action.get('stop_loss')}")
+    return actions
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--market", required=True, choices=("KR", "US"))
@@ -456,12 +487,14 @@ def main(argv=None):
         return 0
     results = run(args.market, since=REGISTERED, today=today)
     positions = record(args.market, results, today=today, dry_run=args.dry_run)
+    actions = apply_live(args.market, results, dry_run=args.dry_run)
     counts = {}
     for p in positions.values():
         counts[p["status"]] = counts.get(p["status"], 0) + 1
     missing = sum(1 for r in results if r.get("error"))
-    print(f"Core-hold {args.market} summary: positions={len(results)} statuses={counts} missing={missing}"
-          + (" (dry run)" if args.dry_run else ""))
+    live = "off" if actions is None else f"{len(actions)} actions"
+    print(f"Core-hold {args.market} summary: positions={len(results)} statuses={counts} missing={missing} "
+          f"live={live}" + (" (dry run)" if args.dry_run else ""))
     return 0
 
 

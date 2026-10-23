@@ -2336,8 +2336,11 @@ class StockTrackingAgent:
                 else None if limit_price is None else float(limit_price)
             )
             try:
+                from prism_core import core_hold_live
                 from reentry_cooldown import classify_exit_kind
 
+                # a LIVE core holding's sale is a core exit, not a stop-out (re-entry watch)
+                exit_kind = core_hold_live.exit_kind(stock_data, "KR") or exit_kind
                 classified_exit_kind = classify_exit_kind(sell_reason, exit_kind)
             except Exception:
                 classified_exit_kind = exit_kind
@@ -3332,7 +3335,10 @@ class StockTrackingAgent:
 
             # Classify the exit (stop/trend_exit/target/ai) for the churn guard.
             try:
+                from prism_core import core_hold_live
                 from reentry_cooldown import classify_exit_kind
+                # a LIVE core holding's sale is a core exit, not a stop-out (re-entry watch)
+                exit_kind = core_hold_live.exit_kind(stock_data, "KR") or exit_kind
                 _exit_kind = classify_exit_kind(sell_reason, exit_kind)
             except Exception:
                 _exit_kind = exit_kind  # fail-open: store caller hint or None
