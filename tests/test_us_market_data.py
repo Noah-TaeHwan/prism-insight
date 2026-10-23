@@ -206,3 +206,57 @@ def test_missing_client_is_unavailable(monkeypatch):
     monkeypatch.setattr(md, "_us_trading_class", broken)
     with pytest.raises(md.UsMarketDataUnavailable):
         md.daily_history("AAPL", "2026-10-01", "2026-10-02")
+
+
+@pytest.fixture
+def fresh_chain(monkeypatch):
+    monkeypatch.setattr(md, "_chain", None)
+    yield
+    md.set_default_chain(None)
+
+
+def test_default_chain_is_kis_only(fresh_chain, monkeypatch):
+    monkeypatch.delenv("PRISM_US_MARKET_DATA_SOURCES", raising=False)
+    assert md.default_chain().names == ["kis"]
+
+
+def test_unknown_source_name_is_refused(fresh_chain, monkeypatch):
+    monkeypatch.setenv("PRISM_US_MARKET_DATA_SOURCES", "kis,bloomberg")
+    with pytest.raises(ValueError):
+        md.default_chain()
+
+
+def no_kis(monkeypatch):
+    def broken():
+        raise FileNotFoundError("no config")
+    monkeypatch.setattr(md, "_client", None)
+    monkeypatch.setattr(md, "_us_trading_class", broken)
+
+
+def fake_yfinance(monkeypatch, frame, info):
+    import sys
+    module = SimpleNamespace(Ticker=lambda symbol: SimpleNamespace(history=lambda **kwargs: frame, info=info))
+    monkeypatch.setitem(sys.modules, "yfinance", module)
+
+
+def test_falls_back_to_next_source_when_kis_cannot_answer(fresh_chain, monkeypatch):
+    monkeypatch.setenv("PRISM_US_MARKET_DATA_SOURCES", "kis,yfinance")
+    no_kis(monkeypatch)
+    index = pd.DatetimeIndex(["2026-10-20", "2026-10-21"]).tz_localize("America/New_York")
+    fake_yfinance(monkeypatch, pd.DataFrame({"Open": [1.0, 2.0], "High": [1.0, 2.0], "Low": [1.0, 2.0],
+                                             "Close": [1.0, 2.0], "Volume": [10, 20], "Dividends": [0, 0],
+                                             "Stock Splits": [0.0, 0.0]}, index=index),
+                  {"regularMarketPrice": None, "previousClose": 99.0})
+    frame = md.daily_history("aapl", "2026-10-20", "2026-10-21")
+    assert list(frame["Close"]) == [1.0, 2.0] and frame.index.tz is None
+    assert list(frame.columns) == ["Open", "High", "Low", "Close", "Volume", "Stock Splits"]
+    assert md.current_quote("AAPL") is None
+    assert md.current_quote("AAPL", allow_previous_close=True) == 99.0
+
+
+def test_every_source_failing_raises_the_public_error(fresh_chain, monkeypatch):
+    monkeypatch.setenv("PRISM_US_MARKET_DATA_SOURCES", "kis,yfinance")
+    no_kis(monkeypatch)
+    fake_yfinance(monkeypatch, pd.DataFrame(), {})
+    with pytest.raises(md.UsMarketDataUnavailable, match="kis.*yfinance"):
+        md.daily_history("AAPL", "2026-10-20", "2026-10-21")
