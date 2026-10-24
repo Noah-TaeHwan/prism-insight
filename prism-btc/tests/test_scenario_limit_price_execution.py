@@ -44,6 +44,8 @@ def setup_runtime(tmp_path):
                      take_profits=[dict(id='tp', price=87000, fraction=.5)],
                      partial_stops=[], cancel_entry_ids=[], leverage=10,
                      chase=dict(max_bps=0, max_reprices=0), rationale='isolated structural price')
+        if context.get('immediate_reduce_version') == 1:
+            value['reduce_fraction'] = None
         return validate_wire_proposal(value, context)
     runtime = ScenarioRuntime(conn, broker, propose,
         lambda: dict(valid=True, as_of_ms=exchange.now*1000), clock=lambda: exchange.now)
