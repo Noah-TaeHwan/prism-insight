@@ -108,7 +108,7 @@ def _failed(active):
                 or (active.get("last_thesis_assessment") or {}).get("status") == "FAILED")
 
 
-def _observation(broker, body):
+def _observation(broker, body, *, require_accounting=True):
     from live.scenario_execution import decimal
     active = broker._active()
     for child in broker.children(active["scenario_id"]):
@@ -125,11 +125,12 @@ def _observation(broker, body):
     if any(c["status"] == "UNKNOWN" or not c["evidence"] or
            (c["kind"] == "entry" and c["status"] != "TERMINAL") for c in own):
         broker._fail("reduce_unreconciled_children")
-    accounting = broker._risk_accounting(observed, active, own)
-    if not accounting or accounting.get("status") != "confirmed":
-        broker._fail("reduce_accounting_unconfirmed")
-    if sum((decimal(p["quantity"]) for p in accounting["positions"]), Decimal(0)) != q:
-        broker._fail("reduce_accounting_quantity_conflict")
+    if require_accounting:
+        accounting = broker._risk_accounting(observed, active, own)
+        if not accounting or accounting.get("status") != "confirmed":
+            broker._fail("reduce_accounting_unconfirmed")
+        if sum((decimal(p["quantity"]) for p in accounting["positions"]), Decimal(0)) != q:
+            broker._fail("reduce_accounting_quantity_conflict")
     return observed, q
 
 
@@ -148,7 +149,9 @@ def execute(broker, payload, ident):
     if _failed(broker._active()):
         # Query every possibly submitted child before handing off. Do not add
         # restoration POSTs that could introduce a new UNKNOWN ahead of EXIT.
-        _observation(broker, body)
+        # There is no new reduction or restoration POST in this handoff.
+        # Financial finality must not impose a stronger fence than full EXIT.
+        _observation(broker, body, require_accounting=False)
         if any(c["kind"] == "reduce" and c["status"] != "TERMINAL"
                for c in broker.children(payload["scenario_id"])):
             broker._fail("reduce_result_pending")

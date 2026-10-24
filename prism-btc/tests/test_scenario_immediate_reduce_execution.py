@@ -659,3 +659,36 @@ def test_fully_filled_restoration_is_complete_not_unfilled_cancel_failure(live):
     assert load(broker, "r1")["status"] == "COMPLETE"
     assert load(broker, "r1")["failed_source_ids"] == []
     assert float(exchange.size) == 0
+
+
+@pytest.mark.parametrize("financial", ["pending", "raising"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_failed_no_post_handoff_does_not_wait_for_financial_finality(live, monkeypatch, financial, failed):
+    from live.scenario_immediate_reduce import load
+    broker, exchange = held(live)
+    payload = reduction(broker)
+    if failed:
+        state = json.loads(broker.conn.execute("SELECT body FROM llm_scenario_state").fetchone()[0])
+        state["active"]["entry_contract_observation"] = {"status": "FAILED"}
+        broker.conn.execute("UPDATE llm_scenario_state SET body=?", (json.dumps(state),))
+        broker.conn.commit()
+
+    def unavailable(*args):
+        if financial == "raising":
+            raise BrokerNotReady("financial_fixture_unavailable")
+        return {"status": "pending"}
+
+    monkeypatch.setattr(broker, "_risk_accounting", unavailable)
+    before = list(exchange.writes)
+    if not failed:
+        with pytest.raises(BrokerNotReady):
+            broker.execute(payload, "r1")
+        assert load(broker, "r1")["status"] == "PREPARED"
+        assert exchange.writes == before
+        return
+    broker.execute(payload, "r1")
+    assert exchange.writes == before
+    assert load(broker, "r1")["status"] == "SKIPPED_FAILED"
+    full_exit = persist(broker, action="EXIT", action_id="exit", entries=[])
+    broker.execute(full_exit, "exit")
+    assert any(c["kind"] == "exit" for c in broker.children())
