@@ -692,3 +692,27 @@ def test_failed_no_post_handoff_does_not_wait_for_financial_finality(live, monke
     full_exit = persist(broker, action="EXIT", action_id="exit", entries=[])
     broker.execute(full_exit, "exit")
     assert any(c["kind"] == "exit" for c in broker.children())
+
+
+@pytest.mark.parametrize("tables", [[], ["llm_scenario_intents"], ["llm_scenario_reductions"]])
+def test_optional_reduction_context_missing_runtime_schema_is_read_only_unavailable(tables):
+    from types import SimpleNamespace
+    from live.scenario_immediate_reduce import context
+    conn = sqlite3.connect(":memory:")
+    for table in tables:
+        conn.execute(f"CREATE TABLE {table}(id TEXT)")
+    before = conn.execute("SELECT name,sql FROM sqlite_master").fetchall()
+    changes = conn.total_changes
+    result = context(SimpleNamespace(conn=conn), {"scenario_id": "active"})
+    assert result == dict(immediate_reduce_available=False,
+                         immediate_reduce_result=dict(status="UNAVAILABLE", reason="runtime_schema_missing"))
+    assert conn.total_changes == changes
+    assert conn.execute("SELECT name,sql FROM sqlite_master").fetchall() == before
+
+
+def test_reduction_context_complete_schema_does_not_hide_missing_registered_intent(live):
+    from live.scenario_immediate_reduce import context
+    broker, _ = held(live)
+    persist(broker, action="REDUCE", action_id="missing-reduction-record", entries=[])
+    with pytest.raises(BrokerNotReady, match="reduce_preparation_missing"):
+        context(broker, broker._active())

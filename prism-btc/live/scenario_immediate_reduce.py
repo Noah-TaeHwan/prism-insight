@@ -44,6 +44,14 @@ def result(broker, ident):
 def context(broker, active):
     if not active:
         return {}
+    # A standalone read-only broker can expose finance before runtime schema
+    # exists. Missing history disables REDUCE; it is not an empty success log.
+    required = {"llm_scenario_intents", "llm_scenario_reductions"}
+    present = {row[0] for row in broker.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?)", tuple(sorted(required)))}
+    if present != required:
+        return dict(immediate_reduce_available=False,
+                    immediate_reduce_result=dict(status="UNAVAILABLE", reason="runtime_schema_missing"))
     rows = broker.conn.execute("SELECT id,payload FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid DESC",
                                (active["scenario_id"],)).fetchall()
     for ident, raw in rows:
