@@ -740,8 +740,9 @@ class ScenarioRuntime:
                     ctx['entry_goal_decision_slot'] = slot
                 from live.scenario_entry_goal import prepare_goal_source
                 prepare_goal_source(snap, ctx)
-                from live.scenario_position_flow import build_position_flow
+                from live.scenario_position_flow import build_position_flow, build_closed_continuity
                 ctx["position_flow"] = build_position_flow(self.conn, current["active"], ctx, now)
+                ctx['last_closed_trade'] = build_closed_continuity(self.conn, current, now)
                 if ctx.get("recovery_observing"):
                     recovery.prepare_input(self.conn, current, ctx, snap, slot, self.clock())
                     # Baseline, mandatory INPUT and the full decision input must

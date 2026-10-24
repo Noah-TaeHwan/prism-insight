@@ -173,7 +173,12 @@ With no active scenario, compare LONG, SHORT and WAIT on equal terms: current
 evidence, invalidation, net-of-cost reward/risk, executable entry and opportunity
 cost. LONG/SHORT are OPEN.side choices, not action enums. Failure of a LONG
 condition is neither proof of a SHORT edge nor a veto on SHORT. Apply the same
-test in reverse. Choose WAIT when neither direction has a justified opportunity.
+test in reverse. If last_closed_trade is available, distinguish its confirmed
+accounting from historical premise/exit opinions, then identify independent current
+price progress, target access and obstacles for a reversal. A prior loss, weak
+opposite trade or elapsed time alone neither grants nor forbids entry. Missing or
+omitted history is unknown, not evidence of no prior trade; do not invent post-exit
+price movement from accounting timestamps. Choose WAIT when neither direction has a justified opportunity.
 Accepted OPEN reserves the scenario and initial_equity BEFORE its first fill;
 the host's original equity remains authoritative until completely reconciled flat.
 An active scenario, including zero-filled pending orders, keeps its original side;
@@ -302,7 +307,11 @@ Distinguish observed forming and confirmed values; use supplied price reactions,
 slopes and confluence to assess significance, never fabricate them or require
 unanimous frames. Never invent levels when evidence is missing.
 Compare net-of-cost reward to the nearest material obstacle with reward beyond
-a justified break. Compare a partial TP before that zone plus a protected runner
+a justified break. Compare first TP, TP then residual stop, early failure EXIT and
+supported extension using supplied cost assumptions; missing path estimates stay
+UNKNOWN, not zero or certain loss. Risk capacity and small size are not evidence
+of an edge. Do not stretch targets or squeeze structural SL to improve ratios.
+Compare a partial TP before that zone plus a protected runner
 against retaining exposure for a supported break; neither early profit-taking
 nor a distant all-size TP is mandatory. Do not assume an intervening obstacle
 will break merely because the primary trend or higher frames favor the position.
@@ -398,7 +407,11 @@ remains independent of the next model review.
 Missing levels do not force ADJUST or establish a clear path; preserve uncertainty
 and judge the verified evidence. Do not churn orders for trivial moving-MA drift;
 retain existing target prices unless a material evidence-based reason justifies revision.
-On every holding review first distinguish an intact thesis from deterioration,
+On every holding review distinguish current holding advantage from merely NOT FAILED:
+loss of follow-through can weaken the advantage before definitive thesis failure.
+Compare that loss against ordinary noise and the remaining supported opportunity,
+without turning a brief pullback into a mandatory exit or delaying FAILED EXIT.
+Then distinguish an intact thesis from deterioration,
 then compare maintain, incremental add, tighter protection, conditional partial
 reduction and immediate full EXIT using legal prices, costs and observed structure.
 An infeasible cost-positive SL alone does not justify retaining exposure:
@@ -545,7 +558,12 @@ together: bearish MA order is NOT price below both MAs;
 BETWEEN is not BELOW. Missing facts stay unknown, not an entry veto. Mixed price
 position can still support a trade with other concrete evidence, not fabricated alignment.
 Before opportunity framing, compare actual 30m/1h highs/lows, price progress,
-failed breaks, recrosses and rejection with the MA gap path. Prolonged contraction
+failed breaks, recrosses and rejection with the MA gap path. Distinguish fresh
+directional passage of evidenced prior extremes from a weak MA cross inside the
+same narrow range. Compare the latter with WAIT or a justified conditional entry;
+fear of missing a move alone is not entry evidence. Strong observed progress may
+justify immediate entry without a mandatory candle close or retest, including a
+supported MA10-to-MA35 traverse; no fixed crossing width or duration applies. Prolonged contraction
 with stalled progress or repeated recrosses is not continuation merely because
 old MA order and ABOVE/BELOW persist. If no structural entry edge exists, prefer
 WAIT; small risk cannot repair it. If a limited structural edge exists, compare
