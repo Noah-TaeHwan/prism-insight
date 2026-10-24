@@ -17,7 +17,7 @@ from live import scenario_llm
 from live.scenario_contract import _matches, _object, response_schema, validate_wire_proposal
 from live.scenario_entry_contract import strip_metadata
 from live.scenario_entry_goal import GoalConsistencyRejection, prepare_goal_source, validate_goal_pair
-from live.scenario_position_flow import project_position_flow_input
+from live.scenario_position_flow import project_position_flow_input, project_holding_price_order_input
 from live.scenario_analysis_frames import analysis_model_view
 from live.scenario_runtime import snapshot_input_time
 
@@ -531,6 +531,11 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
 
 
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
+    return project_holding_price_order_input(_base_model_payload(snapshot, context, response_contract,
+        calculated_candidates=calculated_candidates))[0]
+
+
+def _base_model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
     model_context = deepcopy(context)
     model_context.pop('seen_action_ids', None)
     model_context.pop('entry_goal_source', None)

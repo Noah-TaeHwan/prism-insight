@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from engine.scenario_ma_context import build_ma_structure_context
 from live.scenario_entry_display import project_entry_display_input
-from live.scenario_position_flow import project_position_flow_input
+from live.scenario_position_flow import project_position_flow_input, project_holding_price_order_input
 from live.scenario_analysis_frames import analysis_model_view, PRIMARY_FRAMES
 
 MODEL = "gpt-6.1-sol"
@@ -970,6 +970,8 @@ def immediate_reduce_instructions(text, context):
     text = text.replace('Immediate partial market reduction is unsupported; do not invent an\naction',
                         'Immediate partial market reduction uses only an offered REDUCE action; do not invent another action')
     text = text.replace('ADJUST/EXIT when active', 'ADJUST/EXIT or offered REDUCE when active')
+    if context.get('scenario_id') is not None and context.get('positions'):
+        text += '\nUse holding_price_order when available for exact numeric comparisons: do not group a level beyond a TP with levels before that TP. It proves neither support nor active orders; missing/omitted display is unavailable, so use original sources.\n'
     return text + '''
 REDUCE is available only when the response schema offers it for confirmed protected
 holdings without pending/unknown orders. Compare a justified immediate partial
@@ -1035,6 +1037,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
             payload, projection_audit = project_entry_display_input(payload)
         else:
             payload, projection_audit = project_position_flow_input(payload)
+        payload, projection_audit = project_holding_price_order_input(payload, projection_audit)
         prompt = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (TypeError, ValueError):
         raise ScenarioModelError("invalid_input") from None
