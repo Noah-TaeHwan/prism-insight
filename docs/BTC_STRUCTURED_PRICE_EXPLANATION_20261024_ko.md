@@ -11,6 +11,8 @@ WAIT·후보·최종 SELECT·후보 없는 판단에 같은 구조화 설명 경
 모델의 rationale/no_candidate_reason은 `interpretation`, `evidence_refs`, `comparisons`로 구성한다.
 comparison에는 `level_ref`, `target_ref`만 있으며 가격·출처·관계값은 모델이 쓰지 않는다.
 `interpretation`은 원문을 보존하고 표시할 때 `모델 해석(미검증)`으로 구분한다.
+해석란에는 질적 시장 해석·행동의 장단점을 쓰고, 가격·phase·목표 앞뒤 주장을
+참조·비교로 위임하도록 지시한다. 이를 어긴 원문도 삭제하거나 성공으로 처리하지 않는다.
 thesis_assessment.reason 등 다른 자유문장의 사실성은 여전히 수동 검토 대상이다.
 
 ## 출처와 표시 기준
@@ -19,10 +21,16 @@ thesis_assessment.reason 등 다른 자유문장의 사실성은 여전히 수�
 4시간·12시간·일봉·주봉 MA만 제한된 참조 사전으로 만든다. 15분봉은 포함하지 않는다.
 `P:30m:0:low`는 해당 프레임 point 0의 원래 phase·시각을 유지한다.
 상위 MA는 `MA:4h.ma10.forming`, Mark는 `MARK`로 참조한다.
+사전의 자체 해시만으로 출처를 승인하지 않는다. 호출자가 제공한 frozen snapshot과
+원래 계좌 Mark·조회 시각으로 사전을 다시 생성해 정확히 일치할 때만 VERIFIED이다.
+snapshot이 없거나 사전이 불일치하면 UNKNOWN이며, 변조된 사전은 모델 입력에서도
+UNKNOWN_SOURCE_MISMATCH로 표시한다. 이 설명 문제만으로 FAILED EXIT를 막지 않는다.
 
 WAIT/REDUCE/EXIT는 `CURRENT:TP:<id>`로 현재 계획을 표시한다.
 ADJUST는 `c0:TP:<id>` 또는 `c1:TP:<id>`로 해당 후보 검산 후 가격을 표시한다.
 다른 후보의 목표 참조는 UNKNOWN이다. SELECT는 선택 토큰에 연결된 계획만 사용한다.
+공식 문장에는 모델이 정한 목표 ID 대신 호스트 순번 TP1·TP2를 표시한다.
+원래 ID·참조와 가격·수량은 변경하지 않고 영수증에 보존한다.
 표시 계획은 실제 주문 상태·체결·지지저항·가격 도달 순서의 증거가 아니다.
 
 방향별 숫자 순서는 BEFORE/AFTER, 같은 가격은 EQUAL이다. 없는 참조·유효하지 않은
@@ -36,6 +44,9 @@ ADJUST는 `c0:TP:<id>` 또는 `c1:TP:<id>`로 해당 후보 검산 후 가격을
 사전 뷰는 기존 입력이 정리된 뒤 100KB 안에 들어갈 때만 추가하며,
 생략은 명시한다. 해석 600자·근거 4개·비교 4개를 표시 대상으로 제한하고
 기존 2,000자 설명 한도를 넘기지 않는다. 긴 원문을 숨겨 통과로 보지 않는다.
+v1 calculated 보유 입력에서는 옛 holding_price_order 파생 뷰와 사용 지시만 새 사전으로
+대체한다. 원시세·ma_structure·current_plan·경제·이력 자료는 삭제하지 않는다.
+구버전과 single-pass의 옛 뷰는 유지한다. 출력 참조에 옛 M·T0·1h.index.low를 쓰지 않는다.
 잘못된 자유 해석은 공식 숫자 대조가 맞더라도 오류이며 실제 모델 검증에서 별도로 판정한다.
 
 필수 반례: LONG/SHORT·동가·결측·15분 제외·후보 교차 참조·ADJUST 가격 보정·phase/시각·

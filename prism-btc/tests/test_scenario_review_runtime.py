@@ -133,10 +133,17 @@ def test_exit_with_hold_selection_prose_keeps_candidate_reason_in_saved_plan_and
     selected=tape['outcome']['result']['selected']['raw_proposal']
     proposal=json.loads(r.conn.execute('SELECT proposal FROM llm_scenario_decisions').fetchone()[0])
     intent=json.loads(r.conn.execute('SELECT payload FROM llm_scenario_intents').fetchone()[0])
-    for plan in (proposal,intent,broker.executed[0]):
+    # The pre-guard audit proposal remains the original normalized candidate;
+    # the final intent/adapter receive the separately bound official display.
+    assert proposal['action']=='EXIT' and proposal['rationale']==selected['rationale']=='구조 판단'
+    for plan in (intent,broker.executed[0]):
         assert plan['action']=='EXIT'
-        assert plan['rationale']==selected['rationale']=='구조 판단'
-    assert tape['outcome']['result']['selection']['rationale']==reason
+        assert selected['rationale']=='구조 판단'
+        assert plan['rationale']==tape['outcome']['result']['selected']['explanation']['text']
+        assert '모델 해석(미검증): 구조 판단' in plan['rationale']
+        assert reason not in plan['rationale']
+    assert tape['outcome']['result']['selection']['explanation']['raw']==reason
+    assert reason in tape['outcome']['result']['selection']['rationale']
 
 
 def test_pre_call_oversize_keeps_failed_tape_but_reports_actual_input_error(tmp_path):

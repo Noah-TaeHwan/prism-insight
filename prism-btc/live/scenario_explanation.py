@@ -52,14 +52,14 @@ def model_matches(value, schema, context):
     return _matches(value, schema)
 
 
-def bind_receipt(receipt, context):
+def bind_receipt(receipt, context, *, snapshot=None):
     if not enabled(context):
         return receipt
     raw = receipt.get('raw_proposal') or receipt.get('raw_allocation_proposal') or {}
     effective = receipt.get('effective_plan') or raw
     if raw.get('action') == 'ADJUST' and not receipt.get('effective_plan'):
         effective = dict(action='ADJUST', explanation_plan_unavailable=True)
-    explanation = compile_explanation(raw.get('rationale'), context, effective, scope=receipt['id'])
+    explanation = compile_explanation(raw.get('rationale'), context, effective, scope=receipt['id'], snapshot=snapshot)
     receipt['explanation'] = explanation
     if receipt.get('effective_plan') is not None:
         receipt['effective_plan'] = dict(effective, rationale=explanation['text'])
@@ -96,12 +96,25 @@ def prepare_source(snapshot, context):
         context['explanation_source'] = source_from_structure(build_ma_structure_context(snapshot, context), context)
 
 
-def project_input(projected, context):
+def _verified_source(snapshot, context):
+    from engine.scenario_ma_context import build_ma_structure_context
+    source = context.get('explanation_source')
+    try:
+        return (isinstance(snapshot, dict) and isinstance(source, dict)
+                and source.get('version') == 1 and isinstance(source.get('points'), list)
+                and source.get('sha256') == digest({k: v for k, v in source.items() if k != 'sha256'})
+                and source == source_from_structure(build_ma_structure_context(snapshot, context), context))
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+        return False
+
+
+def project_input(projected, context, *, snapshot=None):
     if not enabled(context):
         return projected
     from live.scenario_model_input import restore_model_input, project_model_input
     logical = restore_model_input(projected)
-    for source in (context.get('explanation_source'), {'status': 'OMITTED_INPUT_BUDGET'}):
+    offered = context.get('explanation_source') if _verified_source(snapshot, context) else {'status': 'UNKNOWN_SOURCE_MISMATCH'}
+    for source in (offered, {'status': 'OMITTED_INPUT_BUDGET'}):
         logical['contract_context']['explanation_source'] = source
         candidate, _ = project_model_input(logical, allow_gap_rescue=True)
         if len(json.dumps(candidate, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()) <= 100_000:
@@ -116,15 +129,11 @@ def interpretation_text(raw):
     return '모델 해석(미검증): ' + value[:600] + (' [해석 표시 생략]' if len(value) > 600 else '')
 
 
-def compile_explanation(raw, context, plan, *, scope):
+def compile_explanation(raw, context, plan, *, scope, snapshot=None):
     from live.scenario_contract import _matches
     source = context.get('explanation_source')
     source = source if isinstance(source, dict) else {}
-    try:
-        valid = (source.get('version') == 1 and isinstance(source.get('points'), list)
-                 and source.get('sha256') == digest({k: v for k, v in source.items() if k != 'sha256'}))
-    except (ValueError, TypeError):
-        valid = False
+    valid = _verified_source(snapshot, context)
     levels = {}
     if valid:
         for row in source['points']:
@@ -140,10 +149,10 @@ def compile_explanation(raw, context, plan, *, scope):
     basis = basis if isinstance(basis, dict) else {}
     prefix = scope if action == 'ADJUST' else 'CURRENT'
     targets = {}
-    for target in basis.get('take_profits') or []:
+    for index, target in enumerate(basis.get('take_profits') or []):
         if isinstance(target, dict) and isinstance(target.get('id'), str) and _number(target.get('price')):
             ref = prefix + ':TP:' + target['id']
-            targets[ref] = dict(ref=ref, price=target['price']) if ref not in targets else None
+            targets[ref] = dict(ref=ref, price=target['price'], label=f'TP{index + 1}') if ref not in targets else None
     comparisons = []
     for request in requested[:4]:
         request = request if isinstance(request, dict) else {}
@@ -172,7 +181,7 @@ def compile_explanation(raw, context, plan, *, scope):
             level, target = item['level'], item['target']
             word = {'BEFORE': '앞', 'AFTER': '뒤', 'EQUAL': '동가'}[item['relation']]
             line = (f"\n{level['ref']}={level['price']} ({level['phase']}, {level['as_of_ms']}ms), "
-                    f"{target['ref']}={target['price']}: {context['side']} 방향 수치순서 {word}.")
+                    f"{target['label']}={target['price']}: {context['side']} 방향 수치순서 {word}.")
         if len(text) + len(line) > 1900:
             omitted = True
             break
@@ -195,11 +204,17 @@ def compile_explanation(raw, context, plan, *, scope):
 
 PROMPT = '''
 Holding explanation_contract_version=1 replaces rationale with an object:
+This overrides earlier free-text rationale formatting, never economic or FAILED safety rules.
 interpretation (up to 600 characters, explicitly unverified model opinion),
 evidence_refs (up to 4), comparisons (up to 4 objects containing only level_ref,target_ref).
+Use interpretation only for qualitative market interpretation and action tradeoffs.
+Delegate market prices, source phases and before/after-TP relationships to references
+and comparisons; do not restate these numeric/source/order claims in interpretation.
 Never supply source values, prices or relations in comparison objects. explanation_source.points
 rows are [ref, frozen price, phase, as_of_ms]. P references retain their point's own phase/time;
 15m references are forbidden. Missing references mean UNKNOWN; equal numbers mean EQUAL.
+Output evidence_refs/level_ref use only explanation_source.points references; old
+holding_price_order helper IDs M, T0 and 1h.index.low are not output references.
 WAIT/REDUCE/EXIT target refs are CURRENT:TP:<current_plan target id>.
 ADJUST candidate index zero uses c0:TP:<its target id>, index one uses c1:TP:<its target id>.
 SELECT must use only its selected candidate's target refs; never another candidate's targets.

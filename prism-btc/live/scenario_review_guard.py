@@ -156,7 +156,7 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     from live.scenario_explanation import enabled as explanation_enabled, compile_explanation
     if explanation_enabled(original):
         explanation = compile_explanation(selected['raw_proposal'].get('rationale'), original,
-                                          validated, scope=selected['id'])
+                                          validated, scope=selected['id'], snapshot=snapshot)
         expected_explanation = selected.get('explanation')
         if expected_explanation != explanation:
             raise ValueError('review_guard_explanation_receipt_changed')

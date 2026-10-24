@@ -456,7 +456,7 @@ def _supplied_instrument_filters(plan, context):
                         minimum_quantity=float(minimum), minimum_notional=float(notional)))
 
 
-def calculate_candidate(wire, context, *, candidate_id, original_input_now=None, strict=False):
+def calculate_candidate(wire, context, *, candidate_id, original_input_now=None, strict=False, explanation_snapshot=None):
     """Return rejected candidates too; never repair model prices or quantities."""
     _check_lifecycle_context(context)
     original_now=context["now"] if original_input_now is None else original_input_now
@@ -485,7 +485,7 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
             receipt.update(effective_plan=effective, effective_sha256=receipt_hash(effective),
                 current_reserved_risk=_current_reserved_risk(context),
                 projection=_holding_projection(effective, context), eligible=True)
-            bind_receipt(receipt, context)
+            bind_receipt(receipt, context, snapshot=explanation_snapshot)
             receipt["receipt_sha256"] = receipt_hash(receipt)
             return receipt
         # Canceled orders retain their reservation until confirmed by the host.
@@ -532,15 +532,16 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
         if strict or context.get('entry_contract_version') == 2:
             raise
         receipt["rejection"] = "wire_economic_or_calculation_invalid"
-    bind_receipt(receipt, context)
+    bind_receipt(receipt, context, snapshot=explanation_snapshot)
     receipt["receipt_sha256"] = receipt_hash(receipt)
     return receipt
 
 
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
-    baseline = project_holding_price_order_input(_base_model_payload(snapshot, context, response_contract,
-        calculated_candidates=calculated_candidates))[0]
-    return project_explanation_input(baseline, context)
+    baseline = _base_model_payload(snapshot, context, response_contract, calculated_candidates=calculated_candidates)
+    if not explanation_enabled(context):
+        baseline = project_holding_price_order_input(baseline)[0]
+    return project_explanation_input(baseline, context, snapshot=snapshot)
 
 
 def _base_model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
@@ -549,6 +550,8 @@ def _base_model_payload(snapshot, context, response_contract, *, calculated_cand
     model_context.pop('entry_goal_source', None)
     model_context.pop('entry_goal_decision_slot', None)
     model_context.pop('explanation_source', None)
+    if explanation_enabled(context):
+        model_context.pop('holding_price_order', None)
     recovery = context.get("recovery") or {}
     # Interpretation-only copy. Do not alter source context, receipt hashes or
     # authorization; missing/non-boolean metadata remains explicitly unknown.
@@ -635,7 +638,7 @@ Existing position quantities are observations, not fields for you to rewrite.
 """
 
 
-def calculate_allocation_candidate(raw, context, *, candidate_id, original_input_now=None):
+def calculate_allocation_candidate(raw, context, *, candidate_id, original_input_now=None, explanation_snapshot=None):
     """Keep model allocation and host quantity wire distinct and hash-bound."""
     from live.scenario_risk_allocation import allocate_entry_risk, validate_allocation_prices
     original = deepcopy(raw)
@@ -644,7 +647,7 @@ def calculate_allocation_candidate(raw, context, *, candidate_id, original_input
             raise ValueError("research_allocation_contract")
         wire, allocation = allocate_entry_risk(original, context)
         receipt = calculate_candidate(wire, context, candidate_id=candidate_id,
-                                      original_input_now=original_input_now)
+                                      original_input_now=original_input_now, explanation_snapshot=explanation_snapshot)
         receipt.update(raw_allocation_proposal=original, raw_allocation_sha256=receipt_hash(original),
                        allocation_receipt=allocation, allocation_sha256=receipt_hash(allocation))
         if receipt["eligible"]:
@@ -679,7 +682,7 @@ ACTION_ALLOCATION_MODES = {"action-allocation-single-v1", "action-allocation-cal
 ECONOMIC_REJECT_MODES = {"economic-reject-single-v1", "economic-reject-calculated-v1"}
 
 
-def calculate_economic_candidate(raw, context, *, candidate_id, original_input_now=None):
+def calculate_economic_candidate(raw, context, *, candidate_id, original_input_now=None, explanation_snapshot=None):
     """Only producer-typed economic failures may become a non-authorizing result.
 
     Validate every raw field, identity and lifecycle before sizing can reject a
@@ -722,7 +725,7 @@ def calculate_economic_candidate(raw, context, *, candidate_id, original_input_n
         receipt.update(raw_proposal=deepcopy(wire), raw_sha256=receipt_hash(wire),
                        allocation_receipt=allocation, allocation_sha256=receipt_hash(allocation))
         calculated = calculate_candidate(wire, context, candidate_id=candidate_id,
-            original_input_now=original_input_now, strict=True)
+            original_input_now=original_input_now, strict=True, explanation_snapshot=explanation_snapshot)
         receipt.update(calculated)
         validate_allocation_prices(receipt["effective_plan"], allocation, context)
     except GoalConsistencyRejection as exc:
@@ -858,8 +861,6 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return now
 
     base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
-    if explanation_enabled(context):
-        base += EXPLANATION_PROMPT
     if context.get('pending_wait_policy_version') == 1:
         base += scenario_llm.PENDING_WAIT_PROMPT
     if context.get("entry_contract_version") in (1, 2):
@@ -901,7 +902,10 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         prompt = _encoded(data)
         if len(prompt.encode()) > 100_000:
             raise ValueError("research_input_size")
-        request = dict(system_prompt=scenario_llm.immediate_reduce_instructions(base + appendix, frozen_context), user_prompt=prompt,
+        system = scenario_llm.immediate_reduce_instructions(base + appendix, frozen_context)
+        if explanation_enabled(frozen_context):
+            system += EXPLANATION_PROMPT
+        request = dict(system_prompt=system, user_prompt=prompt,
             model=scenario_llm.MODEL, reasoning_effort=scenario_llm.EFFORT,
             fast_tier=True, timeout=scenario_llm.TIMEOUT_SECONDS - (now - started),
             mcp_profile=None, response_schema=output_schema, retry_transport=False)
@@ -1027,7 +1031,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     wait_receipt = dict(id="WAIT", raw_proposal=wait_wire, input_sha256=original)
     if explanation_enabled(context):
         wait_receipt['effective_plan'] = effective_wait
-        bind_receipt(wait_receipt, context)
+        bind_receipt(wait_receipt, context, snapshot=frozen_snapshot)
     if effective_wait.get('pending_renewal'):
         wait_receipt['effective_plan'] = effective_wait
     if failed_template:
@@ -1038,7 +1042,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         _bind_model_wrapper(wait_receipt, draft, wait_wire)
     calculator = calculate_economic_candidate if economic_reject else calculate_allocation_candidate if allocation else calculate_candidate
     receipts = [calculator(wire, now_context, candidate_id=f"c{index}",
-                                   original_input_now=frozen_context["now"])
+                                   original_input_now=frozen_context["now"],
+                                   **({'explanation_snapshot': frozen_snapshot} if explanation_enabled(context) else {}))
                 for index, wire in enumerate(draft["candidates"])]
     if effective_wait.get('pending_renewal'):
         # Preserve the model's exact WAIT proposal as an explicit selectable
@@ -1056,7 +1061,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     if failed_template and not any(r["eligible"] for r in receipts):
         raise ValueError("research_failed_thesis_no_valid_exit")
     for receipt in receipts:
-        bind_receipt(receipt, now_context)
+        bind_receipt(receipt, now_context, snapshot=frozen_snapshot)
         if action_contract:
             _bind_model_wrapper(receipt, draft, receipt["raw_allocation_proposal"])
         receipt["input_sha256"] = original
@@ -1096,7 +1101,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         raise ValueError("research_selection_hash")
     if explanation_enabled(context):
         final['explanation'] = compile_explanation(final['rationale'], context,
-            selected.get('effective_plan') or selected['raw_proposal'], scope=selected['id'])
+            selected.get('effective_plan') or selected['raw_proposal'], scope=selected['id'], snapshot=frozen_snapshot)
         final['rationale'] = final['explanation']['text']
     if not isinstance(final["rationale"], str) or not 1 <= len(final["rationale"].strip()) <= 2000:
         raise ValueError("research_selection_rationale")

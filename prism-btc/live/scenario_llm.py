@@ -971,7 +971,8 @@ def immediate_reduce_instructions(text, context):
     text = text.replace('Immediate partial market reduction is unsupported; do not invent an\naction',
                         'Immediate partial market reduction uses only an offered REDUCE action; do not invent another action')
     text = text.replace('ADJUST/EXIT when active', 'ADJUST/EXIT or offered REDUCE when active')
-    if context.get('scenario_id') is not None and context.get('positions'):
+    from live.scenario_explanation import enabled as explanation_enabled
+    if context.get('scenario_id') is not None and context.get('positions') and not explanation_enabled(context):
         text += '\nUse holding_price_order when available for exact numeric comparisons: do not group a level beyond a TP with levels before that TP. It proves neither support nor active orders; missing/omitted display is unavailable, so use original sources.\n'
     return text + '''
 REDUCE is available only when the response schema offers it for confirmed protected
