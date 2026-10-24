@@ -4,6 +4,10 @@ import hashlib
 import json
 import math
 
+MAX_INTERPRETATION = 160
+MAX_EVIDENCE_REFS = 3
+MAX_COMPARISONS = 3
+
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
@@ -24,9 +28,9 @@ def rationale_schema():
     def obj(properties):
         return dict(type='object', properties=properties, required=list(properties), additionalProperties=False)
     ref = dict(type='string', maxLength=180)
-    return obj(dict(interpretation=dict(type='string', maxLength=600),
-        evidence_refs=dict(type='array', maxItems=4, items=ref),
-        comparisons=dict(type='array', maxItems=4, items=obj(dict(level_ref=ref, target_ref=ref)))))
+    return obj(dict(interpretation=dict(type='string', maxLength=MAX_INTERPRETATION),
+        evidence_refs=dict(type='array', maxItems=MAX_EVIDENCE_REFS, items=ref),
+        comparisons=dict(type='array', maxItems=MAX_COMPARISONS, items=obj(dict(level_ref=ref, target_ref=ref)))))
 
 
 def model_matches(value, schema, context):
@@ -126,7 +130,7 @@ def interpretation_text(raw):
     value = raw.get('interpretation') if isinstance(raw, dict) else raw
     if not isinstance(value, str) or not value:
         return '모델 해석(미검증): 설명 미제공.'
-    return '모델 해석(미검증): ' + value[:600] + (' [해석 표시 생략]' if len(value) > 600 else '')
+    return '모델 해석(미검증): ' + value[:MAX_INTERPRETATION] + (' [해석 표시 생략]' if len(value) > MAX_INTERPRETATION else '')
 
 
 def compile_explanation(raw, context, plan, *, scope, snapshot=None):
@@ -154,7 +158,7 @@ def compile_explanation(raw, context, plan, *, scope, snapshot=None):
             ref = prefix + ':TP:' + target['id']
             targets[ref] = dict(ref=ref, price=target['price'], label=f'TP{index + 1}') if ref not in targets else None
     comparisons = []
-    for request in requested[:4]:
+    for request in requested[:MAX_COMPARISONS]:
         request = request if isinstance(request, dict) else {}
         level = levels.get(request.get('level_ref')) if isinstance(request.get('level_ref'), str) else None
         target = targets.get(request.get('target_ref')) if isinstance(request.get('target_ref'), str) else None
@@ -164,8 +168,9 @@ def compile_explanation(raw, context, plan, *, scope, snapshot=None):
             relation = 'EQUAL' if difference == 0 else ('BEFORE' if (difference < 0) == (context['side'] == 'LONG') else 'AFTER')
         comparisons.append(dict(level_ref=request.get('level_ref'), target_ref=request.get('target_ref'),
                                 level=level, target=target, relation=relation))
-    facts = [levels.get(ref) if isinstance(ref, str) else None for ref in evidence[:4]]
-    omitted = len(evidence) > 4 or len(requested) > 4 or len(str(data.get('interpretation', ''))) > 600
+    facts = [levels.get(ref) if isinstance(ref, str) else None for ref in evidence[:MAX_EVIDENCE_REFS]]
+    omitted = (len(evidence) > MAX_EVIDENCE_REFS or len(requested) > MAX_COMPARISONS
+               or len(str(data.get('interpretation', ''))) > MAX_INTERPRETATION)
     text = interpretation_text(raw) + '\n공식 수치 대조(표시계획 기준·실제 주문 상태 아님, 도달·지지저항 증명 아님):'
     for fact in facts:
         line = ('\nUNKNOWN: 근거 참조 미확인.' if not fact else
@@ -202,11 +207,11 @@ def compile_explanation(raw, context, plan, *, scope, snapshot=None):
     return dict(receipt, sha256=digest(receipt))
 
 
-PROMPT = '''
+PROMPT = f'''
 Holding explanation_contract_version=1 replaces rationale with an object:
 This overrides earlier free-text rationale formatting, never economic or FAILED safety rules.
-interpretation (up to 600 characters, explicitly unverified model opinion),
-evidence_refs (up to 4), comparisons (up to 4 objects containing only level_ref,target_ref).
+interpretation (up to {MAX_INTERPRETATION} characters, explicitly unverified model opinion),
+evidence_refs (up to {MAX_EVIDENCE_REFS}), comparisons (up to {MAX_COMPARISONS} objects containing only level_ref,target_ref).
 Use interpretation only for qualitative market interpretation and action tradeoffs.
 Delegate market prices, source phases and before/after-TP relationships to references
 and comparisons; do not restate these numeric/source/order claims in interpretation.
@@ -222,4 +227,15 @@ The host compares ADJUST effective prices after calculation; other actions use c
 This display is not proof of live orders, support/resistance, travel order or fills.
 The original interpretation and other free-text fields remain unverified and auditable.
 Do not use absent explanation facts as a new WAIT gate or delay protective/FAILED EXIT.
+Lossless v1 input references: restore existing schema/table/gap/wrapper/proposal/recovery
+references first. A registered $explanation_copy raw copies this same receipt's original
+wrapper proposal rationale (WAIT=wait_proposal; c0/c1=candidates[0/1]); text copies its
+effective_plan.rationale. The sole bundle no_candidate_reason copy uses the WAIT wrapper's
+no_candidate_reason. They retain exact original text, values and canonical receipt hashes.
+A registered $explanation_source ma-structure-v1 rebuilds the source catalog from existing
+ma_structure and account facts: MARK uses mark_price and account_captured_at*1000;
+P:30m|1h:index:high|low|close|ma10|ma35 uses the same primary point's field, phase and as_of_ms;
+MA:level_id uses higher-frame level price, confirmed/forming phase and as_of_ms.
+Keep source numeric types and verify restored_sha256. No market data is omitted by these
+fixed references. Expand them before reading the source catalog or interpreting receipt hashes.
 '''

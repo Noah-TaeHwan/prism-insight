@@ -194,6 +194,7 @@ def test_resealed_source_replay_and_fresh_guard_still_allow_failed_exit(field, v
             reply['rationale'] = deepcopy(raw)
 
     args, calls = taped(ctx, mutate=mutate)
+    assert args[-1]['outcome']['status'] == 'COMPLETE', args[-1]['outcome']
     selected = args[-1]['outcome']['result']['selected']
     assert selected['explanation']['source_status'] == 'UNKNOWN'
     assert selected['explanation']['raw'] == raw
