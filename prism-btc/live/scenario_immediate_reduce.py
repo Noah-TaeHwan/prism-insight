@@ -34,8 +34,88 @@ def load(broker, ident):
     return json.loads(row[0])
 
 
+def _rejected(broker, body, ident):
+    """Validate archived no-order facts before skipping any source on restart."""
+    from live.scenario_execution import stable_link, decimal
+    records = body.get('rejected_restorations', {})
+    if not isinstance(records, dict):
+        broker._fail('reduce_rejection_corrupt')
+    for source_id, item in records.items():
+        source = next((s for s in body['sources'] if s['link_id'] == source_id), None)
+        proof = item.get('proof', {})
+        request = proof.get('request', {})
+        expected = stable_link(ident, 'partial_sl', 'reduce:' + source_id)
+        if (not source or source['kind'] != 'partial_sl' or proof.get('version') != 1
+                or proof.get('source') not in {'PYBIT_INVALID_REQUEST', 'EXPLICIT_RESPONSE', 'PREFLIGHT_MARK_CROSSED'}
+                or proof.get('request_sha256') != hashlib.sha256(_wire(request).encode()).hexdigest()
+                or request.get('orderLinkId') != expected or request.get('reduceOnly') is not True
+                or request.get('orderType') != 'Market' or request.get('triggerBy') != 'MarkPrice'
+                or proof.get('main_uid') != broker.expected_main_uid
+                or proof.get('endpoint') != 'https://api-demo.bybit.com'):
+            broker._fail('reduce_rejection_corrupt')
+        terms = {k: v for k, v in source['request'].items()
+                 if k not in {'orderLinkId', 'category', 'symbol', 'positionIdx', 'qty'}}
+        if (any(request.get(k) != v for k, v in terms.items())
+                or request.get('category') != 'linear' or request.get('symbol') != 'BTCUSDT'
+                or request.get('positionIdx') != 0
+                or not 0 < decimal(request.get('qty')) <= decimal(source['unfilled'])
+                or not 0 <= decimal(proof.get('captured_at')) <= decimal(broker.clock())):
+            broker._fail('reduce_rejection_corrupt')
+        if proof['source'] != 'PREFLIGHT_MARK_CROSSED':
+            child = item.get('child', {})
+            if (type(proof.get('code')) is not int or proof['code'] not in {110092, 110093}
+                    or child.get('link_id') != expected or child.get('intent_id') != ident
+                    or child.get('scenario_id') != body['payload']['scenario_id']
+                    or child.get('kind') != 'partial_sl' or child.get('local_id') != 'reduce:' + source_id
+                    or child.get('request') != request or child.get('status') != 'UNKNOWN'
+                    or child.get('order_id') is not None or child.get('evidence') is not None):
+                broker._fail('reduce_rejection_corrupt')
+            if proof['source'] == 'EXPLICIT_RESPONSE' and proof.get('response', {}).get('retCode') != proof['code']:
+                broker._fail('reduce_rejection_corrupt')
+        else:
+            mark, trigger = decimal(proof.get('mark_price')), decimal(request.get('triggerPrice'))
+            if not ((request.get('triggerDirection') == 1 and mark >= trigger)
+                    or (request.get('triggerDirection') == 2 and mark <= trigger)):
+                broker._fail('reduce_rejection_corrupt')
+        if any(c['link_id'] == expected for c in broker.children()):
+            broker._fail('reduce_rejection_child_conflict')
+    return records
+
+
+def _archive_rejection(broker, body, ident, source, proof, *, created=False):
+    from live.scenario_execution import encoded
+    child = None
+    if created:
+        child = next((c for c in broker.children() if c['link_id'] == proof['request']['orderLinkId']), None)
+        if (not child or child['intent_id'] != ident or child['scenario_id'] != body['payload']['scenario_id']
+                or child['kind'] != 'partial_sl' or child['local_id'] != 'reduce:' + source['link_id']
+                or child['status'] != 'UNKNOWN' or child['order_id'] is not None
+                or child['evidence'] is not None or child['request'] != proof['request']):
+            broker._fail('reduce_rejection_child_conflict')
+    body.setdefault('rejected_restorations', {})[source['link_id']] = dict(child=child, proof=proof)
+    broker.conn.execute('SAVEPOINT reduce_rejection')
+    try:
+        _save(broker, ident, body, commit=False)
+        if child:
+            deleted = broker.conn.execute("DELETE FROM llm_scenario_children WHERE link_id=? AND intent_id=? AND status='UNKNOWN' AND order_id IS NULL AND evidence IS NULL AND request=?",
+                (child['link_id'], ident, encoded(child['request'])))
+            if deleted.rowcount != 1:
+                broker._fail('reduce_rejection_delete_conflict')
+        _rejected(broker, body, ident)
+        broker.conn.execute('RELEASE reduce_rejection')
+        broker.conn.commit()
+    except Exception:
+        try:
+            broker.conn.execute('ROLLBACK TO reduce_rejection')
+            broker.conn.execute('RELEASE reduce_rejection')
+        except Exception:
+            broker.conn.rollback()
+        raise
+
+
 def result(broker, ident):
     body = load(broker, ident)
+    _rejected(broker, body, ident)
     return dict(status=body["status"], intent_id=ident,
                 failed_source_ids=body.get("failed_source_ids", []),
                 restored_exit_targets_complete=body["status"] == "COMPLETE")
@@ -146,6 +226,7 @@ def execute(broker, payload, ident):
     """Restart-safe state machine: cancellation, one IOC, exact result, restore."""
     from live.scenario_execution import decimal, text_number
     body = load(broker, ident)
+    _rejected(broker, body, ident)
     if body["payload"] != payload:
         broker._fail("reduce_preparation_changed")
     if body["status"] in RESOLVED:
@@ -235,7 +316,9 @@ def execute(broker, payload, ident):
         # Fixed restoration quotas survive retries and racing restored fills.
         allocated = {"tp": Decimal(0), "partial_sl": Decimal(0)}
         for source in body["sources"]:
-            _, size = _observation(broker, body)
+            observed, size = _observation(broker, body)
+            if source['link_id'] in body.get('rejected_restorations', {}):
+                continue
             quota = decimal(source["unfilled"])
             quantity = (quota * original_remaining / basis / instrument["step"]).to_integral_value(rounding=ROUND_DOWN) * instrument["step"] if basis else Decimal(0)
             quantity = min(quantity, quota)
@@ -263,9 +346,29 @@ def execute(broker, payload, ident):
             request = {k: v for k, v in source["request"].items()
                        if k not in {"orderLinkId", "category", "symbol", "positionIdx", "qty"}}
             request["qty"] = text_number(quantity)
-            broker._submit(payload, ident, kind, local_id, request)
+            from live.scenario_execution import RestorationNotAccepted, stable_link
+            full_request = dict(request, category='linear', symbol='BTCUSDT', positionIdx=0,
+                orderLinkId=stable_link(ident, kind, local_id))
+            if kind == 'partial_sl' and request.get('triggerBy') == 'MarkPrice':
+                mark, trigger = decimal(observed['mark_price']), decimal(request['triggerPrice'])
+                if not 0 <= broker.clock() - observed['captured_at'] <= 10:
+                    broker._fail('reduce_restore_mark_stale')
+                if ((request.get('triggerDirection') == 1 and mark >= trigger)
+                        or (request.get('triggerDirection') == 2 and mark <= trigger)):
+                    proof = dict(version=1, source='PREFLIGHT_MARK_CROSSED', code=None,
+                        request=full_request, request_sha256=hashlib.sha256(_wire(full_request).encode()).hexdigest(),
+                        main_uid=broker.expected_main_uid, endpoint=broker.session.endpoint,
+                        captured_at=observed['captured_at'], mark_price=str(mark))
+                    _archive_rejection(broker, body, ident, source, proof)
+                    continue
+            try:
+                broker._submit(payload, ident, kind, local_id, request)
+            except RestorationNotAccepted as exc:
+                if not exc.created_this_invocation or exc.proof['request'] != full_request:
+                    raise
+                _archive_rejection(broker, body, ident, source, exc.proof, created=True)
             _, size = _observation(broker, body)
-        failed = []
+        failed = list(body.get('rejected_restorations', {}))
         for source in body["sources"]:
             child = next((c for c in broker.children(payload["scenario_id"])
                           if c["intent_id"] == ident and c["kind"] == source["kind"]

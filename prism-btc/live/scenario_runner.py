@@ -108,6 +108,20 @@ def _run_once(conn, broker, *, execute=False, protect_only=False,
     return runtime.tick()
 
 
+def observe_pending_market(result, snapshot, *, clock=time.time):
+    """Collect outside trading locks; never authorize a model call or an order."""
+    from live.scenario_runtime import snapshot_input_time
+    result = dict(result, market_observation_only=True, model_called=False)
+    try:
+        observed = snapshot()
+        if observed.get('valid') is not True or not 0 <= clock()-snapshot_input_time(observed) <= 120:
+            raise ValueError('pending_market_snapshot_invalid')
+        result['market_observation_status'] = 'observed'
+    except Exception:
+        result['market_observation_status'] = 'failed'
+    return result
+
+
 def record_health(conn,result,*,snapshot=None,loop=None,clock=time.time):
     """Keep existing BTC liveness monitoring, without forging legacy bar cursors."""
     from live import tracking
@@ -116,12 +130,19 @@ def record_health(conn,result,*,snapshot=None,loop=None,clock=time.time):
     # Separate latest outcomes: protection success must not overwrite a failed
     # decision loop, and a legacy heartbeat is never this evidence.
     if loop in {"decision", "protection"}:
+        observation = ({"market_observation_only": True, "model_called": False,
+                        "market_observation_status": result.get('market_observation_status')}
+                       if result.get('market_observation_only') is True else {})
         tracking.set_meta(conn,"scenario_health_"+loop,json.dumps({
             "at":clock(),"status":status,"reason":result.get("reason"),
             "verified_flat_halt":result.get("verified_flat_halt") is True,
-            "verified_flat":result.get("verified_flat") is True},allow_nan=False),"demo")
-    if snapshot is not None and snapshot.get("valid") is True:
-        tracking.set_meta(conn,"scenario_input_asof_ms",snapshot_input_time(snapshot)*1000,"demo")
+            "verified_flat":result.get("verified_flat") is True, **observation},allow_nan=False),"demo")
+    if (snapshot is not None and snapshot.get("valid") is True
+            and result.get('market_observation_status') != 'failed'):
+        observed_ms = snapshot_input_time(snapshot)*1000
+        tracking.set_meta(conn,"scenario_market_observed_ms",observed_ms,"demo")
+        if result.get('market_observation_only') is not True:
+            tracking.set_meta(conn,"scenario_input_asof_ms",observed_ms,"demo")
     if status=="blocked" and result.get("reason")!="new_risk_halted":
         detail="scenario tick blocked: "+str(result.get("reason","unknown"))
         if result.get("failure_stage") in _FAILURE_STAGES:
@@ -268,6 +289,10 @@ def main():
         result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
                         snapshot=snapshot,proposal=operational_propose,
                         calculated_review=args.calculated_review, entry_contract_enabled=args.entry_contract)
+        if args.execute and result.get('status') == 'intent_pending' and not snapshots:
+            # Runtime returned before snapshot collection and released its locks.
+            # Keep observation alive without bypassing the unresolved-order fence.
+            result = observe_pending_market(result, snapshot)
         _record_health_best_effort(conn,result,snapshot=snapshots[-1] if snapshots else None,
                                    loop="protection" if args.protect_only else "decision")
         # Disabled adapters cannot produce trade notices. Delivery occurs only

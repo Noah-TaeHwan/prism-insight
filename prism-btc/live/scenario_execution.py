@@ -29,6 +29,27 @@ def encoded(value):
     return json.dumps(value, sort_keys=True, allow_nan=False)
 
 
+class RestorationNotAccepted(Exception):
+    """Fresh POST proof only; not an exchange order or terminal execution."""
+    def __init__(self, proof):
+        super().__init__('restoration_not_accepted')
+        self.proof = proof
+        self.created_this_invocation = False
+
+
+def restoration_rejection(broker, method, request, code, source, response):
+    if (method != 'place_order' or type(code) is not int or code not in {110092, 110093}
+            or request.get('reduceOnly') is not True or request.get('orderType') != 'Market'
+            or request.get('triggerBy') != 'MarkPrice' or not request.get('triggerPrice')
+            or request.get('triggerDirection') not in {1, 2}
+            or (source == 'EXPLICIT_RESPONSE' and (not isinstance(response.get('result', {}), dict)
+                or response.get('result', {}).get('orderId')))):
+        return None
+    return dict(version=1, code=code, source=source, response=response,
+        request=request, request_sha256=hashlib.sha256(encoded(request).encode()).hexdigest(),
+        main_uid=broker.expected_main_uid, endpoint=broker.session.endpoint, captured_at=broker.clock())
+
+
 def decimal(value):
     from live.scenario_broker import BrokerNotReady
     try:
@@ -109,7 +130,7 @@ class ScenarioExecution:
             result.append(item)
         return result
 
-    def _write(self, method, **params):
+    def _write(self, method, *, _restore_rejection=False, **params):
         if not self.execution_enabled:
             self._fail("scenario_execution_disabled")
         self._identity()  # Includes endpoint recheck on every mutation.
@@ -133,14 +154,48 @@ class ScenarioExecution:
                 self._fail("recovery_entry_audit_unavailable")
         from live.scenario_provenance import exchange_call, observed_time
         started = observed_time()
+        attempted = restored = False
         try:
-            response = getattr(self.session, method)(**params)
-        except Exception:
+            # A final SDK rejection proves nonacceptance only if no earlier
+            # hidden transport attempt could already have submitted this order.
+            absent = object()
+            previous_retry_settings = {}
+            try:
+                if _restore_rejection:
+                    for name, value in (('max_retries', 1), ('force_retry', False)):
+                        previous_retry_settings[name] = getattr(self.session, name, absent)
+                        setattr(self.session, name, value)
+                operation = getattr(self.session, method)
+                attempted = True
+                response = operation(**params)
+            finally:
+                for name, value in previous_retry_settings.items():
+                    if value is absent:
+                        delattr(self.session, name)
+                    else:
+                        setattr(self.session, name, value)
+                restored = True
+        except Exception as exc:
             exchange_call(method, params, started)
+            if _restore_rejection and attempted and restored:
+                try:
+                    from pybit.exceptions import InvalidRequestError
+                except ImportError:
+                    InvalidRequestError = ()
+                if isinstance(exc, InvalidRequestError):
+                    proof = restoration_rejection(self, method, params, getattr(exc, 'status_code', None),
+                        'PYBIT_INVALID_REQUEST', dict(message=getattr(exc, 'message', None),
+                        request=getattr(exc, 'request', None), time=getattr(exc, 'time', None)))
+                    if proof:
+                        raise RestorationNotAccepted(proof) from exc
             if probe:
                 self._probe_exchange_journal("EXCHANGE_ERROR", dict(audit, error="submission_unknown"))
             self._fail("submission_unknown")
         exchange_call(method, params, started, response=response)
+        if _restore_rejection and isinstance(response, dict):
+            proof = restoration_rejection(self, method, params, response.get('retCode'), 'EXPLICIT_RESPONSE', response)
+            if proof:
+                raise RestorationNotAccepted(proof)
         if probe:
             # Logging failure after a POST must never turn into a repeated POST.
             # The durable child UNKNOWN/ACK reconciliation remains authoritative.
@@ -362,7 +417,12 @@ class ScenarioExecution:
         self.conn.executemany("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,'UNKNOWN',NULL,NULL,?)",
             [(link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock())])
         self.conn.commit()  # Crash after this point can only recover by exact ID.
-        response = self._write("place_order",**request)
+        try:
+            response = self._write("place_order", _restore_rejection=(payload.get('action') == 'REDUCE'
+                and kind == 'partial_sl' and local_id.startswith('reduce:')), **request)
+        except RestorationNotAccepted as exc:
+            exc.created_this_invocation = True
+            raise
         order_id = response.get("result",{}).get("orderId")
         if not isinstance(order_id,str) or not order_id:
             self._fail("order_ack_identity_missing")

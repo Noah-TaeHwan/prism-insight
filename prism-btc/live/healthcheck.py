@@ -333,7 +333,9 @@ def _check_price_stale(conn, mode: str, now: datetime) -> dict | None:
         if mode == "demo":
             from live.scenario_control import legacy_management_allowed
             if not legacy_management_allowed(conn):
-                ms = tracking.get_meta(conn,"scenario_input_asof_ms",mode)
+                ms = tracking.get_meta(conn,"scenario_market_observed_ms",mode)
+                if ms is None:
+                    ms = tracking.get_meta(conn,"scenario_input_asof_ms",mode)
                 if ms is None:
                     return {"level":"warn","code":"price_stale","msg":"LLM 시나리오의 시세 관측 기록이 아직 없습니다."}
                 try:
@@ -360,6 +362,49 @@ def _check_price_stale(conn, mode: str, now: datetime) -> dict | None:
         return {"level": "alert", "code": "price_stale",
                 "msg": f"시세/처리 정지 — 마지막 처리된 30분봉 기준시각 {age:.0f}분 전"}
     return None
+
+
+def _check_execution_stalled(conn, mode: str, now: datetime) -> dict | None:
+    """Fresh market/protection observations cannot clear unresolved execution."""
+    if mode != 'demo':
+        return None
+    try:
+        from live.scenario_control import legacy_management_allowed
+        if legacy_management_allowed(conn):
+            return None
+        if not conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' LIMIT 1").fetchone():
+            return None
+        unknown = conn.execute("SELECT c.created_at FROM llm_scenario_children c JOIN llm_scenario_intents i "
+            "ON i.id=c.intent_id WHERE i.status='PENDING' AND c.status='UNKNOWN'").fetchall()
+        stamps = [r[0] for r in unknown]
+        if not stamps:
+            row = conn.execute('SELECT slot FROM llm_scenario_decisions ORDER BY slot DESC LIMIT 1').fetchone()
+            if not row:
+                return None
+            stamps = [row[0]*300]
+        current = now.timestamp()
+        if any(type(s) not in (int,float) or not math.isfinite(s) or not 0 < s <= current for s in stamps):
+            age_text = '대기 시각 확인 불가'
+        else:
+            age = (current-min(stamps))/60
+            if age <= 15:
+                return None
+            age_text = f'{age:.0f}분째 대기'
+        try:
+            protection = json.loads(tracking.get_meta(conn,'scenario_health_protection',mode) or '{}')
+            if not isinstance(protection, dict):
+                protection = {}
+        except Exception:
+            protection = {}  # Missing protection metadata cannot hide a proven stall.
+        stamp = protection.get('at')
+        protected = (protection.get('status') == 'protection_checked' and type(stamp) in (int,float)
+                     and math.isfinite(stamp) and 0 <= current-stamp <= 180)
+        detail = '최근 보호 점검은 정상이나 판단 재개와는 별개입니다.' if protected else '최근 보호 상태도 별도 확인이 필요합니다.'
+        return dict(level='alert',code='execution_stalled',msg=(
+            f'주문 결과 미확정으로 새 매매 판단이 보류되어 있습니다 — {age_text}, 미확정 주문 {len(unknown)}건. '
+            f'시세 관측이 갱신되어도 해결된 상태가 아닙니다. {detail}'))
+    except Exception:
+        return None  # Other price/daemon/protection checks remain independent.
 
 
 def _check_equity(conn, mode: str, now: datetime) -> dict | None:
@@ -463,6 +508,7 @@ _CHECKS = (
     _check_daemon,
     _check_error_burst,
     _check_price_stale,
+    _check_execution_stalled,
     _check_scenario_decision_halted,
     _check_equity,
     _check_stale_positions,
@@ -508,6 +554,7 @@ _CODE_TAG = {
     "daemon_down": "데몬정지",
     "error_burst": "에러폭주",
     "price_stale": "시세정지",
+    "execution_stalled": "주문확인정체",
     "decision_halted": "판단중단",
     "equity_missing": "자산없음",
     "equity_zero": "자산이상",
