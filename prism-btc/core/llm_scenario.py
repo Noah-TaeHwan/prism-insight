@@ -17,6 +17,7 @@ RISK_FRACTION = 0.02
 
 def immediate_reduce_allowed(context):
     return (type(context.get('immediate_reduce_version')) is int and context['immediate_reduce_version'] == 1
+        and context.get('immediate_reduce_available') is not False
         and context.get('scenario_id') is not None and bool(context.get('positions'))
         and context.get('pending_entries') == [] and context.get('accounting_status') == 'confirmed'
         and context.get('protection_ok') is True and context.get('legacy_fenced') is False

@@ -29,7 +29,7 @@ _OPTIONAL_STABLE = (
     "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
     "entry_goal_untrusted",
     'pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
-    'immediate_reduce_version', 'market_maximum_quantity',
+    'immediate_reduce_version', 'market_maximum_quantity', 'immediate_reduce_available',
 )
 
 
@@ -114,6 +114,8 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
                 or (original[key] != fresh[key] and (actionable or key != "new_risk_blocked"))):
             raise ValueError("review_guard_context_changed:" + key)
     for key in _OPTIONAL_STABLE:
+        if key == 'immediate_reduce_available' and selected_plan['action'] != 'REDUCE':
+            continue
         if goal_independent and key == 'entry_goal_untrusted':
             continue
         if (goal_independent and fresh.get('entry_goal_untrusted') is True

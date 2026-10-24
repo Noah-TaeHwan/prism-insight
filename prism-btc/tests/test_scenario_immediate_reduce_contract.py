@@ -152,7 +152,8 @@ def test_reduce_fresh_guard_rejects_changed_quantity_or_authority(field,value):
 
 
 @pytest.mark.parametrize('prepare_fails',[False,True])
-def test_runtime_atomically_prepares_reduce_and_preserves_original_plan(tmp_path,prepare_fails):
+@pytest.mark.parametrize('submission',['complete','ack_pending','ack_lost','query_unknown'])
+def test_runtime_atomically_prepares_reduce_and_preserves_original_plan(tmp_path,prepare_fails,submission):
     from tests.test_scenario_review_runtime import Broker,wire as runtime_wire
     from live.scenario_runtime import ScenarioRuntime
     from live.scenario_review_adapter import make_calculated_review_proposer
@@ -161,6 +162,16 @@ def test_runtime_atomically_prepares_reduce_and_preserves_original_plan(tmp_path
     conn=sqlite3.connect(tmp_path/'reduce.db')
     class ReduceBroker(Broker):
         capabilities=Broker.capabilities | {'immediate_reduce_v1'}
+        def execute(self,payload,ident):
+            super().execute(payload,ident)
+            if submission!='complete':
+                from live.scenario_broker import BrokerNotReady
+                conn.execute('CREATE TABLE llm_scenario_children(intent_id TEXT,scenario_id TEXT,kind TEXT,status TEXT,order_id TEXT)')
+                conn.execute('INSERT INTO llm_scenario_children VALUES(?,?,?,?,?)',
+                    (ident,payload['scenario_id'],'reduce','LIVE' if submission=='ack_pending' else 'UNKNOWN',
+                     None if submission=='ack_lost' else 'ack-order'))
+                conn.commit()
+                raise BrokerNotReady('exact_order_query_unknown' if submission=='query_unknown' else 'reduce_result_pending')
         def prepare_reduce(self,payload,ident):
             assert conn.in_transaction
             assert conn.execute('SELECT id FROM llm_scenario_intents WHERE id=?',(ident,)).fetchone()
@@ -191,7 +202,7 @@ def test_runtime_atomically_prepares_reduce_and_preserves_original_plan(tmp_path
     state['active']=dict(scenario_id='existing',initial_equity=10000,side='LONG',
         hard_stop=90,revision=0,created_at=now-600,expires_at=now+900,current_plan=deepcopy(current_plan))
     r._save(state)
-    r.tick()
+    outcome=r.tick()
     if prepare_fails:
         assert not conn.execute('SELECT id FROM prepared').fetchall()
         assert not conn.execute('SELECT id FROM llm_scenario_intents').fetchall()
@@ -202,6 +213,8 @@ def test_runtime_atomically_prepares_reduce_and_preserves_original_plan(tmp_path
         assert broker.executed[0]['reduce_plan']['requested_quantity']==.003
         assert conn.execute('SELECT count(*) FROM prepared').fetchone()[0]==1
         assert r.state()['active']['revision']==1
+        assert outcome['reason']==({'complete':'awaiting_exact_evidence','ack_pending':'awaiting_reduce_evidence',
+                                    'ack_lost':'submission_unknown','query_unknown':'submission_unknown'}[submission])
     assert r.state()['active']['current_plan']==current_plan
     assert r.state()['active']['initial_equity']==10000
 
@@ -230,3 +243,15 @@ def test_reduce_helper_is_source_bound_for_review_and_execution():
     assert binding['loaded_parity'][name]=='VERIFIED'
     manifest=_manifest()
     assert manifest['loaded_code_checks'][name]=='VERIFIED'
+
+
+def test_failed_restore_disables_only_new_reduce_not_management_schema():
+    ctx=holding()
+    normalized=validate_wire_proposal(reduction(ctx),ctx)
+    ctx['immediate_reduce_available']=False
+    schema=response_schema(ctx)
+    assert 'reduce_fraction' in schema['properties']
+    assert 'REDUCE' not in schema['properties']['action']['enum']
+    assert {'WAIT','ADJUST','EXIT'} <= set(schema['properties']['action']['enum'])
+    with pytest.raises(ValueError):
+        validate_scenario(normalized,ctx)

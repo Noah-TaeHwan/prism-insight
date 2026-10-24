@@ -1021,11 +1021,19 @@ class ScenarioRuntime:
                 try:
                     self.broker.execute(validated, ident)
                 except Exception as exc:
-                    from live.scenario_broker import BrokerCancellationPending
+                    from live.scenario_broker import BrokerCancellationPending, BrokerNotReady
                     self._notice("unknown:"+ident,dict(kind="PENDING",timestamp=self.clock()))
                     self.conn.commit()
-                    reason = ("awaiting_cancellation" if validated["action"] == "EXIT"
+                    reason = ("awaiting_cancellation" if validated["action"] in {"EXIT", "REDUCE"}
                               and isinstance(exc, BrokerCancellationPending) else "submission_unknown")
+                    if (validated['action'] == 'REDUCE' and type(exc) is BrokerNotReady
+                            and str(exc) == 'reduce_result_pending'):
+                        children = self.conn.execute(
+                            "SELECT status,order_id FROM llm_scenario_children WHERE intent_id=? AND scenario_id=? AND kind='reduce'",
+                            (ident, validated['scenario_id'])).fetchall()
+                        if (len(children) == 1 and children[0][0] == 'LIVE'
+                                and isinstance(children[0][1], str) and children[0][1]):
+                            reason = 'awaiting_reduce_evidence'
                     return {"status": "intent_pending", "reason": reason,
                             "review_update_receipt": receipt}
                 return {"status": "intent_pending", "reason": "awaiting_exact_evidence",
