@@ -37,7 +37,7 @@ def test_whole_path_uses_rounded_quantities_and_no_partial_stop_credit(side):
     assert len(json.dumps({'whole_plan_payoff': payoff}, separators=(',', ':')).encode()) < 200
 
 
-@pytest.mark.parametrize('case', ['missing_fee', 'zero_fee', 'nonpositive_loss', 'no_targets'])
+@pytest.mark.parametrize('case', ['missing_fee', 'zero_fee', 'nonpositive_loss', 'no_targets', 'subminimum_targets'])
 def test_unknown_cost_and_nonpositive_loss_are_not_invented(case):
     plan, ctx = funded()
     if case == 'missing_fee':
@@ -46,13 +46,17 @@ def test_unknown_cost_and_nonpositive_loss_are_not_invented(case):
         ctx['observed_execution_fee_evidence']['rates']['TAKER'].update(minimum=0, maximum=0)
     elif case == 'nonpositive_loss':
         plan['hard_stop'] = 110
-    else:
+    elif case == 'no_targets':
         plan['take_profits'] = []
-    payoff = _gross_projection(plan, ctx)['whole_plan_payoff']
-    if case == 'no_targets':
-        assert payoff['ratio'] == -1
     else:
-        assert payoff == dict(status='UNKNOWN', net_reward=None, full_stop_loss=None, ratio=None)
+        plan['take_profits'][0]['fraction'] = .05
+    projection = _gross_projection(plan, ctx)
+    payoff = projection['whole_plan_payoff']
+    assert payoff == dict(status='UNKNOWN', net_reward=None, full_stop_loss=None, ratio=None)
+    if case in {'no_targets', 'subminimum_targets'}:
+        stop = next(p for p in projection['joint_exit_paths']['paths'] if 'STOP' in p[0])
+        assert stop[1] == 1
+        assert stop[2] == projection['gross_at_full_stop'] == -20
 
 
 @pytest.mark.parametrize('boundary', ['holding', 'pending', 'lots', 'not_open', 'zero_quantity'])

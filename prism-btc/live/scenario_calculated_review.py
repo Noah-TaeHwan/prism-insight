@@ -323,7 +323,7 @@ def _gross_projection(plan, context, *, lots=None,
         result['joint_exit_paths'] = _joint_exit_paths(plan, targets, quantity, basis, minimum, fees)
         payoff = dict(status='UNKNOWN', net_reward=None, full_stop_loss=None, ratio=None)
         try:
-            path = next(p for p in result['joint_exit_paths']['paths'] if 'TP_STOP' in p[0] or 'STOP' in p[0])
+            path = next(p for p in result['joint_exit_paths']['paths'] if 'TP_STOP' in p[0])
             full_stop = result['fee_only_projection_at_full_stop']
             if full_stop.get('status') == 'AVAILABLE':
                 reward = _decimal(path[3][2])
