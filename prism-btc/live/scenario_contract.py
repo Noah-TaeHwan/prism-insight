@@ -10,6 +10,7 @@ import hashlib
 import math
 from core.llm_scenario import immediate_reduce_allowed
 from live.scenario_analysis_frames import allowed_evidence_path
+from live.scenario_explanation import enabled as explanation_enabled, rationale_schema, interpretation_text
 
 
 def identity_fields(context):
@@ -61,6 +62,8 @@ def response_schema(context):
                                                "max_reprices": {"type": "integer"}}),
                                        {"type": "null"}]},
                       rationale={"type": "string"}, leverage={"type": "integer", "enum": [10]})
+    if explanation_enabled(context):
+        properties['rationale'] = rationale_schema()
     if (context.get("stop_policy") or {}).get("version") == 1:
         properties["stop_revision"] = {"anyOf": [_object({
             "reason": {"type": "string"}, "structure_reference": {"type": "string"},
@@ -139,6 +142,12 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
     schema = response_schema(context)
     if not isinstance(payload, dict):
         raise ValueError("response_contract_mismatch")
+    if explanation_enabled(context):
+        # Keep original model objects in the caller's raw receipt. Only this
+        # economic wire copy receives text; missing explanation is not a veto.
+        schema['properties']['rationale'] = {'type': 'string'}
+        raw = payload.get('rationale')
+        payload = dict(payload, rationale=raw if isinstance(raw, str) and raw else interpretation_text(raw))
     if context.get("conditional_entry_version") == 1 and isinstance(payload.get("entries"), list):
         # Legacy regular-entry proposals are replayable; new wire schemas still
         # require an explicit nullable trigger field.

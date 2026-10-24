@@ -153,6 +153,15 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     validate_goal_pair(payload, None, goal_context)
     validated = validate_execution_prices(core, fresh)
     validate_goal_pair(payload, validated, goal_context)
+    from live.scenario_explanation import enabled as explanation_enabled, compile_explanation
+    if explanation_enabled(original):
+        explanation = compile_explanation(selected['raw_proposal'].get('rationale'), original,
+                                          validated, scope=selected['id'])
+        expected_explanation = selected.get('explanation')
+        if expected_explanation != explanation:
+            raise ValueError('review_guard_explanation_receipt_changed')
+        payload = dict(payload, rationale=explanation['text'])
+        validated = dict(validated, rationale=explanation['text'])
     if research_mode != "legacy" and selected["id"] != "WAIT" and not renewal:
         from live.scenario_risk_allocation import validate_allocation_prices
         validate_allocation_prices(validated, selected["allocation_receipt"], fresh)

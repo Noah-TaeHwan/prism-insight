@@ -14,12 +14,15 @@ from core.llm_scenario import EconomicProposalRejection, ScenarioValidationError
 from core.scenario_limit_prices import preview_execution_prices
 from engine.scenario_ma_context import build_ma_structure_context
 from live import scenario_llm
-from live.scenario_contract import _matches, _object, response_schema, validate_wire_proposal
+from live.scenario_contract import _object, response_schema, validate_wire_proposal
 from live.scenario_entry_contract import strip_metadata
 from live.scenario_entry_goal import GoalConsistencyRejection, prepare_goal_source, validate_goal_pair
 from live.scenario_position_flow import project_position_flow_input, project_holding_price_order_input
 from live.scenario_analysis_frames import analysis_model_view
 from live.scenario_runtime import snapshot_input_time
+from live.scenario_explanation import (enabled as explanation_enabled, rationale_schema,
+    model_matches, bind_receipt, compile_explanation, project_input as project_explanation_input,
+    PROMPT as EXPLANATION_PROMPT)
 
 
 DRAFT_PROMPT = """
@@ -482,6 +485,7 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
             receipt.update(effective_plan=effective, effective_sha256=receipt_hash(effective),
                 current_reserved_risk=_current_reserved_risk(context),
                 projection=_holding_projection(effective, context), eligible=True)
+            bind_receipt(receipt, context)
             receipt["receipt_sha256"] = receipt_hash(receipt)
             return receipt
         # Canceled orders retain their reservation until confirmed by the host.
@@ -528,13 +532,15 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
         if strict or context.get('entry_contract_version') == 2:
             raise
         receipt["rejection"] = "wire_economic_or_calculation_invalid"
+    bind_receipt(receipt, context)
     receipt["receipt_sha256"] = receipt_hash(receipt)
     return receipt
 
 
 def _model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
-    return project_holding_price_order_input(_base_model_payload(snapshot, context, response_contract,
+    baseline = project_holding_price_order_input(_base_model_payload(snapshot, context, response_contract,
         calculated_candidates=calculated_candidates))[0]
+    return project_explanation_input(baseline, context)
 
 
 def _base_model_payload(snapshot, context, response_contract, *, calculated_candidates=None):
@@ -542,6 +548,7 @@ def _base_model_payload(snapshot, context, response_contract, *, calculated_cand
     model_context.pop('seen_action_ids', None)
     model_context.pop('entry_goal_source', None)
     model_context.pop('entry_goal_decision_slot', None)
+    model_context.pop('explanation_source', None)
     recovery = context.get("recovery") or {}
     # Interpretation-only copy. Do not alter source context, receipt hashes or
     # authorization; missing/non-boolean metadata remains explicitly unknown.
@@ -633,7 +640,7 @@ def calculate_allocation_candidate(raw, context, *, candidate_id, original_input
     from live.scenario_risk_allocation import allocate_entry_risk, validate_allocation_prices
     original = deepcopy(raw)
     try:
-        if not _matches(original, allocation_response_schema(context)):
+        if not model_matches(original, allocation_response_schema(context), context):
             raise ValueError("research_allocation_contract")
         wire, allocation = allocate_entry_risk(original, context)
         receipt = calculate_candidate(wire, context, candidate_id=candidate_id,
@@ -682,7 +689,7 @@ def calculate_economic_candidate(raw, context, *, candidate_id, original_input_n
     from live.scenario_risk_allocation import (
         _filters, _number, _worst_unit_risk, allocate_entry_risk, validate_allocation_prices,
     )
-    if not _matches(raw, {"anyOf": _action_allocation_branches(context)["anyOf"]}):
+    if not model_matches(raw, {"anyOf": _action_allocation_branches(context)["anyOf"]}, context):
         raise ValueError("research_allocation_contract")
     if (context.get("accounting_status") not in {"confirmed", "pending"}
             or (raw["action"] in {"OPEN", "ADJUST"} and context["accounting_status"] != "confirmed")
@@ -851,6 +858,8 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         return now
 
     base = scenario_llm.SYSTEM_PROMPT + scenario_llm.MA_STRUCTURE_PROMPT
+    if explanation_enabled(context):
+        base += EXPLANATION_PROMPT
     if context.get('pending_wait_policy_version') == 1:
         base += scenario_llm.PENDING_WAIT_PROMPT
     if context.get("entry_contract_version") in (1, 2):
@@ -878,7 +887,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     first_observation = (frozen_context.get("recovery") or {}).get("first_observation") is True
     draft_schema = _object(dict(wait_proposal=wait_schema,
         candidates=dict(type="array", maxItems=0 if wait_only or first_observation else 2,
-                        items=candidate_schema), no_candidate_reason=dict(type="string")))
+                        items=candidate_schema), no_candidate_reason=rationale_schema() if explanation_enabled(context) else dict(type="string")))
     if action_contract:
         schema = action_allocation_response_schema(frozen_context)
         payload = _model_payload(frozen_snapshot, frozen_context, schema)
@@ -916,7 +925,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
                              raw=result.text, elapsed_seconds=clock() - actual_started)))
         fresh()
         parsed = scenario_llm.parse_proposal(result.text)
-        if not _matches(parsed, output_schema):
+        if not model_matches(parsed, output_schema, frozen_context):
             raise ValueError("research_response_contract")
         return parsed
 
@@ -996,7 +1005,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         payload = _model_payload(frozen_snapshot, frozen_context, draft_schema)
     draft = call("candidate", draft_prompt, payload, draft_schema)
     category = "FIRST_OBSERVATION" if first_observation else "CANDIDATES_PROVIDED" if draft["candidates"] else "NO_CANDIDATES_SUPPLIED"
-    if len(draft["no_candidate_reason"]) > 2000 or (not draft["candidates"] and not draft["no_candidate_reason"].strip()):
+    if not explanation_enabled(context) and (len(draft["no_candidate_reason"]) > 2000 or (not draft["candidates"] and not draft["no_candidate_reason"].strip())):
         raise ValueError("research_missing_candidate_reason")
     now_context = dict(frozen_context, now=fresh())
     wait_wire = draft["wait_proposal"]
@@ -1016,6 +1025,9 @@ def research_review(snapshot, context, response_contract, *, generate, record,
                                              _allow_failed_wait_template=failed_template)
     effective_wait = validate_scenario({k: v for k, v in strip_metadata(wait_normalized).items() if k not in {"review", "recovery"}}, now_context)
     wait_receipt = dict(id="WAIT", raw_proposal=wait_wire, input_sha256=original)
+    if explanation_enabled(context):
+        wait_receipt['effective_plan'] = effective_wait
+        bind_receipt(wait_receipt, context)
     if effective_wait.get('pending_renewal'):
         wait_receipt['effective_plan'] = effective_wait
     if failed_template:
@@ -1044,6 +1056,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     if failed_template and not any(r["eligible"] for r in receipts):
         raise ValueError("research_failed_thesis_no_valid_exit")
     for receipt in receipts:
+        bind_receipt(receipt, now_context)
         if action_contract:
             _bind_model_wrapper(receipt, draft, receipt["raw_allocation_proposal"])
         receipt["input_sha256"] = original
@@ -1051,7 +1064,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         receipt["receipt_sha256"] = receipt_hash(receipt)
     bundle = dict(wait=wait_receipt, candidates=receipts, input_sha256=original,
                   no_candidate_category=category, category_source="HOST_DERIVED_FROM_STATE_AND_ARRAY",
-                  no_candidate_reason=draft["no_candidate_reason"],
+                  no_candidate_reason=draft.get("no_candidate_reason"),
                   qualitative_reason_truth="NOT_MECHANICALLY_VERIFIED")
     bundle_sha = receipt_hash(bundle)
     record(deepcopy(dict(kind="CALCULATED_CANDIDATES", body=bundle, sha256=bundle_sha)))
@@ -1063,7 +1076,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
                    for r in [wait_receipt] + receipts
                    if (r["id"] == "WAIT" and not failed_template) or (r["id"] != "WAIT" and r["eligible"])}
         selection_schema = _object(dict(selection_token=dict(type="string", enum=list(choices)),
-                                        rationale=dict(type="string")))
+                                        rationale=rationale_schema() if explanation_enabled(context) else dict(type="string")))
         # Re-project with the phase-specific contract so restoration hashes remain
         # valid. Market/account facts are unchanged; only obsolete output rules go.
         selection_payload = _model_payload(frozen_snapshot, frozen_context, selection_schema,
@@ -1071,16 +1084,20 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         selection_wire = call("selection", SELECT_PROMPT, selection_payload, selection_schema)
         chosen = choices[selection_wire["selection_token"]]
         final = dict(selection=chosen["id"], receipt_sha256=chosen["receipt_sha256"],
-                     rationale=selection_wire["rationale"])
+                     rationale=selection_wire.get("rationale"))
     else:
         final = dict(selection="WAIT", receipt_sha256=wait_receipt["receipt_sha256"],
-                     rationale=draft["no_candidate_reason"])
+                     rationale=draft.get("no_candidate_reason"))
     fresh()
     if receipt_hash(bundle) != bundle_sha:
         raise ValueError("research_candidate_mutated")
     selected = next((r for r in [wait_receipt] + receipts if r["id"] == final["selection"]), None)
     if selected is None or final["receipt_sha256"] != selected["receipt_sha256"]:
         raise ValueError("research_selection_hash")
+    if explanation_enabled(context):
+        final['explanation'] = compile_explanation(final['rationale'], context,
+            selected.get('effective_plan') or selected['raw_proposal'], scope=selected['id'])
+        final['rationale'] = final['explanation']['text']
     if not isinstance(final["rationale"], str) or not 1 <= len(final["rationale"].strip()) <= 2000:
         raise ValueError("research_selection_rationale")
     if selected["raw_proposal"]["expires_at"] <= fresh():

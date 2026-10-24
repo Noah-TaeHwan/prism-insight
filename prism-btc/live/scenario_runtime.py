@@ -408,7 +408,8 @@ class ScenarioRuntime:
         for key in ('pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
                     'entry_contract_version', 'registered_entry_contract', 'entry_contract_status',
                     'entry_contract_failure_rule', 'entry_contract_observation', 'previous_thesis_assessment',
-                    'entry_goal_source', 'entry_goal_untrusted', 'entry_goal_decision_slot', 'immediate_reduce_version'):
+                    'entry_goal_source', 'entry_goal_untrusted', 'entry_goal_decision_slot', 'immediate_reduce_version',
+                    'explanation_contract_version', 'explanation_source'):
             ctx.pop(key, None)
         if ('immediate_reduce_v1' in self.broker.capabilities
                 and callable(getattr(self.broker, 'prepare_reduce', None))):
@@ -741,6 +742,11 @@ class ScenarioRuntime:
                         outcome["lock_wait_seconds"] = snapshot_lock["lock_wait_seconds"]
                     return outcome
                 ctx["now"] = now
+                if (self.calculated_review_enabled and 'single' not in self.research_review_mode
+                        and ctx.get('scenario_id') is not None and ctx.get('positions')):
+                    from live.scenario_explanation import prepare_source
+                    ctx['explanation_contract_version'] = 1
+                    prepare_source(snap, ctx)
                 if ctx.get('entry_contract_version') == 2 and ctx.get('scenario_id') is None:
                     ctx['entry_goal_decision_slot'] = slot
                 from live.scenario_entry_goal import prepare_goal_source
