@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 import ast
+from live import scenario_immediate_reduce
 import types
 import importlib.metadata
 import inspect
@@ -67,6 +68,7 @@ def review_policy_binding(*, research_mode="legacy"):
         'live/scenario_entry_display.py': scenario_entry_display,
         'live/scenario_analysis_frames.py': scenario_analysis_frames,
         'live/scenario_position_flow.py': scenario_position_flow,
+        'live/scenario_immediate_reduce.py': scenario_immediate_reduce,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
     if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
@@ -198,7 +200,7 @@ def _manifest():
                     'live/scenario_preview.py', 'engine/scenario_snapshot.py',
                     'engine/scenario_ma_context.py',
                     'engine/indicators.py']
-    execution_files = ['live/scenario_execution.py', 'live/scenario_accounting.py',
+    execution_files = ['live/scenario_execution.py', 'live/scenario_accounting.py', 'live/scenario_immediate_reduce.py',
                        'core/scenario_limit_prices.py', 'core/llm_scenario.py',
                        'core/scenario_stop_policy.py']
     sources, policy, execution, parity = {}, {}, {}, {}

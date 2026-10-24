@@ -408,8 +408,13 @@ class ScenarioRuntime:
         for key in ('pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
                     'entry_contract_version', 'registered_entry_contract', 'entry_contract_status',
                     'entry_contract_failure_rule', 'entry_contract_observation', 'previous_thesis_assessment',
-                    'entry_goal_source', 'entry_goal_untrusted', 'entry_goal_decision_slot'):
+                    'entry_goal_source', 'entry_goal_untrusted', 'entry_goal_decision_slot', 'immediate_reduce_version'):
             ctx.pop(key, None)
+        if ('immediate_reduce_v1' in self.broker.capabilities
+                and callable(getattr(self.broker, 'prepare_reduce', None))):
+            ctx['immediate_reduce_version'] = 1
+            ctx['unknown_intents'] = bool(self.conn.execute(
+                "SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' OR status IS NULL").fetchone())
         hard_risk_blocked = ctx.get("new_risk_blocked")
         for flag in ("legacy_fenced", "protection_ok", "new_risk_blocked"):
             if type(ctx.get(flag)) is not bool:
@@ -984,6 +989,8 @@ class ScenarioRuntime:
                         receipt=final_guard["receipt"]),commit=False)
                 self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
                                   (ident, validated["scenario_id"], _json(validated)))
+                if validated['action'] == 'REDUCE':
+                    self.broker.prepare_reduce(validated, ident)
                 self._save(state)  # Intent precedes the first exchange side effect.
                 record_hashed("intent_committed", {"payload": validated, "risk": validated.get("risk"),
                               "initial_equity": fresh["initial_equity"],

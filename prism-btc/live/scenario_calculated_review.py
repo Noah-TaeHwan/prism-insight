@@ -330,6 +330,16 @@ def _holding_projection_values(plan, context):
     lots = context["positions"]
     if any(_decimal(row["price"]) <= 0 or _decimal(row["quantity"]) <= 0 for row in lots):
         return unavailable
+    if plan['action'] == 'REDUCE':
+        quantity = sum((_decimal(row['quantity']) for row in lots), Decimal(0))
+        requested = _decimal(plan['reduce_plan']['requested_quantity'])
+        average = sum((_decimal(row['price']) * _decimal(row['quantity']) for row in lots), Decimal(0)) / quantity
+        gross = (1 if side == 'LONG' else -1) * (_decimal(context['mark_price']) - average) * requested
+        return dict(status='AVAILABLE', assumption='REDUCE_LEG_AT_MARK_NOT_FILL_OR_WHOLE_SCENARIO_NET',
+                    reduce_plan=deepcopy(plan['reduce_plan']), estimated_leg_gross_at_mark=float(gross),
+                    actual_future_fees=None, actual_future_slippage=None, actual_net_pnl=None,
+                    remaining_targets='PRESERVE_EXISTING_ABSOLUTE_QUOTAS_CAPPED_BY_REMAINDER',
+                    native_full_stop='UNCHANGED')
     if plan["action"] == "EXIT":
         mark = _decimal(context["mark_price"])
         equity = _decimal(context["initial_equity"])
@@ -457,11 +467,11 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
                        actual_future_fees=None, actual_future_funding=None))
     try:
         normalized = validate_wire_proposal(raw, context)
-        if normalized["action"] not in ("OPEN", "ADJUST", "EXIT"):
+        if normalized["action"] not in ("OPEN", "ADJUST", "EXIT", "REDUCE"):
             raise ValueError("candidate_not_actionable")
         core = {key: value for key, value in strip_metadata(normalized).items()
                 if key not in {"review", "recovery"}}
-        if core["action"] == "EXIT":
+        if core["action"] in {"EXIT", "REDUCE"}:
             effective = preview_execution_prices(core,context,original_input_now=original_now)
             quotes=context.get("limit_price_quotes")
             receipt["pricing_basis"]=dict(kind="ORIGINAL_INPUT_HYPOTHETICAL",
@@ -734,11 +744,13 @@ def _action_allocation_branches(context, actions=None):
                 props["entry_contract"] = entry_contract_schema(context['entry_contract_version'])
             else:
                 props["entry_contract"] = {"type": "null"}
-        if action in {"WAIT", "EXIT"}:
+        if action in {"WAIT", "EXIT", "REDUCE"}:
             for field in ("side", "hard_stop", "chase"):
                 props[field] = {"type": "null"}
             for field in ("entries", "take_profits", "partial_stops"):
                 props[field]["maxItems"] = 0
+            if action == 'REDUCE':
+                props['cancel_entry_ids']['maxItems'] = 0
         else:
             sides = [context["side"]] if action == "ADJUST" else ["LONG", "SHORT"]
             props["side"] = dict(type="string", enum=sides)
@@ -748,6 +760,8 @@ def _action_allocation_branches(context, actions=None):
                 props["entries"]["minItems"] = 1
         if 'pending_renewal' in props and action != 'WAIT':
             props['pending_renewal'] = {'type': 'null'}
+        if 'reduce_fraction' in props:
+            props['reduce_fraction'] = {'type': 'number' if action == 'REDUCE' else 'null'}
         branches.append(branch)
     return {"anyOf": branches}
 
@@ -852,7 +866,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
     for field in ("entries", "take_profits", "partial_stops"):
         wait_schema["properties"][field]["maxItems"] = 0
     candidate_schema = deepcopy(schema)
-    candidate_schema["properties"]["action"]["enum"] = ["OPEN"] if context.get("scenario_id") is None else ["ADJUST", "EXIT"]
+    candidate_schema["properties"]["action"]["enum"] = [a for a in candidate_schema['properties']['action']['enum'] if a != 'WAIT']
     wait_only = schema["properties"]["action"]["enum"] == ["WAIT"]
     first_observation = (frozen_context.get("recovery") or {}).get("first_observation") is True
     draft_schema = _object(dict(wait_proposal=wait_schema,
@@ -863,7 +877,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         payload = _model_payload(frozen_snapshot, frozen_context, schema)
         draft_schema["properties"]["wait_proposal"] = _action_allocation_branches(frozen_context, {"WAIT"})
         # Empty arrays still need a valid item schema, even in WAIT-only state.
-        candidates = _action_allocation_branches(frozen_context, {"OPEN", "ADJUST", "EXIT"})
+        candidates = _action_allocation_branches(frozen_context, {"OPEN", "ADJUST", "EXIT", "REDUCE"})
         draft_schema["properties"]["candidates"]["items"] = candidates if candidates["anyOf"] else _action_allocation_branches(frozen_context)
 
     def call(phase, appendix, data, output_schema):
@@ -871,7 +885,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         prompt = _encoded(data)
         if len(prompt.encode()) > 100_000:
             raise ValueError("research_input_size")
-        request = dict(system_prompt=base + appendix, user_prompt=prompt,
+        request = dict(system_prompt=scenario_llm.immediate_reduce_instructions(base + appendix, frozen_context), user_prompt=prompt,
             model=scenario_llm.MODEL, reasoning_effort=scenario_llm.EFFORT,
             fast_tier=True, timeout=scenario_llm.TIMEOUT_SECONDS - (now - started),
             mcp_profile=None, response_schema=output_schema, retry_transport=False)

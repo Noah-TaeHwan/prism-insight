@@ -964,6 +964,26 @@ def parse_proposal(text: str) -> dict:
     return value
 
 
+def immediate_reduce_instructions(text, context):
+    if context.get('immediate_reduce_version') != 1:
+        return text
+    text = text.replace('Immediate partial market reduction is unsupported; do not invent an\naction',
+                        'Immediate partial market reduction uses only an offered REDUCE action; do not invent another action')
+    text = text.replace('ADJUST/EXIT when active', 'ADJUST/EXIT or offered REDUCE when active')
+    return text + '''
+REDUCE is available only when the response schema offers it for confirmed protected
+holdings without pending/unknown orders. Compare a justified immediate partial
+reduction against WAIT, conditional ADJUST and full EXIT; it is not mandatory.
+REDUCE uses reduce_fraction strictly between 0 and 1, null side/hard_stop/chase,
+empty entries/take_profits/partial_stops/cancel_entry_ids, and no pending renewal.
+Other actions require reduce_fraction=null. The host floors quantity to step and
+requires valid nonzero reduction and remainder; never supply reduce_plan.
+REDUCE preserves the native Full SL and original target prices/absolute quotas;
+it does not reset the entry thesis, budget or filled quotas. Actual fees/slippage
+and fill timing remain unknown. FAILED requires full EXIT, never partial delay.
+'''
+
+
 def propose(snapshot: dict, context: dict, response_contract: dict, *,
             generate: Callable | None = None, clock: Callable = time.time) -> dict:
     """Read-only proposal; caller must revalidate against fresh execution state.
@@ -1026,6 +1046,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
         system_prompt += entry_contract_prompt(context)
     if flat_entry:
         system_prompt += FLAT_ENTRY_PROMPT
+    system_prompt = immediate_reduce_instructions(system_prompt, context)
     from live.scenario_recovery import record_model_request, record_model_wire, record_model_error
     record_model_request(system_prompt=system_prompt, user_prompt=prompt,
                          response_schema=schema, model=MODEL, effort=EFFORT, fast=True,

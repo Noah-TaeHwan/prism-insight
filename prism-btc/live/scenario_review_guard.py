@@ -29,6 +29,7 @@ _OPTIONAL_STABLE = (
     "entry_contract_version", "registered_entry_contract", "entry_contract_status", "entry_contract_failure_rule",
     "entry_goal_untrusted",
     'pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
+    'immediate_reduce_version', 'market_maximum_quantity',
 )
 
 
@@ -84,11 +85,11 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     result = outcome["result"]
     selected = result["selected"]
     renewal = bool(selected['raw_proposal'].get('pending_renewal'))
-    actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST"} or renewal
+    actionable = selected["raw_proposal"]["action"] in {"OPEN", "ADJUST", "REDUCE"} or renewal
     original, fresh = deepcopy(original_context), deepcopy(fresh_context)
     selected_plan = selected['raw_proposal']
     goal_independent = (original.get('entry_contract_version') == 2 and not renewal
-        and (selected_plan['action'] in {'WAIT', 'EXIT'}
+        and (selected_plan['action'] in {'WAIT', 'EXIT', 'REDUCE'}
              or (selected_plan['action'] == 'ADJUST' and not selected_plan.get('entries')
                  and not selected_plan.get('take_profits'))))
     goal_context = original
@@ -145,7 +146,7 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     core = {key: value for key, value in strip_metadata(payload).items() if key not in {"review", "recovery"}}
     if core.get('pending_renewal') is None:
         core.pop('pending_renewal', None)
-    if actionable and not renewal:
+    if core['action'] in {'OPEN', 'ADJUST'}:
         _supplied_instrument_filters(core, fresh)
     validate_goal_pair(payload, None, goal_context)
     validated = validate_execution_prices(core, fresh)
@@ -153,7 +154,7 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     if research_mode != "legacy" and selected["id"] != "WAIT" and not renewal:
         from live.scenario_risk_allocation import validate_allocation_prices
         validate_allocation_prices(validated, selected["allocation_receipt"], fresh)
-    if actionable and not renewal:
+    if core['action'] in {'OPEN', 'ADJUST'}:
         _supplied_instrument_filters(validated, fresh)
     if core["action"] != "WAIT" or renewal:
         expected = selected["effective_plan"]

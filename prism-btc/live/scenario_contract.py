@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from core.llm_scenario import immediate_reduce_allowed
 from live.scenario_analysis_frames import allowed_evidence_path
 
 
@@ -64,6 +65,10 @@ def response_schema(context):
         properties["stop_revision"] = {"anyOf": [_object({
             "reason": {"type": "string"}, "structure_reference": {"type": "string"},
             "input_id": {"type": "string", "enum": [context["input_id"]]}}), {"type": "null"}]}
+    if type(context.get('immediate_reduce_version')) is int and context['immediate_reduce_version'] == 1:
+        properties['reduce_fraction'] = {'type': ['number','null']}
+        if immediate_reduce_allowed(context):
+            properties['action']['enum'].append('REDUCE')
     if context.get("review_contract_version") == 1:
         properties["review"] = {"anyOf": [_object({
             "conditions": {"type": "array", "maxItems": 3, "items": _object({
@@ -189,7 +194,7 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
     normalized["entries"] = [{key: value for key, value in row.items()
                               if key != "trigger_price" or value is not None}
                              for row in payload["entries"]]
-    if payload["action"] in ("WAIT", "EXIT"):
+    if payload["action"] in ("WAIT", "EXIT", "REDUCE"):
         if any(payload[key] is not None for key in ("side", "hard_stop", "chase")):
             raise ValueError("response_contract_inactive_protection")
         if any(payload[key] for key in ("entries", "take_profits", "partial_stops")):
@@ -198,6 +203,12 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
             del normalized[key]
     elif any(payload[key] is None for key in ("side", "hard_stop", "chase")):
         raise ValueError("response_contract_missing_protection")
+    if payload['action'] == 'REDUCE':
+        fraction = payload.get('reduce_fraction')
+        if type(fraction) not in (int,float) or not 0 < fraction < 1 or payload['cancel_entry_ids']:
+            raise ValueError('response_reduce_fraction_or_cancellation')
+    elif normalized.pop('reduce_fraction', None) is not None:
+        raise ValueError('response_reduce_fraction_requires_reduce')
     if has_stop_policy and payload["action"] == "ADJUST" and stop_revision is not None:
         normalized["stop_revision"] = stop_revision
     if has_review:

@@ -26,7 +26,8 @@ def inputs(duration_ms=600000):
 def wait_policy(snapshot,c):
     return dict(schema_version=1,scenario_id='fixture',revision=c['revision']+1,input_id=c['input_id'],
                 action_id='wait-'+str(c['now']),action='WAIT',confidence=.2,expires_at=c['now']+60,
-                entries=[],take_profits=[],partial_stops=[],rationale='synthetic wait')
+                entries=[],take_profits=[],partial_stops=[],rationale='synthetic wait',
+                **({'reduce_fraction':None} if c.get('immediate_reduce_version')==1 else {}))
 
 
 def test_full_runtime_record_and_frozen_replay_same_hash(tmp_path):
@@ -150,7 +151,8 @@ def test_strict_wire_fresh_and_frozen_preserve_trade_or_rejection(tmp_path,inval
         p=dict(identity_fields(c),action='EXIT' if c['scenario_id'] else 'OPEN',
                confidence=.5,expires_at=c['now']+600,leverage=10,
                side=None,hard_stop=None,chase=None,entries=[],take_profits=[],
-               partial_stops=[],cancel_entry_ids=[],rationale='synthetic contract test')
+               partial_stops=[],cancel_entry_ids=[],rationale='synthetic contract test',
+               **({'reduce_fraction':None} if c.get('immediate_reduce_version')==1 else {}))
         if p['action']=='OPEN':
             p.update(side='LONG',hard_stop=98,chase=dict(max_bps=0,max_reprices=0),
                      entries=[dict(id='e1',price=100,quantity=.1)])

@@ -42,6 +42,8 @@ def wire(ctx, action):
         take_profits=[dict(id="tp", price=120, fraction=.5)] if action == "OPEN" else [],
         partial_stops=[], cancel_entry_ids=[], chase=dict(max_bps=0, max_reprices=0) if action == "OPEN" else None,
         rationale="구조 판단", leverage=10, review=None, stop_revision=None)
+    if ctx.get('immediate_reduce_version') == 1:
+        result['reduce_fraction'] = None
     if ctx.get("recovery_contract_version") in (1, 2):
         result["recovery"] = dict(decision="PROBE" if action == "OPEN" else "OBSERVE",
             reason="관측한 가격 구조 변화", changed_evidence=["timeframes.30m.closed.close"] if action == "OPEN" else [],
