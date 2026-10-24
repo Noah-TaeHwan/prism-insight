@@ -88,7 +88,7 @@ def test_real_broker_context_passes_confirmed_finance_without_extra_collection()
     broker._active=lambda:dict(scenario_id='owned',side='SHORT',hard_stop=85650,initial_equity=9539.78)
     broker.children=lambda sid:[dict(kind='native_sl',status='LIVE',evidence={})]
     broker._daily=lambda observed:dict(new_risk_allowed=True,day='2026-10-06',day_start_equity=9600,daily_net_pnl=-60)
-    broker._instrument=lambda:dict(tick='.1',step='.001',minimum='.001',notional='5')
+    broker._instrument=lambda:dict(tick='.1',step='.001',minimum='.001',notional='5',market_maximum='100')
     broker._risk_accounting=lambda *args:evidence()
     broker._verify_protection=lambda *args:True
     broker._new_risk_enabled=lambda:True
@@ -97,6 +97,10 @@ def test_real_broker_context_passes_confirmed_finance_without_extra_collection()
     assert ctx['runner_economics']==view()
     assert ctx['account_captured_at']==1000
     assert ctx['previous_hard_stop']==85650
+    assert ctx['immediate_reduce_available'] is False
+    assert ctx['immediate_reduce_result'] == {'status': 'UNAVAILABLE', 'reason': 'runtime_schema_missing'}
+    assert broker.conn.total_changes == 0
+    assert broker.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == []
 
 
 @pytest.mark.parametrize('side,mark,stop,expected', [

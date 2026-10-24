@@ -22,6 +22,7 @@ TITLES = {
 REASONS = {
     "BREAKOUT":"수렴 뒤 돌파", "RETEST":"돌파 구간 재확인", "TREND_CONTINUATION":"단기 추세 지속",
     "TREND_INVALIDATED":"단기 추세 무효화", "HARD_STOP":"최종 손절", "PARTIAL_STOP":"부분 손절",
+    "IMMEDIATE_REDUCTION":"즉시 일부 감축",
     "TAKE_PROFIT":"부분 익절", "TRAILING_STOP":"추적 손절", "TIME_EXPIRED":"시나리오 만료",
     "THREE_LOSSES":"3개 시나리오 연속 순손실", "DAILY_LOSS":"하루 손실 한도 도달",
 }

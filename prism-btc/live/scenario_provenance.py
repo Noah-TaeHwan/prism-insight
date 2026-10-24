@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 import ast
+from live import scenario_immediate_reduce
 import types
 import importlib.metadata
 import inspect
@@ -38,7 +39,7 @@ def review_policy_binding(*, research_mode="legacy"):
                       scenario_review_guard, scenario_llm, scenario_contract,
                       scenario_model_input, scenario_preview, scenario_runtime,
                       scenario_entry_contract, scenario_position_flow, scenario_pending_renewal, scenario_entry_goal,
-                      scenario_entry_display, scenario_analysis_frames)
+                      scenario_entry_display, scenario_analysis_frames, scenario_explanation)
     from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
     from core import scenario_pending_renewal as pending_renewal_core
     from engine import scenario_ma_context, scenario_snapshot
@@ -66,7 +67,9 @@ def review_policy_binding(*, research_mode="legacy"):
         'live/scenario_entry_goal.py': scenario_entry_goal,
         'live/scenario_entry_display.py': scenario_entry_display,
         'live/scenario_analysis_frames.py': scenario_analysis_frames,
+        'live/scenario_explanation.py': scenario_explanation,
         'live/scenario_position_flow.py': scenario_position_flow,
+        'live/scenario_immediate_reduce.py': scenario_immediate_reduce,
         'live/scenario_provenance.py': sys.modules[__name__],
     }
     if research_mode not in {"legacy", "allocation-single", "allocation-calculated",
@@ -192,13 +195,14 @@ def _manifest():
                     'live/scenario_entry_goal.py',
                     'live/scenario_entry_display.py',
                     'live/scenario_analysis_frames.py',
+                    'live/scenario_explanation.py',
                     'live/scenario_position_flow.py', 'live/scenario_pending_renewal.py',
                     'core/scenario_pending_renewal.py',
                     'live/scenario_model_input.py',
                     'live/scenario_preview.py', 'engine/scenario_snapshot.py',
                     'engine/scenario_ma_context.py',
                     'engine/indicators.py']
-    execution_files = ['live/scenario_execution.py', 'live/scenario_accounting.py',
+    execution_files = ['live/scenario_execution.py', 'live/scenario_accounting.py', 'live/scenario_immediate_reduce.py',
                        'core/scenario_limit_prices.py', 'core/llm_scenario.py',
                        'core/scenario_stop_policy.py']
     sources, policy, execution, parity = {}, {}, {}, {}

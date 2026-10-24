@@ -138,7 +138,7 @@ def resolve_goal(goal, context):
 
 
 def validate_goal_plan(plan, resolved):
-    if not resolved or resolved['goal']['mode'] != 'BOUNDED_BEFORE' or plan.get('action') in {'WAIT', 'EXIT'}:
+    if not resolved or resolved['goal']['mode'] != 'BOUNDED_BEFORE' or plan.get('action') in {'WAIT', 'EXIT', 'REDUCE'}:
         return
     bound, side = resolved['price'], plan.get('side')
     if not number(bound) or side not in {'LONG', 'SHORT'}:

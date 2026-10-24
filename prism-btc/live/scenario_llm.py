@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from engine.scenario_ma_context import build_ma_structure_context
 from live.scenario_entry_display import project_entry_display_input
-from live.scenario_position_flow import project_position_flow_input
+from live.scenario_position_flow import project_position_flow_input, project_holding_price_order_input
 from live.scenario_analysis_frames import analysis_model_view, PRIMARY_FRAMES
 
 MODEL = "gpt-6.1-sol"
@@ -890,7 +890,7 @@ Qualitative FAILED is a separate model judgment, not proof that the host's numer
 failure rule was met. Explain it as model-assessed invalidation; never claim the
 code verified that judgment or invent confirmed numeric failure observations.
 In two-pass calculated review, wait_proposal and every candidate must carry the
-exact same thesis_assessment. A FAILED wait_proposal is a NONEXECUTABLE TEMPLATE
+same contract_id and status; reason wording may differ. A FAILED wait_proposal is a NONEXECUTABLE TEMPLATE
 only: supply a valid EXIT candidate; WAIT is excluded from selection. Do not use
 INTACT in the WAIT template to contradict FAILED in an EXIT candidate. Single-pass
 FAILED likewise requires EXIT. The host enforces this action constraint, not the
@@ -964,6 +964,36 @@ def parse_proposal(text: str) -> dict:
     return value
 
 
+def immediate_reduce_instructions(text, context):
+    if context.get('immediate_reduce_version') != 1:
+        return text
+    text = text.replace('Immediate partial market reduction is unsupported; do not invent an\naction',
+                        'Immediate partial market reduction uses only an offered REDUCE action; do not invent another action')
+    text = text.replace('ADJUST/EXIT when active', 'ADJUST/EXIT or offered REDUCE when active')
+    from live.scenario_explanation import enabled as explanation_enabled
+    if context.get('scenario_id') is not None and context.get('positions') and not explanation_enabled(context):
+        text += '\nUse holding_price_order when available for exact numeric comparisons: do not group a level beyond a TP with levels before that TP. It proves neither support nor active orders; missing/omitted display is unavailable, so use original sources.\n'
+    return text + '''
+REDUCE is available only when the response schema offers it for confirmed protected
+holdings with no pending_entries and no unknown_intents. Verified LIVE TP/partial-SL
+orders are not pending entries; the executor separately reconciles their cancellation.
+Compare a justified immediate partial
+reduction against WAIT, conditional ADJUST and full EXIT; it is not mandatory.
+REDUCE uses reduce_fraction strictly between 0 and 1, null side/hard_stop/chase,
+empty entries/take_profits/partial_stops/cancel_entry_ids, and no pending renewal.
+Other actions require reduce_fraction=null. The host floors quantity to step and
+requires valid nonzero reduction and remainder; never supply reduce_plan.
+REDUCE does not request changing the native Full SL. On successful target restoration,
+original target prices are retained and verified unfilled
+target quantities are proportionally scaled to the actual remainder, never above
+their original unfilled quotas and never recreating already filled targets.
+Use immediate_reduce_result and current verified order evidence: RESTORE_FAILED and
+SKIPPED_FAILED are not successful restoration or proof that retained targets are live.
+REDUCE does not reset the entry thesis, budget or filled quotas. Actual fees/slippage
+and fill timing remain unknown. FAILED requires full EXIT, never partial delay.
+'''
+
+
 def propose(snapshot: dict, context: dict, response_contract: dict, *,
             generate: Callable | None = None, clock: Callable = time.time) -> dict:
     """Read-only proposal; caller must revalidate against fresh execution state.
@@ -1013,6 +1043,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
             payload, projection_audit = project_entry_display_input(payload)
         else:
             payload, projection_audit = project_position_flow_input(payload)
+        payload, projection_audit = project_holding_price_order_input(payload, projection_audit)
         prompt = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (TypeError, ValueError):
         raise ScenarioModelError("invalid_input") from None
@@ -1026,6 +1057,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
         system_prompt += entry_contract_prompt(context)
     if flat_entry:
         system_prompt += FLAT_ENTRY_PROMPT
+    system_prompt = immediate_reduce_instructions(system_prompt, context)
     from live.scenario_recovery import record_model_request, record_model_wire, record_model_error
     record_model_request(system_prompt=system_prompt, user_prompt=prompt,
                          response_schema=schema, model=MODEL, effort=EFFORT, fast=True,

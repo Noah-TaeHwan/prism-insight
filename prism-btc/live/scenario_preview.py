@@ -55,6 +55,9 @@ def response_contract(context):
             "structure_reference": "observed timeframe/structure, 1..240 chars", "input_id": context["input_id"]}
         contract["rules"].append("stop_revision is null unless requesting an ADJUST restoration. Only host widening_eligible permits it: no entries/pending/cancellations, exact original initial_hard_stop boundary, current old stop not touched, unchanged budget including costs and ALL remaining full-stop risk. Protective WAIT/EXIT/tightening need no restoration metadata. Legacy missing anchor never becomes an invented new anchor.")
         contract["rules"].append("Restoration is new risk even with entries=[] and requires total risk<=existing scenario budget. Pending partial stops do not release reserved risk. Choose structural invalidation then size down; recovery caps do not require artificially tight stops.")
+    if context.get('immediate_reduce_version') == 1:
+        contract['reduce_fraction'] = 'REDUCE: fraction strictly between 0 and 1; all other actions: null'
+        contract['rules'].append('Only an offered REDUCE action requests immediate partial market reduction. It keeps side/hard_stop/chase null and all order/cancellation arrays empty. Host sizing preserves a valid remainder and existing Full SL/target quotas; FAILED still requires full EXIT.')
     if context.get("review_contract_version") == 1:
         contract["review"] = {"conditions": [{"source": "MARK_PRICE", "operator": "ge | le", "price": "positive numeric threshold"}],
                               "acknowledgements": [{"id": "exact review_memory host ID", "disposition": "hold | replace", "reason": "1..240 characters explaining decision"}]}

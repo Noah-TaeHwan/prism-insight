@@ -55,6 +55,47 @@ def _observation(context, now):
                                   "recorded_scenario_net", "accounting_status", "mark_price")))
 
 
+def project_holding_price_order_input(projected, audit=None):
+    """Append bounded numeric order only after all existing optional views fit."""
+    logical = restore_model_input(projected)
+    context = logical.get('contract_context', {})
+    if (context.get('immediate_reduce_version') != 1 or context.get('scenario_id') is None
+            or not context.get('positions') or _size(projected) > _MODEL_INPUT_LIMIT):
+        return projected, audit
+    side = context.get('side')
+    targets = (context.get('current_plan') or {}).get('take_profits')
+    primary = (context.get('ma_structure') or {}).get('primary', {})
+    view = dict(status='UNAVAILABLE')
+    if side in {'LONG','SHORT'} and isinstance(targets,list) and len(targets)<=20:
+        values = [(context.get('mark_price'),'M')]
+        values += [(row.get('price'),f'T{i}') for i,row in enumerate(targets) if isinstance(row,dict)]
+        complete = len(values)==len(targets)+1 and bool(targets)
+        for frame in ('30m','1h'):
+            points = primary.get(frame,{}).get('points',[])
+            confirmed = [(i,p) for i,p in enumerate(points) if p.get('phase')=='CONFIRMED' and p.get('is_confirmed') is True][-3:]
+            forming = [(i,p) for i,p in enumerate(points) if p.get('phase')=='FORMING' and p.get('is_confirmed') is False][-1:]
+            complete = complete and bool(confirmed) and bool(forming)
+            for i,point in confirmed+forming:
+                values += [(point.get(field),f'{frame}.{i}.{field}') for field in ('high','low')]
+        complete = complete and all(_number(value) and value>0 for value,_ in values)
+        grouped = {}
+        for value,ref in values:
+            if _number(value) and value>0:
+                grouped.setdefault(value,[]).append(ref)
+        view = dict(status='AVAILABLE' if complete else 'PARTIAL',
+            ordering='ASCENDING_PRICE' if side=='LONG' else 'DESCENDING_PRICE',
+            meaning='NUMERIC_ORDER_NOT_SUPPORT_OR_LIVE_ORDER_PROOF; not travel/time/fill order. M=mark_price; T#=current_plan.take_profits[index].price; frame.index.high/low=ma_structure.primary[frame].points[index][field]. Original point phase/time applies; target activity/remaining quota require separate evidence.',
+            prices=[[price,grouped[price]] for price in sorted(grouped,reverse=side=='SHORT')])
+    if _size(view)>2000:
+        view=dict(status='UNAVAILABLE_SIZE_BOUND')
+    for value in (view,dict(status='OMITTED_INPUT_BUDGET')):
+        logical['contract_context']['holding_price_order']=value
+        candidate,candidate_audit=project_model_input(logical,allow_gap_rescue=True)
+        if _size(candidate)<=_MODEL_INPUT_LIMIT:
+            return candidate,candidate_audit
+    return projected,audit
+
+
 def project_position_flow_input(payload):
     history = (payload.get('contract_context') or {}).get('last_closed_trade')
     if history is None:

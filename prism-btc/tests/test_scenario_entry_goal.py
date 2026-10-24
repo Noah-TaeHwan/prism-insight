@@ -480,7 +480,7 @@ def test_v2_prompt_is_reviewed_and_v1_prompt_is_unchanged():
     from live.scenario_llm import ENTRY_CONTRACT_PROMPT, entry_contract_prompt
     assert entry_contract_prompt({'entry_contract_version': 1}) == ENTRY_CONTRACT_PROMPT
     assert hashlib.sha256(entry_contract_prompt({'entry_contract_version': 2}).encode()).hexdigest() == (
-        'f3b8ec7e7e52152d003209ae11f7e58acf129bc28697ecf8535dd1d13c80dd16')
+        '33d1c257facbc6711586c5cc78800de6df5e6f6c45fc8f322c8c3d92584d7381')
 
 
 @pytest.mark.parametrize('side', ['LONG', 'SHORT'])

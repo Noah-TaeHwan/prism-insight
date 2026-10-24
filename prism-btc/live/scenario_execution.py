@@ -60,7 +60,17 @@ class ScenarioExecution:
             status TEXT NOT NULL, order_id TEXT, evidence TEXT, created_at REAL NOT NULL)""")
         self.conn.execute("CREATE TABLE IF NOT EXISTS llm_scenario_exit_basis(intent_id TEXT PRIMARY KEY,quantity TEXT NOT NULL,entry_baseline TEXT NOT NULL)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS llm_scenario_execution_batches(intent_id TEXT PRIMARY KEY,status TEXT NOT NULL)")
+        from live.scenario_immediate_reduce import initialize
+        initialize(self.conn)
         self.conn.commit()
+
+    def prepare_reduce(self, payload, intent_id):
+        from live.scenario_immediate_reduce import prepare
+        return prepare(self, payload, intent_id)
+
+    def _execute_reduce(self, payload, intent_id):
+        from live.scenario_immediate_reduce import execute
+        return execute(self, payload, intent_id)
 
     def _new_risk_enabled(self):
         from live.scenario_control import read_control
@@ -242,6 +252,11 @@ class ScenarioExecution:
                     order.get("reduceOnly") is not True):
                 self._fail("native_parent_identity_conflict")
         self._verify_entry_order_terms(child, order)
+        if child["kind"] == "reduce" and (
+                order.get("reduceOnly") is not True or order.get("orderType") != "Market"
+                or order.get("timeInForce") != "IOC" or order.get("positionIdx") != 0
+                or order.get("closeOnTrigger") is not True):
+            self._fail("reduce_order_terms_changed")
         executions = read_evidence_pages(self._call,"get_executions",category="linear",symbol="BTCUSDT",orderId=order["orderId"])
         qty = Decimal(0)
         for row in executions:
@@ -804,6 +819,8 @@ class ScenarioExecution:
             active=self._active()
             if not active or active["scenario_id"]!=payload["scenario_id"]:
                 self._fail("active_scenario_required")
+            if payload["action"] == "REDUCE":
+                return self._execute_reduce(payload, intent_id)
             # Maintain existing protection before potentially failing recovery.
             own=self.children(active["scenario_id"])
             baseline=sum((decimal(fill["execQty"]) for c in own if c["kind"]=="entry" and c["evidence"]
@@ -819,6 +836,9 @@ class ScenarioExecution:
             for c in own:
                 self._query_child(c)
             own=self.children(active["scenario_id"])
+            if payload["action"] == "EXIT" and any(
+                    c["kind"] == "reduce" and c["status"] != "TERMINAL" for c in own):
+                self._fail("reduce_result_pending")
             if payload.get("stop_revision") and payload.get("action") == "ADJUST":
                 from core.scenario_stop_policy import is_widening
                 if is_widening(active["side"], payload["hard_stop"], active["hard_stop"]) and any(

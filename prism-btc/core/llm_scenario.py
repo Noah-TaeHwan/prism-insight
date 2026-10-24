@@ -15,6 +15,38 @@ LEVERAGE = 10
 RISK_FRACTION = 0.02
 
 
+def immediate_reduce_allowed(context):
+    return (type(context.get('immediate_reduce_version')) is int and context['immediate_reduce_version'] == 1
+        and context.get('immediate_reduce_available') is not False
+        and context.get('scenario_id') is not None and bool(context.get('positions'))
+        and context.get('pending_entries') == [] and context.get('accounting_status') == 'confirmed'
+        and context.get('protection_ok') is True and context.get('legacy_fenced') is False
+        and (context.get('unknown_intents') is False or context.get('unknown_intents') == [])
+        and all((context.get(key) or {}).get('status') != 'FAILED' for key in
+                ('entry_contract_observation','previous_thesis_assessment')))
+
+
+def _reduce_plan(fraction, context):
+    if not immediate_reduce_allowed(context):
+        raise ScenarioValidationError('immediate_reduce_unavailable')
+    def number(value, name):
+        return Decimal(str(_number(value, name, positive=True)))
+    f = number(fraction, 'reduce_fraction')
+    if f >= 1:
+        raise ScenarioValidationError('reduce_fraction must be below one')
+    step = number(context.get('quantity_step'), 'quantity_step')
+    minimum = number(context.get('minimum_quantity'), 'minimum_quantity')
+    maximum = number(context.get('market_maximum_quantity'), 'market_maximum_quantity')
+    quantity = sum((number(row['quantity'], 'position_quantity') for row in context['positions']), Decimal(0))
+    if quantity % step:
+        raise ScenarioValidationError('reduce_quantity_off_step')
+    requested = (quantity * f // step) * step
+    remainder = quantity - requested
+    if requested < minimum or remainder < minimum or requested > maximum:
+        raise ScenarioValidationError('reduce_quantity_limits')
+    return dict(quantity_before=float(quantity), requested_quantity=float(requested), target_remainder=float(remainder))
+
+
 class ScenarioValidationError(ValueError):
     pass
 
@@ -189,6 +221,8 @@ the caller must first reconcile cancellations before dropping pending risk.
                "cancel_entry_ids", "stop_revision"}
     if context.get('pending_renewal_version') == 1:
         allowed.add('pending_renewal')
+    if type(context.get('immediate_reduce_version')) is int and context['immediate_reduce_version'] == 1:
+        allowed.add('reduce_fraction')
     if set(payload) - allowed:
         raise ScenarioValidationError("unknown scenario fields")
     p = deepcopy(payload)
@@ -215,12 +249,12 @@ the caller must first reconcile cancellations before dropping pending risk.
             p.pop('pending_renewal', None)
         elif action != 'WAIT':
             raise ScenarioValidationError('pending renewal requires WAIT')
-        if action not in ("WAIT", "OPEN", "ADJUST", "EXIT"):
+        if action not in ("WAIT", "OPEN", "ADJUST", "EXIT", "REDUCE"):
             raise ScenarioValidationError("invalid action")
         active = context["scenario_id"] is not None
         if active and p["scenario_id"] != context["scenario_id"]:
             raise ScenarioValidationError("different active scenario")
-        if (action == "OPEN" and active) or (action in ("ADJUST", "EXIT") and not active):
+        if (action == "OPEN" and active) or (action in ("ADJUST", "EXIT", "REDUCE") and not active):
             raise ScenarioValidationError("action incompatible with lifecycle")
         confidence = _number(p["confidence"], "confidence")
         if confidence > 1 or type(p.get("leverage", LEVERAGE)) not in (int, float) or p.get("leverage", LEVERAGE) != LEVERAGE:
@@ -239,12 +273,19 @@ the caller must first reconcile cancellations before dropping pending risk.
             raise ScenarioValidationError("duplicate pending id")
         if not set(cancellations) <= pending_ids:
             raise ScenarioValidationError("unknown cancellation id")
-        if action in ("WAIT", "EXIT"):
+        if action != 'REDUCE':
+            if p.pop('reduce_fraction', None) is not None:
+                raise ScenarioValidationError('reduce_fraction_requires_reduce')
+        if action in ("WAIT", "EXIT", "REDUCE"):
             p.pop("stop_revision", None)
             if {"hard_stop", "side", "chase"} & p.keys():
                 raise ScenarioValidationError("WAIT/EXIT cannot change protection or side")
             if entries or tps or stops:
                 raise ScenarioValidationError("WAIT/EXIT cannot add orders")
+            if action == 'REDUCE':
+                if cancellations or renewal is not None:
+                    raise ScenarioValidationError('reduce_cannot_cancel_or_renew')
+                p['reduce_plan'] = _reduce_plan(p.get('reduce_fraction'), context)
             if renewal is not None:
                 if cancellations:
                     raise ScenarioValidationError('pending renewal cannot cancel')

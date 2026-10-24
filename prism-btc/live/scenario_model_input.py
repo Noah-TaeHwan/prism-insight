@@ -493,6 +493,139 @@ def _restore_tables(original, metadata):
         raise ValueError("unregistered_row_table")
 
 
+def _explanation_v1(payload):
+    context = payload.get('contract_context', {})
+    return (isinstance(context, dict) and type(context.get('explanation_contract_version')) is int
+            and context['explanation_contract_version'] == 1
+            and context.get('scenario_id') is not None and bool(context.get('positions')))
+
+
+def _has_explanation_marker(value):
+    if isinstance(value, dict):
+        return ('$explanation_copy' in value or '$explanation_source' in value
+                or any(_has_explanation_marker(v) for v in value.values()))
+    return isinstance(value, list) and any(_has_explanation_marker(v) for v in value)
+
+
+def _explanation_locations(payload):
+    bundle = payload.get('calculated_candidates') or {}
+    if not isinstance(bundle, dict):
+        return {}
+    candidates = bundle.get('candidates')
+    if not isinstance(candidates, list) or len(candidates) > 2:
+        return {}
+    result = {}
+    for ident, row in [('WAIT', bundle.get('wait'))] + list(zip(('c0', 'c1'), candidates)):
+        if not isinstance(row, dict) or row.get('id') != ident:
+            continue
+        proof = row.get('explanation')
+        if isinstance(proof, dict):
+            for field in ('raw', 'text'):
+                if field in proof:
+                    result[ident + '.' + field] = (proof, field, row)
+        if ident == 'WAIT' and 'no_candidate_reason' in bundle:
+            result['no_candidate_reason'] = (bundle, 'no_candidate_reason', row)
+    return result
+
+
+def _explanation_value(row, field):
+    if field == 'text':
+        parent, key = row.get('effective_plan'), 'effective_sha256'
+        source = parent
+    else:
+        parent, key = row.get('raw_model_wrapper'), 'raw_model_wrapper_sha256'
+        source = parent if field == 'no_candidate_reason' else _wrapper_proposal(row)
+    name = 'no_candidate_reason' if field == 'no_candidate_reason' else 'rationale'
+    if (not isinstance(parent, dict) or _has_explanation_marker(parent)
+            or hashlib.sha256(_json(parent, sort_keys=True).encode()).hexdigest() != row.get(key)
+            or not isinstance(source, dict) or name not in source):
+        raise ValueError('invalid_explanation_copy_source')
+    if field == 'text' and not isinstance(source[name], str):
+        raise ValueError('invalid_explanation_text_source')
+    return source[name]
+
+
+def _factor_explanation(projected, original):
+    if _has_explanation_marker(original):
+        raise ValueError('reserved_explanation_projection')
+    if not _explanation_v1(original):
+        return [], False
+    locations = _explanation_locations(projected)
+    copies = []
+    for path, (owner, field, row) in _explanation_locations(original).items():
+        try:
+            source = _explanation_value(row, field)
+        except ValueError:
+            continue
+        if _json(owner[field], sort_keys=True) != _json(source, sort_keys=True):
+            continue
+        marker = {'$explanation_copy': field,
+                  'restored_sha256': hashlib.sha256(_json(source, sort_keys=True).encode()).hexdigest()}
+        if path in locations and len(_json(marker)) + len(path) + 8 < len(_json(source)):
+            target, key, _ = locations[path]
+            target[key] = marker
+            copies.append(path)
+    context = original['contract_context']
+    source = context.get('explanation_source')
+    derived = False
+    if isinstance(source, dict) and source.get('version') == 1 and isinstance(context.get('ma_structure'), dict):
+        from live.scenario_explanation import source_from_structure
+        try:
+            expected = source_from_structure(context['ma_structure'], context)
+            derived = _json(source, sort_keys=True) == _json(expected, sort_keys=True)
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+            derived = False
+        if derived:
+            projected['contract_context']['explanation_source'] = {
+                '$explanation_source': 'ma-structure-v1', 'restored_sha256': source['sha256']}
+    return copies, derived
+
+
+def _restore_explanation(original, metadata):
+    keys = {'explanation_copy_version', 'explanation_copy_paths',
+            'explanation_source_version', 'explanation_source_path'}
+    registered = bool(keys & metadata.keys())
+    if not _explanation_v1(original):
+        if registered:
+            raise ValueError('explanation_projection_not_enabled')
+        if _has_explanation_marker(original):
+            raise ValueError('unregistered_explanation_projection')
+        return
+    if 'explanation_copy_version' in metadata or 'explanation_copy_paths' in metadata:
+        paths = metadata.get('explanation_copy_paths')
+        if (type(metadata.get('explanation_copy_version')) is not int or metadata['explanation_copy_version'] != 1
+                or not isinstance(paths, list) or not 1 <= len(paths) <= 7
+                or any(not isinstance(p, str) for p in paths) or len(paths) != len(set(paths))):
+            raise ValueError('invalid_explanation_copy_projection')
+        locations = _explanation_locations(original)
+        for path in paths:
+            if path not in locations:
+                raise ValueError('unknown_explanation_copy_path')
+            owner, field, row = locations[path]
+            source = _explanation_value(row, field)
+            expected = {'$explanation_copy': field,
+                        'restored_sha256': hashlib.sha256(_json(source, sort_keys=True).encode()).hexdigest()}
+            if owner[field] != expected:
+                raise ValueError('explanation_copy_hash_mismatch')
+            owner[field] = deepcopy(source)
+    if 'explanation_source_version' in metadata or 'explanation_source_path' in metadata:
+        if (type(metadata.get('explanation_source_version')) is not int or metadata['explanation_source_version'] != 1
+                or metadata.get('explanation_source_path') != 'contract_context.explanation_source'):
+            raise ValueError('invalid_explanation_source_projection')
+        from live.scenario_explanation import source_from_structure
+        context = original['contract_context']
+        try:
+            source = source_from_structure(context['ma_structure'], context)
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+            raise ValueError('invalid_explanation_source_input') from None
+        if context.get('explanation_source') != {'$explanation_source': 'ma-structure-v1',
+                                               'restored_sha256': source['sha256']}:
+            raise ValueError('explanation_source_hash_mismatch')
+        context['explanation_source'] = source
+    if _has_explanation_marker(original):
+        raise ValueError('unregistered_explanation_projection')
+
+
 def project_model_input(payload, *, allow_gap_rescue=False):
     """Return independent projected payload and value-free byte/hash/path audit."""
     original = _json(payload)
@@ -618,10 +751,22 @@ def project_model_input(payload, *, allow_gap_rescue=False):
             receipt[field] = deepcopy(ref)
             value_paths.append(path)
             paths.append(path)
+    explanation_paths, explanation_source = _factor_explanation(projected, payload)
+    paths.extend('explanation_copy:' + path for path in explanation_paths)
+    if explanation_source:
+        paths.append('contract_context.explanation_source')
     if paths:
         projected["model_input_projection"] = {
-            "version": 5 if recovery_change_path else 4 if proposal_paths or keyed_tables or value_paths else 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
+            "version": 5 if recovery_change_path else 4 if proposal_paths or keyed_tables or value_paths or explanation_paths or explanation_source else 3 if wrapper_paths else 2 if table_paths else 1, "numeric_market_references": references, "feature_definitions": definitions,
             "meaning": "Lossless references only. Resolve numeric_market-v1 as the supplied snapshot numeric paths; feature-definition references use this shared dictionary. All original values are retained or exactly reproducible."}
+        if explanation_paths:
+            projected['model_input_projection'].update(explanation_copy_version=1,
+                                                       explanation_copy_paths=explanation_paths)
+        if explanation_source:
+            projected['model_input_projection'].update(explanation_source_version=1,
+                explanation_source_path='contract_context.explanation_source')
+        if explanation_paths or explanation_source:
+            projected['model_input_projection']['meaning'] += ' Resolve fixed v1 explanation references last, as specified in the system instructions; original receipt hashes remain authoritative.'
         if table_paths:
             projected["model_input_projection"]["row_table_paths"] = table_paths
             projected["model_input_projection"]["meaning"] += " At each row_table_path, $row_table.columns names each cell in every rows array, in order; each array is one original observation object. Expand tables before resolving numeric_market-v1."
@@ -700,6 +845,7 @@ def restore_model_input(payload):
             raise ValueError("unregistered_model_wrapper")
         if _has_table_marker(original):
             raise ValueError("unregistered_row_table")
+        _restore_explanation(original, {})
         return original
     if not isinstance(metadata, dict) or type(metadata.get("version")) is not int or metadata["version"] not in (1, 2, 3, 4, 5):
         raise ValueError("unknown_projection_version")
@@ -730,6 +876,7 @@ def restore_model_input(payload):
         _restore_recovery_changes(original, metadata)
     elif _has_recovery_marker(original) or "recovery_changed_evidence_path" in metadata:
         raise ValueError("unregistered_recovery_change")
+    _restore_explanation(original, metadata)
     if metadata["version"] in (4, 5):
         for _, receipt in _wrapper_locations(original):
             if isinstance(receipt, dict) and "receipt_sha256" in receipt:
