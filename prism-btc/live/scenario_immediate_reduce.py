@@ -5,6 +5,8 @@ import hashlib
 import json
 from decimal import Decimal, ROUND_DOWN
 
+RESOLVED = frozenset({"COMPLETE", "RESTORE_FAILED", "SKIPPED_FAILED"})
+
 
 def _wire(value):
     return json.dumps(value, sort_keys=True, allow_nan=False)
@@ -30,6 +32,30 @@ def load(broker, ident):
     if hashlib.sha256(row[0].encode()).hexdigest() != row[1]:
         broker._fail("reduce_preparation_corrupt")
     return json.loads(row[0])
+
+
+def result(broker, ident):
+    body = load(broker, ident)
+    return dict(status=body["status"], intent_id=ident,
+                failed_source_ids=body.get("failed_source_ids", []),
+                restored_exit_targets_complete=body["status"] == "COMPLETE")
+
+
+def context(broker, active):
+    if not active:
+        return {}
+    rows = broker.conn.execute("SELECT id,payload FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid DESC",
+                               (active["scenario_id"],)).fetchall()
+    for ident, raw in rows:
+        action = json.loads(raw)["action"]
+        if action == "WAIT":
+            continue
+        if action == "REDUCE":
+            outcome = result(broker, ident)
+            return dict(immediate_reduce_result=outcome,
+                        immediate_reduce_available=outcome["status"] == "COMPLETE")
+        break
+    return {}
 
 
 def prepare(broker, payload, ident):
@@ -113,12 +139,22 @@ def execute(broker, payload, ident):
     body = load(broker, ident)
     if body["payload"] != payload:
         broker._fail("reduce_preparation_changed")
-    if body["status"] == "COMPLETE":
+    if body["status"] in RESOLVED:
         return body
     latest = broker.conn.execute("SELECT id FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid DESC LIMIT 1",
                                  (payload["scenario_id"],)).fetchone()
     if not latest or latest[0] != ident:
         broker._fail("reduce_superseded_intent")
+    if _failed(broker._active()):
+        # Query every possibly submitted child before handing off. Do not add
+        # restoration POSTs that could introduce a new UNKNOWN ahead of EXIT.
+        _observation(broker, body)
+        if any(c["kind"] == "reduce" and c["status"] != "TERMINAL"
+               for c in broker.children(payload["scenario_id"])):
+            broker._fail("reduce_result_pending")
+        body["status"] = "SKIPPED_FAILED"
+        _save(broker, ident, body)
+        return body
     instrument = broker._instrument()
     q0, d0, r0 = (decimal(body[k]) for k in ("quantity_before", "requested_quantity", "target_remainder"))
     fraction = decimal(payload.get("reduce_fraction"))
@@ -167,7 +203,7 @@ def execute(broker, payload, ident):
         else:
             _, size = _observation(broker, body)
             quantity = min(decimal(body["market_quantity"]), max(Decimal(0), size - decimal(body["target_remainder"])))
-            if _failed(broker._active()) or broker.clock() >= payload["expires_at"]:
+            if broker.clock() >= payload["expires_at"]:
                 quantity = Decimal(0)
             if quantity >= instrument["minimum"] and quantity <= instrument["market_maximum"]:
                 market = broker._submit(payload, ident, "reduce", "once", dict(
@@ -218,6 +254,15 @@ def execute(broker, payload, ident):
             request["qty"] = text_number(quantity)
             broker._submit(payload, ident, kind, local_id, request)
             _, size = _observation(broker, body)
-        body["status"] = "COMPLETE"
+        failed = []
+        for source in body["sources"]:
+            child = next((c for c in broker.children(payload["scenario_id"])
+                          if c["intent_id"] == ident and c["kind"] == source["kind"]
+                          and c["local_id"] == "reduce:" + source["link_id"]), None)
+            if child and child["status"] == "TERMINAL":
+                order = child["evidence"]["order"]
+                if decimal(order["cumExecQty"]) < decimal(order["qty"]):
+                    failed.append(source["link_id"])
+        body.update(status="RESTORE_FAILED" if failed else "COMPLETE", failed_source_ids=failed)
         _save(broker, ident, body)
     return body

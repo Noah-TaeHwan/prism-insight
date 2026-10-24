@@ -460,6 +460,8 @@ class ScenarioDemoBroker(ScenarioExecution):
         from live.scenario_recovery import managed_permit
         state = self._recovery_state()
         breaker = state.get("breaker", {})
+        from live.scenario_immediate_reduce import context as reduction_context
+        reduction_status = reduction_context(self, active)
         stop_policy = build_stop_policy(active,
             hard_blocked=not self._new_risk_enabled() or not daily.get("new_risk_allowed", False),
             permit_valid=not breaker.get("blocked", False) or bool(
@@ -468,6 +470,7 @@ class ScenarioDemoBroker(ScenarioExecution):
             legacy_fenced=observed["legacy_fenced"], pending_entries=pending, positions=accounting["positions"],
             unknown_intents=any(c["status"] == "UNKNOWN" or not c["evidence"] for c in children))
         return dict(entry_thesis=initial_entry_evidence, stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
+            **reduction_status,
             account_captured_at=observed["captured_at"], runner_economics=review_finance,
             observed_execution_fee_evidence=accounting.get("observed_execution_fee_evidence", {"status":"UNKNOWN"}),
             recorded_scenario_net=accounting.get("net_pnl") if accounting.get("accounting_complete") is True else None,
@@ -761,13 +764,16 @@ class ScenarioDemoBroker(ScenarioExecution):
                     and not observed["legacy_fenced"] and protection
                     and all(c["status"]=="TERMINAL" and c["evidence"] for c in children))
                 reduced = False
+                reduction_result = None
                 if payload["action"] == "REDUCE":
-                    from live.scenario_immediate_reduce import load
-                    reduced = load(self, ident)["status"] == "COMPLETE"
+                    from live.scenario_immediate_reduce import RESOLVED, result
+                    reduction_result = result(self, ident)
+                    reduced = reduction_result["status"] in RESOLVED
                 terminal=cancelled and (reduced or payload["action"]=="WAIT" or adjusted or no_submit or aborted_adjust or (payload["action"]=="EXIT" and observed["exchange_flat"]))
                 if terminal:
                     items.append(dict(intent_id=ident,terminal=True,protection_ok=protection,orders_reconciled=True,
                         executions_complete=True,execution_ids=[],filled_quantity=0.,exchange_order_ids=[],open_entries=[],
+                        **({'reduction_result': reduction_result} if reduction_result else {}),
                         **({'pending_renewal_receipt': proof} if payload.get('pending_renewal') else {})))
                 continue
             execution_ids=[e["execId"] for c in group for e in c["evidence"]["executions"]]
@@ -777,10 +783,14 @@ class ScenarioDemoBroker(ScenarioExecution):
             batch=self.conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id=?",(ident,)).fetchone()
             all_children_submitted=all_children_submitted or bool(batch and batch[0] in {"ABORTED","INTERRUPTED"})
             reduced = False
+            reduction_result = None
             if payload["action"] == "REDUCE":
-                from live.scenario_immediate_reduce import load
-                reduced = load(self, ident)["status"] == "COMPLETE"
-            items.append(dict(intent_id=ident,terminal=(reduced or all(c["status"]=="TERMINAL" for c in group)) and all_children_submitted,
+                from live.scenario_immediate_reduce import RESOLVED, result
+                reduction_result = result(self, ident)
+                reduced = reduction_result["status"] in RESOLVED
+            terminal = reduced if payload['action'] == 'REDUCE' else all(c['status'] == 'TERMINAL' for c in group)
+            items.append(dict(intent_id=ident,terminal=terminal and all_children_submitted,
+                **({'reduction_result': reduction_result} if reduction_result else {}),
                 protection_ok=protection,orders_reconciled=not unknown and all_children_submitted,executions_complete=not unknown,
                 execution_ids=execution_ids,filled_quantity=sum(float(e["execQty"]) for c in group for e in c["evidence"]["executions"]),
                 exchange_order_ids=[c["order_id"] for c in group],open_entries=open_entries,

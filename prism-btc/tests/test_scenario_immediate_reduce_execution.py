@@ -183,6 +183,8 @@ def test_expiry_or_failure_skips_market_and_restores_protection(live, reason):
     assert float(exchange.size) == .1
     assert sum(float(c["request"]["qty"]) for c in broker.children()
                if c["kind"] == "tp" and c["status"] == "LIVE") == .1
+    if reason == "failed":
+        assert not [c for c in broker.children() if c["intent_id"] == "r1"]
 
 
 def test_native_sl_race_flat_never_rearms_or_reduces(live):
@@ -542,3 +544,118 @@ def test_both_restore_group_races_refresh_before_sibling(live, first_kind, resta
     assert len(targets) == 1 and float(targets[0]["request"]["qty"]) == .025
     assert len(market_posts(exchange)) == 1
     assert len([c for c in broker.children() if c["kind"] == first_kind and c["intent_id"] == "r1"]) == 1
+
+
+@pytest.mark.parametrize("status", ["Rejected", "Cancelled", "Deactivated", "PartiallyFilledCanceled"])
+def test_unfilled_restore_terminal_is_explicit_failure_not_success(live, status):
+    from live.scenario_immediate_reduce import load
+    broker, exchange = held(live)
+    payload = reduction(broker)
+    auto_fill(exchange)
+    original = exchange.place_order
+
+    def reject(**request):
+        result = original(**request)
+        if request.get("orderType") == "Limit":
+            if status == "PartiallyFilledCanceled":
+                exchange.fill(request["orderLinkId"], .01)
+            exchange.orders[request["orderLinkId"]]["orderStatus"] = status
+        return result
+
+    exchange.place_order = reject
+    broker.execute(payload, "r1")
+    result = broker.reconcile()
+    receipt = load(broker, "r1")
+    assert receipt["status"] == "RESTORE_FAILED"
+    assert len(receipt["failed_source_ids"]) == 2
+    item = next(i for i in result["intents"] if i["intent_id"] == "r1")
+    assert item["terminal"] is True  # Known failed operation, not an UNKNOWN fence.
+    assert item["reduction_result"]["status"] == "RESTORE_FAILED"
+    context = broker.context()
+    assert context["immediate_reduce_available"] is False
+    assert context["immediate_reduce_result"]["status"] == "RESTORE_FAILED"
+    writes = list(exchange.writes)
+    broker.execute(payload, "r1")
+    assert exchange.writes == writes
+    assert float(exchange.size) == (.03 if status == "PartiallyFilledCanceled" else .05)
+    assert exchange.stop == "98"
+    exit_plan = persist(broker, action="EXIT", action_id="exit", entries=[])
+    broker.execute(exit_plan, "exit")
+    assert any(c["kind"] == "exit" for c in broker.children())
+
+
+@pytest.mark.parametrize("phase", ["PREPARED", "CANCELLED", "RESTORING"])
+def test_failed_at_each_phase_does_not_create_restoration_unknown(live, monkeypatch, phase):
+    from live import scenario_immediate_reduce as reduction_module
+    broker, exchange = held(live)
+    payload = reduction(broker)
+    auto_fill(exchange)
+    if phase != "PREPARED":
+        original_save = reduction_module._save
+
+        def interrupt(b, ident, body, **kwargs):
+            original_save(b, ident, body, **kwargs)
+            if body["status"] == phase:
+                raise RuntimeError("owned simulated crash")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(reduction_module, "_save", interrupt)
+            with pytest.raises(RuntimeError, match="owned simulated crash"):
+                broker.execute(payload, "r1")
+    state = json.loads(broker.conn.execute("SELECT body FROM llm_scenario_state").fetchone()[0])
+    state["active"]["entry_contract_observation"] = {"status": "FAILED"}
+    broker.conn.execute("UPDATE llm_scenario_state SET body=?", (json.dumps(state),))
+    broker.conn.commit()
+    before = list(exchange.writes)
+    broker.execute(payload, "r1")
+    assert exchange.writes == before
+    assert reduction_module.load(broker, "r1")["status"] == "SKIPPED_FAILED"
+    item = next(i for i in broker.reconcile()["intents"] if i["intent_id"] == "r1")
+    assert item["terminal"] is True and item["reduction_result"]["status"] == "SKIPPED_FAILED"
+    full_exit = persist(broker, action="EXIT", action_id="exit", entries=[])
+    broker.execute(full_exit, "exit")
+    child = next(c for c in broker.children() if c["kind"] == "exit")
+    exchange.fill(child["link_id"], float(child["request"]["qty"]))
+    assert broker.reconcile()["settlement"]["flat_confirmed"] is True
+
+
+def test_failed_during_unresolved_reduce_waits_then_skips_restoration(live):
+    from live.scenario_immediate_reduce import load
+    broker, exchange = held(live)
+    payload = reduction(broker)
+    with pytest.raises(BrokerNotReady, match="reduce_result_pending"):
+        broker.execute(payload, "r1")
+    state = json.loads(broker.conn.execute("SELECT body FROM llm_scenario_state").fetchone()[0])
+    state["active"]["entry_contract_observation"] = {"status": "FAILED"}
+    broker.conn.execute("UPDATE llm_scenario_state SET body=?", (json.dumps(state),))
+    broker.conn.commit()
+    before = list(exchange.writes)
+    with pytest.raises(BrokerNotReady, match="reduce_result_pending"):
+        broker.execute(payload, "r1")
+    assert load(broker, "r1")["status"] == "CANCELLED" and exchange.writes == before
+    child = next(c for c in broker.children() if c["kind"] == "reduce")
+    exchange.fill(child["link_id"], float(child["request"]["qty"]))
+    broker.execute(payload, "r1")
+    assert load(broker, "r1")["status"] == "SKIPPED_FAILED"
+    assert exchange.writes == before
+
+
+def test_fully_filled_restoration_is_complete_not_unfilled_cancel_failure(live):
+    from live.scenario_immediate_reduce import load
+    broker, exchange = held(live)
+    payload = reduction(broker)
+    auto_fill(exchange)
+    original = exchange.place_order
+
+    def fill_target(**request):
+        result = original(**request)
+        if request.get("orderType") == "Limit":
+            exchange.fill(request["orderLinkId"], float(request["qty"]))
+            exchange.orders[request["orderLinkId"]]["orderStatus"] = "Cancelled"
+        return result
+
+    exchange.place_order = fill_target
+    broker.execute(payload, "r1")
+    assert load(broker, "r1")["status"] == "COMPLETE"
+    assert load(broker, "r1")["failed_source_ids"] == []
+    assert float(exchange.size) == 0
