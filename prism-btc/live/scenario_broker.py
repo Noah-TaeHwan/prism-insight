@@ -418,7 +418,7 @@ class ScenarioDemoBroker(ScenarioExecution):
                     self.conn.execute('ROLLBACK TO optional_fee_cache')
                     self.conn.execute('RELEASE optional_fee_cache')
         except Exception:
-            pass
+            return  # Optional cache failure never invalidates confirmed accounting.
 
     def _flat_fee_evidence(self, observed_at):
         from live.scenario_control import read_control
