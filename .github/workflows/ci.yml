@@ -324,6 +324,7 @@ jobs:
             prism-btc/tests/test_scenario_explanation_pipeline.py \
             prism-btc/tests/test_scenario_explanation_codec.py \
             prism-btc/tests/test_scenario_whole_plan_payoff.py \
+            prism-btc/tests/test_scenario_flat_fee_evidence.py \
             prism-btc/tests/test_scenario_management_prompt_contract.py \
             prism-btc/tests/test_scenario_forward_packet.py \
             prism-btc/tests/test_scenario_notice.py \

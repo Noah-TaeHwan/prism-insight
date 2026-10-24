@@ -59,6 +59,23 @@ def observed_fee_evidence(evidence, accounting, *, now):
         return unknown
 
 
+def verified_taker_rate(evidence, now):
+    """Validate original execution timestamps, never refresh their age."""
+    if not isinstance(evidence,dict) or evidence.get('status')!='AVAILABLE' or evidence.get('basis')!='HISTORICAL_VERIFIED_EXECUTIONS':
+        raise ValueError('unverified_fee_evidence')
+    source=evidence.get('source_sha256')
+    if not isinstance(source,str) or len(source)!=64 or any(c not in '0123456789abcdef' for c in source):
+        raise ValueError('invalid_fee_source')
+    row=evidence.get('rates',{}).get('TAKER',{})
+    rate,minimum,stamp,current=map(_d,(row.get('maximum'),row.get('minimum'),row.get('latest_at'),now))
+    earliest=_d(row.get('earliest_at'))
+    if (type(row.get('count')) is not int or row['count']<=0 or
+            not 0<minimum<=rate<=Decimal('.01') or not 0<earliest<=stamp<=current or
+            not 0<=current-earliest<=86400):
+        raise ValueError('invalid_or_stale_taker_fee')
+    return rate
+
+
 def fee_only_projection(*, side, entry_price, exit_price, quantity, evidence, now,
                         new_entry, recorded_net=None):
     """TAKER historical upper observed rate illustration, not net-profit guarantee.
@@ -69,18 +86,7 @@ def fee_only_projection(*, side, entry_price, exit_price, quantity, evidence, no
     """
     unknown=dict(status='UNKNOWN',reason='missing_or_stale_taker_fee_evidence')
     try:
-        if not isinstance(evidence,dict) or evidence.get('status')!='AVAILABLE' or evidence.get('basis')!='HISTORICAL_VERIFIED_EXECUTIONS':
-            return unknown
-        source=evidence.get('source_sha256')
-        if not isinstance(source,str) or len(source)!=64 or any(c not in '0123456789abcdef' for c in source):
-            return unknown
-        row=evidence.get('rates',{}).get('TAKER',{})
-        rate,minimum,stamp,current=map(_d,(row.get('maximum'),row.get('minimum'),row.get('latest_at'),now))
-        earliest=_d(row.get('earliest_at'))
-        if (type(row.get('count')) is not int or row['count']<=0 or
-                not 0<minimum<=rate<=Decimal('.01') or not 0<earliest<=stamp<=current or
-                not 0<=current-earliest<=86400):
-            return unknown
+        rate=verified_taker_rate(evidence, now)
         entry,exit_,qty=map(_d,(entry_price,exit_price,quantity))
         if side not in ('LONG','SHORT') or min(entry,exit_,qty)<=0 or type(new_entry) is not bool:
             return dict(status='UNKNOWN',reason='invalid_projection_inputs')

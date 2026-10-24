@@ -6,7 +6,7 @@ from live.scenario_provenance import review_policy_binding
 
 def test_review_binding_does_not_dispatch_module_names(monkeypatch):
     before = review_policy_binding()  # Warm ordinary dependencies first.
-    assert len(before['source_sha256']) == 25
+    assert len(before['source_sha256']) == 26
     assert 'live/scenario_analysis_frames.py' in before['source_sha256']
     assert 'live/scenario_entry_goal.py' in before['source_sha256']
     assert 'engine/scenario_snapshot.py' in before['source_sha256']
@@ -16,6 +16,7 @@ def test_review_binding_does_not_dispatch_module_names(monkeypatch):
     assert 'live/scenario_position_flow.py' in before['source_sha256']
     assert 'live/scenario_immediate_reduce.py' in before['source_sha256']
     assert 'live/scenario_explanation.py' in before['source_sha256']
+    assert 'live/scenario_fee_projection.py' in before['source_sha256']
     assert set(before['loaded_parity'].values()) == {'VERIFIED'}
 
     def forbidden(*_args, **_kwargs):
