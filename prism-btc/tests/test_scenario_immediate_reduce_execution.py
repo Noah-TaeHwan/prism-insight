@@ -471,3 +471,74 @@ def test_tp_and_partial_stop_groups_scale_independently(live):
         targets = [c for c in broker.children() if c["kind"] == kind and c["status"] == "LIVE"]
         assert len(targets) == 1 and float(targets[0]["request"]["qty"]) == qty
     assert exchange.stop == "98"
+
+
+def test_restore_fill_caps_later_other_group_to_actual_remainder(live):
+    broker, exchange = live
+    plan = persist(broker, take_profits=[dict(id="tp", price=105, fraction=.5)],
+                   partial_stops=[dict(id="ps", price=99, fraction=1)])
+    broker.execute(plan, "a1")
+    exchange.fill(broker.children()[0]["link_id"], .1)
+    broker.reconcile()
+    payload = reduction(broker)
+    auto_fill(exchange)
+    original = exchange.place_order
+
+    def place(**request):
+        result = original(**request)
+        if request.get("orderType") == "Limit":
+            exchange.fill(request["orderLinkId"], float(request["qty"]))
+        return result
+
+    exchange.place_order = place
+    broker.execute(payload, "r1")
+    assert float(exchange.size) == .025
+    stops = [c for c in broker.children() if c["kind"] == "partial_sl" and c["status"] == "LIVE"]
+    assert len(stops) == 1 and float(stops[0]["request"]["qty"]) == .025
+    assert len(market_posts(exchange)) == 1
+
+
+@pytest.mark.parametrize("first_kind", ["tp", "partial_sl"])
+@pytest.mark.parametrize("restart", [False, True])
+def test_both_restore_group_races_refresh_before_sibling(live, first_kind, restart):
+    broker, exchange = live
+    plan = persist(broker)
+    broker.execute(plan, "a1")
+    exchange.fill(broker.children()[0]["link_id"], .1)
+    broker.reconcile()
+    second_kind = "partial_sl" if first_kind == "tp" else "tp"
+    for kind, qty in [(first_kind, ".05"), (second_kind, ".1")]:
+        request = dict(side="Sell", qty=qty, reduceOnly=True, orderType="Limit",
+                       timeInForce="GTC", price="105")
+        if kind == "partial_sl":
+            request.pop("price")
+            request.update(orderType="Market", closeOnTrigger=True,
+                           triggerPrice="99", triggerBy="MarkPrice", triggerDirection=2)
+        broker._submit(plan, "a1", kind, "source-" + kind, request)
+    payload = reduction(broker)
+    auto_fill(exchange)
+    original = exchange.place_order
+    raced = False
+
+    def place(**request):
+        nonlocal raced
+        result = original(**request)
+        if request.get("timeInForce") != "IOC" and not raced:
+            raced = True
+            exchange.fill(request["orderLinkId"], float(request["qty"]))
+            if restart:
+                raise TimeoutError()
+        return result
+
+    exchange.place_order = place
+    if restart:
+        with pytest.raises(BrokerNotReady, match="submission_unknown"):
+            broker.execute(payload, "r1")
+        broker = ScenarioDemoBroker(broker.conn, session=exchange, expected_main_uid="123",
+                                   clock=broker.clock, execution_enabled=True)
+    broker.execute(payload, "r1")
+    assert float(exchange.size) == .025
+    targets = [c for c in broker.children() if c["kind"] == second_kind and c["status"] == "LIVE"]
+    assert len(targets) == 1 and float(targets[0]["request"]["qty"]) == .025
+    assert len(market_posts(exchange)) == 1
+    assert len([c for c in broker.children() if c["kind"] == first_kind and c["intent_id"] == "r1"]) == 1

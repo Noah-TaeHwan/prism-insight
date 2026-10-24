@@ -85,6 +85,9 @@ def _failed(active):
 def _observation(broker, body):
     from live.scenario_execution import decimal
     active = broker._active()
+    for child in broker.children(active["scenario_id"]):
+        if child["status"] != "TERMINAL":
+            broker._query_child(child)
     observed = broker.capture_account()
     if observed["legacy_fenced"]:
         broker._fail("reduce_external_exposure")
@@ -185,6 +188,7 @@ def execute(broker, payload, ident):
         # Fixed restoration quotas survive retries and racing restored fills.
         allocated = {"tp": Decimal(0), "partial_sl": Decimal(0)}
         for source in body["sources"]:
+            _, size = _observation(broker, body)
             quota = decimal(source["unfilled"])
             quantity = (quota * original_remaining / basis / instrument["step"]).to_integral_value(rounding=ROUND_DOWN) * instrument["step"] if basis else Decimal(0)
             quantity = min(quantity, quota)
@@ -197,7 +201,16 @@ def execute(broker, payload, ident):
                              c["intent_id"] == ident and c["kind"] == kind and c["local_id"] == local_id), None)
             if previous:
                 broker._query_child(previous)
+                _, size = _observation(broker, body)
                 continue
+            # A restored exit can fill before the next sibling is submitted.
+            # Never reserve that closed quantity again in either exit group.
+            outstanding = sum((decimal(c["evidence"]["order"]["leavesQty"])
+                               for c in broker.children(payload["scenario_id"])
+                               if c["intent_id"] == ident and c["kind"] == kind
+                               and c["status"] == "LIVE"), Decimal(0))
+            quantity = min(quantity, max(Decimal(0), size - outstanding))
+            quantity = (quantity / instrument["step"]).to_integral_value(rounding=ROUND_DOWN) * instrument["step"]
             if not size or quantity < instrument["minimum"]:
                 continue
             request = {k: v for k, v in source["request"].items()
