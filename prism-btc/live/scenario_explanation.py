@@ -207,11 +207,12 @@ def compile_explanation(raw, context, plan, *, scope, snapshot=None):
     return dict(receipt, sha256=digest(receipt))
 
 
-PROMPT = f'''
+PROMPT = ''.join((f'''
 Holding explanation_contract_version=1 replaces rationale with an object:
 This overrides earlier free-text rationale formatting, never economic or FAILED safety rules.
 interpretation (up to {MAX_INTERPRETATION} characters, explicitly unverified model opinion),
 evidence_refs (up to {MAX_EVIDENCE_REFS}), comparisons (up to {MAX_COMPARISONS} objects containing only level_ref,target_ref).
+''', '''\
 Use interpretation only for qualitative market interpretation and action tradeoffs.
 Delegate market prices, source phases and before/after-TP relationships to references
 and comparisons; do not restate these numeric/source/order claims in interpretation.
@@ -238,4 +239,4 @@ P:30m|1h:index:high|low|close|ma10|ma35 uses the same primary point's field, pha
 MA:level_id uses higher-frame level price, confirmed/forming phase and as_of_ms.
 Keep source numeric types and verify restored_sha256. No market data is omitted by these
 fixed references. Expand them before reading the source catalog or interpreting receipt hashes.
-'''
+'''))
