@@ -131,7 +131,7 @@ class ScenarioDemoBroker(ScenarioExecution):
             self._init_execution(execution_enabled)
             if self.execution_enabled:
                 from live.scenario_runtime import REQUIRED_CAPABILITIES
-                self.capabilities=REQUIRED_CAPABILITIES
+                self.capabilities=REQUIRED_CAPABILITIES | {"immediate_reduce_v1"}
                 self.execution_blockers=()
 
     def _call(self, method, **params):
@@ -483,6 +483,7 @@ class ScenarioDemoBroker(ScenarioExecution):
             limit_price_quotes=observed_quotes(observed["ticker"], observed["captured_at"]),
             price_tick=float(instrument["tick"]),quantity_step=float(instrument["step"]),
             minimum_quantity=float(instrument["minimum"]),minimum_notional=float(instrument["notional"]),
+            market_maximum_quantity=float(instrument["market_maximum"]),
             protection_ok=protection,new_risk_blocked=not self._new_risk_enabled() or not financial_ok or not daily.get("new_risk_allowed",False),
             initial_equity=active["initial_equity"] if active else observed["equity"],mark_price=observed["mark_price"],
             previous_hard_stop=active["hard_stop"] if active else None,positions=accounting["positions"],pending_entries=pending,
@@ -647,7 +648,14 @@ class ScenarioDemoBroker(ScenarioExecution):
                         unknown=True
         latest=self.conn.execute("SELECT payload FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid DESC LIMIT 1",(active["scenario_id"],)).fetchone()
         exiting=bool(latest and json.loads(latest[0])["action"]=="EXIT")
-        if self.execution_enabled and not exiting and not (halted or expired or not protection or stop_hit or unknown):
+        reducing=bool(latest and json.loads(latest[0])["action"]=="REDUCE")
+        if reducing and self.execution_enabled and not unknown:
+            try:
+                reduction = json.loads(latest[0])
+                self._execute_reduce(reduction, reduction['action_id'])
+            except Exception:
+                unknown = True
+        if self.execution_enabled and not exiting and not reducing and not (halted or expired or not protection or stop_hit or unknown):
             try:
                 self._autochase(active,self.capture_account())
             except Exception:
@@ -678,7 +686,7 @@ class ScenarioDemoBroker(ScenarioExecution):
                 emergency=[c for c in self.children(active["scenario_id"]) if c["kind"]=="exit" and c["local_id"].startswith("hard-stop-race:")]
                 # One bounded residual attempt per reconciliation. Never issue
                 # another until the prior IOC has exact terminal fill proof.
-                pending_exit=any(c["kind"]=="exit" and c["status"]!="TERMINAL"
+                pending_exit=any(c["kind"] in {"exit", "reduce"} and c["status"]!="TERMINAL"
                                  for c in self.children(active["scenario_id"]))
                 if not pending_exit and (not emergency or emergency[-1]["status"]=="TERMINAL"):
                     self._submit(json.loads(parent[1]),parent[0],"exit","hard-stop-race:"+str(len(emergency)),
@@ -693,6 +701,12 @@ class ScenarioDemoBroker(ScenarioExecution):
             for ident,body in plans:
                 plan=json.loads(body)
                 if plan["action"]=="EXIT":
+                    break
+                if plan["action"] == "REDUCE":
+                    try:
+                        self._execute_reduce(plan, ident)
+                    except Exception:
+                        unknown = True
                     break
                 if plan["action"] in ("OPEN","ADJUST"):
                     if plan.get("stop_revision") and not self._stop_revision_evidence("stop_revision_confirmed", ident):
@@ -746,7 +760,11 @@ class ScenarioDemoBroker(ScenarioExecution):
                     and not unknown and observed["exchange_flat"] and not observed["open_orders"]
                     and not observed["legacy_fenced"] and protection
                     and all(c["status"]=="TERMINAL" and c["evidence"] for c in children))
-                terminal=cancelled and (payload["action"]=="WAIT" or adjusted or no_submit or aborted_adjust or (payload["action"]=="EXIT" and observed["exchange_flat"]))
+                reduced = False
+                if payload["action"] == "REDUCE":
+                    from live.scenario_immediate_reduce import load
+                    reduced = load(self, ident)["status"] == "COMPLETE"
+                terminal=cancelled and (reduced or payload["action"]=="WAIT" or adjusted or no_submit or aborted_adjust or (payload["action"]=="EXIT" and observed["exchange_flat"]))
                 if terminal:
                     items.append(dict(intent_id=ident,terminal=True,protection_ok=protection,orders_reconciled=True,
                         executions_complete=True,execution_ids=[],filled_quantity=0.,exchange_order_ids=[],open_entries=[],
@@ -758,7 +776,11 @@ class ScenarioDemoBroker(ScenarioExecution):
             all_children_submitted=all(any(c["kind"]=="entry" and c["local_id"]==r["id"] for c in group) for r in payload.get("entries",[]))
             batch=self.conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id=?",(ident,)).fetchone()
             all_children_submitted=all_children_submitted or bool(batch and batch[0] in {"ABORTED","INTERRUPTED"})
-            items.append(dict(intent_id=ident,terminal=all(c["status"]=="TERMINAL" for c in group) and all_children_submitted,
+            reduced = False
+            if payload["action"] == "REDUCE":
+                from live.scenario_immediate_reduce import load
+                reduced = load(self, ident)["status"] == "COMPLETE"
+            items.append(dict(intent_id=ident,terminal=(reduced or all(c["status"]=="TERMINAL" for c in group)) and all_children_submitted,
                 protection_ok=protection,orders_reconciled=not unknown and all_children_submitted,executions_complete=not unknown,
                 execution_ids=execution_ids,filled_quantity=sum(float(e["execQty"]) for c in group for e in c["evidence"]["executions"]),
                 exchange_order_ids=[c["order_id"] for c in group],open_entries=open_entries,
@@ -918,8 +940,8 @@ class ScenarioDemoBroker(ScenarioExecution):
                 if (before is None or valid_before) and not self.conn.execute(
                     "SELECT 1 FROM llm_scenario_broker_notices WHERE event_id=?",(event["event_id"],)).fetchone():
                     fresh_rich_comparison=True
-            if child["kind"] in {"tp","partial_sl","native_sl"}:
-                event["reason_code"]={"tp":"TAKE_PROFIT","partial_sl":"PARTIAL_STOP","native_sl":"HARD_STOP"}[child["kind"]]
+            if child["kind"] in {"tp","partial_sl","native_sl", "reduce"}:
+                event["reason_code"]={"tp":"TAKE_PROFIT","partial_sl":"PARTIAL_STOP","native_sl":"HARD_STOP", "reduce":"IMMEDIATE_REDUCTION"}[child["kind"]]
             candidates.append(event)
         changed=bool(snapshot and (before is None or economic_fingerprint(snapshot)!=economic_fingerprint(before)))
         # First observation is a silent comparison baseline, not a new trade or
