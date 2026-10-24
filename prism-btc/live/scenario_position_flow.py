@@ -188,7 +188,7 @@ def build_closed_continuity(conn, state, now):
                         and assessment.get('status') in {'INTACT','WEAKENING','FAILED','UNKNOWN'}):
                     result['exit_opinion'] = dict(status='AVAILABLE', kind='HISTORICAL_MODEL_OPINION_NOT_FILL_CAUSE',
                         source=dict(decision_slot=slot, action_id=proposal['action_id'], proposal_sha256=digest(proposal)),
-                        assessment=assessment, rationale=proposal.get('rationale'))
+                        assessment=assessment)
         return result if _size(result) <= 3000 else dict(version=1,status='UNAVAILABLE',reason='history_size')
     except (sqlite3.Error, ValueError, TypeError, KeyError, OverflowError, AttributeError):
         return missing
