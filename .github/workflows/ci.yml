@@ -308,6 +308,22 @@ jobs:
             prism-btc/tests/test_scenario_limit_price_execution.py \
             prism-btc/tests/test_scenario_runner.py \
             prism-btc/tests/test_scenario_provenance.py \
+            prism-btc/tests/test_review_policy_imports.py \
+            prism-btc/tests/test_scenario_model_input.py \
+            prism-btc/tests/test_scenario_model_input_gaps.py \
+            prism-btc/tests/test_scenario_calculated_review.py \
+            prism-btc/tests/test_scenario_review_guard.py \
+            prism-btc/tests/test_scenario_risk_allocation.py \
+            prism-btc/tests/test_scenario_allocation_chase.py \
+            prism-btc/tests/test_scenario_allocation_review.py \
+            prism-btc/tests/test_scenario_priced_risk_allocation.py \
+            prism-btc/tests/test_scenario_immediate_reduce_contract.py \
+            prism-btc/tests/test_scenario_immediate_reduce_execution.py \
+            prism-btc/tests/test_scenario_reduction_replay.py \
+            prism-btc/tests/test_scenario_explanation.py \
+            prism-btc/tests/test_scenario_explanation_pipeline.py \
+            prism-btc/tests/test_scenario_explanation_codec.py \
+            prism-btc/tests/test_scenario_management_prompt_contract.py \
             prism-btc/tests/test_scenario_forward_packet.py \
             prism-btc/tests/test_scenario_notice.py \
             prism-btc/tests/test_scenario_daily_report.py \
