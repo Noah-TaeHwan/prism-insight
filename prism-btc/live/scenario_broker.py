@@ -320,6 +320,7 @@ class ScenarioDemoBroker(ScenarioExecution):
                 fees_complete=False, funding_complete=False, settlement_ready=False,
                 reason="scenario_order_coverage_and_funding_finality_unverified")
             self._save("financial", result)
+            self._fee_capture = (result, self.expected_main_uid, self.clock())
             return result
 
     def _funding_schedule(self,start_ms,end_ms,observed):
@@ -365,6 +366,7 @@ class ScenarioDemoBroker(ScenarioExecution):
         end=int(self.clock()*1000)
         if end<=start:
             end=start+1
+        self._fee_capture = None
         evidence=self.capture_financial_evidence(start,end)
         owned=[]
         for c in children:
@@ -384,8 +386,67 @@ class ScenarioDemoBroker(ScenarioExecution):
             observed_execution_fee_evidence=fee_evidence),
             scenario_id=active["scenario_id"])
         self._save("scenario_accounting",result)
+        self._cache_fee_evidence(evidence, fee_evidence)
         # Preserve the pure reconciliation result; optional review facts are a sidecar.
         return dict(result, observed_execution_fee_evidence=fee_evidence)
+
+    def _cache_fee_evidence(self, evidence, fees):
+        """One prospective optional record; failure cannot invalidate accounting."""
+        from live.scenario_fee_projection import verified_taker_rate
+        try:
+            captured = self._fee_capture
+            if not captured or captured[0] is not evidence or captured[1] != self.expected_main_uid:
+                return
+            verified_taker_rate(fees, captured[2])
+            body = dict(version=1, main_uid=self.expected_main_uid, environment=self.environment,
+                endpoint=self.session.endpoint, symbol='BTCUSDT', captured_at=captured[2], evidence=fees)
+            with mutation_lock(self.conn):
+                self.conn.execute('SAVEPOINT optional_fee_cache')
+                try:
+                    rows = self.conn.execute("SELECT body FROM llm_scenario_broker_evidence WHERE kind='review_fee_sidecar_v1'").fetchall()
+                    if len(rows) == 1:
+                        old = json.loads(rows[0][0])
+                        if (old.get('main_uid') == body['main_uid']
+                                and old.get('evidence', {}).get('source_sha256') == fees['source_sha256']):
+                            self.conn.execute('RELEASE optional_fee_cache')
+                            return
+                    self.conn.execute("DELETE FROM llm_scenario_broker_evidence WHERE kind='review_fee_sidecar_v1'")
+                    self.conn.execute('INSERT INTO llm_scenario_broker_evidence VALUES(?,?,?)',
+                        ('review_fee_sidecar_v1', captured[2], json.dumps(body, allow_nan=False, sort_keys=True)))
+                    self.conn.execute('RELEASE optional_fee_cache')
+                except Exception:
+                    self.conn.execute('ROLLBACK TO optional_fee_cache')
+                    self.conn.execute('RELEASE optional_fee_cache')
+        except Exception:
+            return  # Optional cache failure never invalidates confirmed accounting.
+
+    def _flat_fee_evidence(self, observed_at):
+        from live.scenario_control import read_control
+        from live.scenario_fee_projection import verified_taker_rate
+        unknown = dict(status='UNKNOWN')
+        try:
+            control = read_control(self.conn)
+            if not control or control['main_uid'] != self.expected_main_uid:
+                return unknown
+            rows = self.conn.execute("SELECT captured_at,body FROM llm_scenario_broker_evidence WHERE kind='review_fee_sidecar_v1' LIMIT 2").fetchall()
+            if len(rows) != 1:
+                return unknown
+            stamp, raw = rows[0]
+            body = json.loads(raw)
+            if (type(body.get('version')) is not int or body['version'] != 1
+                    or body.get('main_uid') != self.expected_main_uid or body.get('environment') != 'demo'
+                    or self.environment != 'demo' or body.get('endpoint') != 'https://api-demo.bybit.com'
+                    or self.session.endpoint != body['endpoint'] or body.get('symbol') != 'BTCUSDT'
+                    or type(body.get('captured_at')) not in (int, float)
+                    or not math.isfinite(body['captured_at']) or stamp != body['captured_at']
+                    or not 0 <= observed_at - stamp <= 86400):
+                return unknown
+            fees = body['evidence']
+            verified_taker_rate(fees, stamp)
+            verified_taker_rate(fees, observed_at)
+            return fees
+        except Exception:
+            return unknown
 
     def _risk_accounting(self,observed,active,children):
         result=self._accounting(observed,active,children)
@@ -439,6 +500,7 @@ class ScenarioDemoBroker(ScenarioExecution):
         daily=self._daily(observed)
         instrument=self._instrument()
         accounting=dict(positions=[],realized_loss=0,fees_paid=0,funding_paid=0)
+        flat_fees = self._flat_fee_evidence(observed['captured_at']) if not active and observed.get('exchange_flat') is True else dict(status='UNKNOWN')
         financial_ok=True
         if active and children:
             try:
@@ -472,7 +534,7 @@ class ScenarioDemoBroker(ScenarioExecution):
         return dict(entry_thesis=initial_entry_evidence, stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
             **reduction_status,
             account_captured_at=observed["captured_at"], runner_economics=review_finance,
-            observed_execution_fee_evidence=accounting.get("observed_execution_fee_evidence", {"status":"UNKNOWN"}),
+            observed_execution_fee_evidence=accounting.get("observed_execution_fee_evidence", flat_fees),
             recorded_scenario_net=accounting.get("net_pnl") if accounting.get("accounting_complete") is True else None,
             target_status=[dict(target_id=c["local_id"],kind=c["kind"],status=c["status"],
                 intent_id=c["intent_id"],

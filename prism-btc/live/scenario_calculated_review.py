@@ -124,6 +124,11 @@ fee_only=null means UNKNOWN; otherwise [assumed_entry_fee,assumed_exit_fee,
 estimated_net_before_unmodelled_costs], in USDT, uses historical taker-max estimates
 with total original entry quantity charged once for version2 flat OPEN. Gross is also USDT. Funding,
 slippage, fill timing and revision races remain UNKNOWN/unmodelled, never zero.
+Flat OPEN whole_plan_payoff uses that all-TP-then-residual-hard-SL fee-only net_reward
+and full_stop_loss from full hard SL WITHOUT partial SL; both are USDT, ratio is
+dimensionless. UNKNOWN means missing costs/path or nonpositive loss denominator.
+This is a hypothetical payoff, not probability, expectancy or a guarantee; future
+funding/slippage are excluded, NOT zero. It changes no eligibility or risk budget.
 ADJUST confirmed_remaining joint paths version3 are supplied separately as
 contract_context.holding_exit_paths rows [candidate_id,receipt_sha256,paths].
 This optional view uses the same row columns and
@@ -316,6 +321,20 @@ def _gross_projection(plan, context, *, lots=None,
     if (new_entry and plan.get('action') == 'OPEN' and lots is None
             and not context.get('positions') and not context.get('pending_entries')):
         result['joint_exit_paths'] = _joint_exit_paths(plan, targets, quantity, basis, minimum, fees)
+        payoff = dict(status='UNKNOWN', net_reward=None, full_stop_loss=None, ratio=None)
+        try:
+            path = next(p for p in result['joint_exit_paths']['paths'] if 'TP_STOP' in p[0])
+            full_stop = result['fee_only_projection_at_full_stop']
+            if full_stop.get('status') == 'AVAILABLE':
+                reward = _decimal(path[3][2])
+                loss = -_decimal(full_stop['estimated_net_before_unmodelled_costs'])
+                if loss > 0:
+                    values = [float(reward), float(loss), float(reward / loss)]
+                    if all(math.isfinite(v) for v in values):
+                        payoff.update(status='AVAILABLE', net_reward=values[0], full_stop_loss=values[1], ratio=values[2])
+        except (StopIteration, KeyError, IndexError, TypeError, ValueError, OverflowError):
+            pass  # Optional arithmetic cannot create an execution/selection veto.
+        result['whole_plan_payoff'] = payoff
     elif holding_paths and confirmed and plan.get('action') == 'ADJUST':
         result['joint_exit_paths'] = _joint_exit_paths(plan, targets, quantity, basis, minimum, fees,
             confirmed=True, recorded_net=context.get('recorded_scenario_net'))
