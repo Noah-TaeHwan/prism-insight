@@ -34,7 +34,7 @@ def closed(request):
             contract_id=contract['contract_id'], status='WEAKENING', reason='Failed progress'))
     for p in (plan, exit_plan):
         conn.execute('INSERT INTO llm_scenario_intents VALUES(?,?,?,?)',
-                     (p['action_id'], 's', json.dumps(p), 'TERMINAL'))
+                     (p['action_id'], 's', json.dumps({k:v for k,v in p.items() if k!='thesis_assessment'}), 'TERMINAL'))
     conn.execute('INSERT INTO llm_scenario_entry_contracts VALUES(?,?)', ('s',json.dumps(contract,sort_keys=True)))
     conn.execute('INSERT INTO llm_scenario_settlements VALUES(?,?)',('s',json.dumps(settlement)))
     conn.execute('INSERT INTO llm_scenario_audit_events VALUES(?,?,?,?,?)',
@@ -201,3 +201,21 @@ def test_exit_opinion_tamper_does_not_become_a_linked_reason(closed,fault):
     result=build_closed_continuity(conn,state,1200)
     assert result['status']=='AVAILABLE'
     assert result['exit_opinion']['status']=='UNAVAILABLE'
+
+
+def test_actual_exit_metadata_shape_matches_terminal_execution_payload(closed):
+    # Same optional keys as the three retained 2026-10-24 EXIT decisions.
+    conn,state,_,_=closed
+    proposal=json.loads(conn.execute('SELECT proposal FROM llm_scenario_decisions').fetchone()[0])
+    proposal.update(entry_contract=None,recovery=None,
+                    review=dict(acknowledgements=[],conditions=[]),stop_revision=None)
+    conn.execute('UPDATE llm_scenario_decisions SET proposal=?',(json.dumps(proposal),))
+    assert build_closed_continuity(conn,state,1200)['exit_opinion']['status']=='AVAILABLE'
+
+
+def test_shared_execution_field_mismatch_cannot_supply_exit_opinion(closed):
+    conn,state,_,_=closed
+    proposal=json.loads(conn.execute('SELECT proposal FROM llm_scenario_decisions').fetchone()[0])
+    proposal['cancel_entry_ids']=['unrelated-order']
+    conn.execute('UPDATE llm_scenario_decisions SET proposal=?',(json.dumps(proposal),))
+    assert build_closed_continuity(conn,state,1200)['exit_opinion']['status']=='UNAVAILABLE'

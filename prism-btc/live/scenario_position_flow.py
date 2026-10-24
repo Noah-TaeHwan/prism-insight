@@ -4,7 +4,7 @@ import json
 import math
 import sqlite3
 
-from live.scenario_entry_contract import valid_record, registered_contract
+from live.scenario_entry_contract import valid_record, registered_contract, strip_metadata
 from live.scenario_model_input import project_model_input, restore_model_input
 
 MAX_BYTES = 6000
@@ -173,13 +173,15 @@ def build_closed_continuity(conn, state, now):
             intent = conn.execute('SELECT substr(payload,1,?),status FROM llm_scenario_intents WHERE id=? AND scenario_id=?',
                                   (_ROW_BYTES + 1, proposal.get('action_id'), sid)).fetchone()
             intent_plan = _object(intent[0]) if intent else {}
+            # Match the runtime metadata boundary and core EXIT normalization.
+            execution_plan = {k:v for k,v in strip_metadata(proposal).items()
+                              if k not in {'review','recovery','stop_revision'}}
             assessment = proposal.get('thesis_assessment')
             if (type(slot) is int and 0 < slot * 300 <= observed
                     and outcome.get('status') == 'intent_pending' and intent and intent[1] == 'TERMINAL'
                     and all(isinstance(proposal.get(k), str) and proposal[k] for k in
                             ('action_id','input_id','rationale'))
-                    and all(intent_plan.get(k) == proposal.get(k) for k in
-                            ('scenario_id','action_id','input_id','action','rationale'))):
+                    and digest(intent_plan) == digest(execution_plan)):
                 if (isinstance(assessment, dict) and assessment.get('contract_id') == contract['contract_id']
                         and set(assessment) == {'contract_id','status','reason'}
                         and isinstance(assessment.get('reason'), str) and 1 <= len(assessment['reason']) <= 240
