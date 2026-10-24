@@ -131,11 +131,13 @@ def test_calculated_reduce_roundtrip_and_fresh_guard():
     assert selected['effective_plan']['reduce_plan']['requested_quantity']==.003
     assert selected['projection']['assumption']=='REDUCE_LEG_AT_MARK_NOT_FILL_OR_WHOLE_SCENARIO_NET'
     assert selected['projection']['actual_net_pnl'] is None
+    assert selected['projection']['remaining_targets']=='PROPORTIONALLY_SCALE_VERIFIED_UNFILLED_QUOTAS_TO_ACTUAL_REMAINDER_NO_REFILL'
     result=guard_review(snapshot,ctx,contract,tape,dict(ctx,now=1001,account_captured_at=1001),
                         bindings={'code':'test'},research_mode='economic-reject-calculated-v1')
     assert result['validated']['action']=='REDUCE'
     assert all('Immediate partial market reduction is unsupported' not in c['system_prompt'] for c in calls)
     assert all('FAILED requires full EXIT' in c['system_prompt'] for c in calls)
+    assert all('target quantities are proportionally scaled to the actual remainder' in c['system_prompt'] for c in calls)
 
 
 @pytest.mark.parametrize('field,value',[

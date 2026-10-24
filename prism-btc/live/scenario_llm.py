@@ -978,7 +978,9 @@ REDUCE uses reduce_fraction strictly between 0 and 1, null side/hard_stop/chase,
 empty entries/take_profits/partial_stops/cancel_entry_ids, and no pending renewal.
 Other actions require reduce_fraction=null. The host floors quantity to step and
 requires valid nonzero reduction and remainder; never supply reduce_plan.
-REDUCE preserves the native Full SL and original target prices/absolute quotas;
+REDUCE preserves the native Full SL and original target prices; verified unfilled
+target quantities are proportionally scaled to the actual remainder, never above
+their original unfilled quotas and never recreating already filled targets;
 it does not reset the entry thesis, budget or filled quotas. Actual fees/slippage
 and fill timing remain unknown. FAILED requires full EXIT, never partial delay.
 '''

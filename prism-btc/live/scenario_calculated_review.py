@@ -338,7 +338,7 @@ def _holding_projection_values(plan, context):
         return dict(status='AVAILABLE', assumption='REDUCE_LEG_AT_MARK_NOT_FILL_OR_WHOLE_SCENARIO_NET',
                     reduce_plan=deepcopy(plan['reduce_plan']), estimated_leg_gross_at_mark=float(gross),
                     actual_future_fees=None, actual_future_slippage=None, actual_net_pnl=None,
-                    remaining_targets='PRESERVE_EXISTING_ABSOLUTE_QUOTAS_CAPPED_BY_REMAINDER',
+                    remaining_targets='PROPORTIONALLY_SCALE_VERIFIED_UNFILLED_QUOTAS_TO_ACTUAL_REMAINDER_NO_REFILL',
                     native_full_stop='UNCHANGED')
     if plan["action"] == "EXIT":
         mark = _decimal(context["mark_price"])
