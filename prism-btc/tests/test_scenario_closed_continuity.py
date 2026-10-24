@@ -219,3 +219,21 @@ def test_shared_execution_field_mismatch_cannot_supply_exit_opinion(closed):
     proposal['cancel_entry_ids']=['unrelated-order']
     conn.execute('UPDATE llm_scenario_decisions SET proposal=?',(json.dumps(proposal),))
     assert build_closed_continuity(conn,state,1200)['exit_opinion']['status']=='UNAVAILABLE'
+
+
+def test_duplicate_exit_rationale_does_not_discard_verified_history(closed):
+    conn,state,_,contract=closed
+    proposal=json.loads(conn.execute('SELECT proposal FROM llm_scenario_decisions').fetchone()[0])
+    proposal['rationale']='반등을 확인했습니다. '*80
+    payload={k:v for k,v in proposal.items() if k!='thesis_assessment'}
+    conn.execute('UPDATE llm_scenario_decisions SET proposal=?',(json.dumps(proposal),))
+    conn.execute("UPDATE llm_scenario_intents SET payload=? WHERE id='exit'",(json.dumps(payload),))
+    before=conn.total_changes
+    result=build_closed_continuity(conn,state,1200)
+    assert result['status']=='AVAILABLE'
+    assert result['original_contract']==contract
+    assert result['exit_opinion']['assessment']==proposal['thesis_assessment']
+    assert 'rationale' not in result['exit_opinion']
+    assert len(json.dumps(result,ensure_ascii=False,separators=(',',':')).encode())<=3000
+    assert conn.total_changes==before
+    assert json.loads(conn.execute('SELECT proposal FROM llm_scenario_decisions').fetchone()[0])==proposal
