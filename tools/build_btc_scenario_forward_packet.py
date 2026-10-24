@@ -25,7 +25,7 @@ QUERIES = {
     "llm_scenario_broker_evidence": "SELECT * FROM llm_scenario_broker_evidence",
     "llm_scenario_outbox": "SELECT * FROM llm_scenario_outbox",
 }
-KINDS = {"entry", "tp", "partial_sl", "native_sl", "exit"}
+KINDS = {"entry", "tp", "partial_sl", "native_sl", "exit", "reduce"}
 OUTCOMES = {"wait", "submitted", "pending", "reconciled", "halted", "blocked",
             "lock_busy", "stale_proposal", "reused_scenario", "duplicate", "error",
             "intent_pending", "duplicate_slot", "execution_disabled", "fenced"}
@@ -139,6 +139,13 @@ def _scenario(sid, intents, children, settlement, proposals, asof, start, seen):
         require(isinstance(oid, str) and bool(oid) and order.get("orderId") == oid
                 and order.get("symbol") == "BTCUSDT" and order.get("side") == request.get("side"))
         require(request.get("side") in {"Buy", "Sell"})
+        if child["kind"] == "reduce":
+            parent = next(r for r in intents if r["id"] == child["intent_id"])
+            require(object_json(parent["payload"]).get("action") == "REDUCE")
+            require(all(row.get("reduceOnly") is True and row.get("orderType") == "Market"
+                        and row.get("timeInForce") == "IOC" and row.get("closeOnTrigger") is True
+                        and row.get("positionIdx") == 0 for row in (request, order)))
+            require(0 < number(order["qty"]) <= number(request["qty"]))
         if child["kind"] != "native_sl":
             require(order.get("orderLinkId") == child["link_id"]
                     and request.get("orderLinkId") == child["link_id"]

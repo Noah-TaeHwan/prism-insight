@@ -67,6 +67,47 @@ def test_dry_run_unchanged_and_new_active_not_borrowed(tmp_path):
     assert not Path(str(path) + ".btc-execution.lock").exists()
 
 
+def reduction_database(tmp_path):
+    path = database(tmp_path)
+    with sqlite3.connect(path) as conn:
+        request, proof = map(json.loads, conn.execute("SELECT request,evidence FROM llm_scenario_children WHERE kind='tp'").fetchone())
+        request["qty"] = ".6"
+        proof["order"].update(qty=".6", cumExecQty=".6")
+        proof["executions"][0]["execQty"] = ".6"
+        conn.execute("UPDATE llm_scenario_children SET request=?,evidence=? WHERE kind='tp'", (json.dumps(request), json.dumps(proof)))
+        request.update(qty=".4", orderLinkId="reduce", reduceOnly=True, orderType="Market",
+                       timeInForce="IOC", closeOnTrigger=True, positionIdx=0)
+        proof["order"].update(request, orderId="reduce", cumExecQty=".4")
+        proof["executions"][0].update(execId="reduce", orderId="reduce", execQty=".4", execTime="15000")
+        conn.execute("INSERT INTO llm_scenario_intents VALUES('reduce','old',?)",
+                     (json.dumps(dict(action_id="reduce", scenario_id="old", action="REDUCE")),))
+        conn.execute("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,?,?,?)",
+                     ("reduce", "reduce", "old", "reduce", json.dumps(request), "TERMINAL", "reduce", json.dumps(proof), 1))
+        settled = json.loads(conn.execute("SELECT evidence FROM llm_scenario_settlements").fetchone()[0])
+        settled.update(execution_ids=["entry", "reduce", "tp"], fees=.3, net_pnl=9.2)
+        conn.execute("UPDATE llm_scenario_settlements SET evidence=?", (json.dumps(settled),))
+    return path
+
+
+def test_recovery_accepts_partial_reduce_then_final_tp_with_exact_costs(tmp_path):
+    path = reduction_database(tmp_path)
+    before = path.read_bytes()
+    result = tool.recover(path, "old", now=30)
+    assert result["status"] == "DRY_RUN_ELIGIBLE" and "9.20" in result["preview"]
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field,value", [("reduceOnly", False), ("timeInForce", "GTC"), ("qty", ".2")])
+def test_recovery_rejects_reduce_order_term_corruption(tmp_path, field, value):
+    path = reduction_database(tmp_path)
+    with sqlite3.connect(path) as conn:
+        proof = json.loads(conn.execute("SELECT evidence FROM llm_scenario_children WHERE kind='reduce'").fetchone()[0])
+        proof["order"][field] = value
+        conn.execute("UPDATE llm_scenario_children SET evidence=? WHERE kind='reduce'", (json.dumps(proof),))
+    with pytest.raises((ValueError, KeyError)):
+        tool.recover(path, "old", now=30)
+
+
 def test_apply_only_notice_tables_then_skip(tmp_path):
     path = database(tmp_path)
     with sqlite3.connect(path) as conn:

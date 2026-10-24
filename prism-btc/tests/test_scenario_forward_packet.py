@@ -135,6 +135,43 @@ def test_cancel_no_fill_is_not_trade(db):
     assert scenario(db)["lifecycle"] == "CANCELLED_UNFILLED"
 
 
+def reduce_child(db):
+    child(db, "reduce", ".4", "110", "700000")
+    with sqlite3.connect(db) as conn:
+        raw = conn.execute("SELECT request,evidence FROM llm_scenario_children WHERE kind='reduce'").fetchone()
+        request, proof = map(json.loads, raw)
+        terms = dict(qty=".4", reduceOnly=True, orderType="Market", timeInForce="IOC",
+                     closeOnTrigger=True, positionIdx=0)
+        request.update(terms)
+        proof["order"].update(terms)
+        intent = dict(action_id="reduce-action", scenario_id="private-scenario", action="REDUCE", input_id="input-2")
+        conn.execute("INSERT INTO llm_scenario_intents VALUES(?, ?, ?, 'TERMINAL', NULL)",
+                     (intent["action_id"], intent["scenario_id"], json.dumps(intent)))
+        conn.execute("UPDATE llm_scenario_children SET intent_id=?,request=?,evidence=? WHERE kind='reduce'",
+                     (intent["action_id"], json.dumps(request), json.dumps(proof)))
+
+
+def test_partial_reduce_remains_open_and_preserves_execution_quantity(db):
+    child(db)
+    reduce_child(db)
+    before = db.read_bytes()
+    result = scenario(db)
+    assert result["entry_quantity"] == "1" and result["exit_quantity"] == "0.4"
+    assert result["remaining_quantity"] == "0.6" and result["lifecycle"] == "OPEN_OR_UNSETTLED"
+    assert db.read_bytes() == before
+
+
+@pytest.mark.parametrize("field,value", [("reduceOnly", False), ("timeInForce", "GTC"), ("qty", ".2")])
+def test_reduce_packet_rejects_changed_order_terms(db, field, value):
+    child(db)
+    reduce_child(db)
+    with sqlite3.connect(db) as conn:
+        proof = json.loads(conn.execute("SELECT evidence FROM llm_scenario_children WHERE kind='reduce'").fetchone()[0])
+        proof["order"][field] = value
+        conn.execute("UPDATE llm_scenario_children SET evidence=? WHERE kind='reduce'", (json.dumps(proof),))
+    assert packet.build_packet(db)["status"] == "INPUT_UNAVAILABLE"
+
+
 def test_identical_duplicate_counted_once(db):
     child(db, duplicate=True)
     assert scenario(db)["entry_quantity"] == "1"

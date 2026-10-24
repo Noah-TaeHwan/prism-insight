@@ -16,7 +16,7 @@ from live.scenario_notice import render_notice
 from live.shared_entry_coordinator import mutation_lock
 
 TERMINAL = {"Filled", "Cancelled", "Rejected", "Deactivated", "PartiallyFilledCanceled"}
-KINDS = {"entry", "exit", "tp", "partial_sl", "native_sl"}
+KINDS = {"entry", "exit", "tp", "partial_sl", "native_sl", "reduce"}
 
 
 def require(condition, reason):
@@ -83,6 +83,11 @@ def audit(conn, sid, *, now):
         side = entry_side if kind == "entry" else ("Sell" if entry_side == "Buy" else "Buy")
         require(request["side"] == order["side"] == side and order["orderId"] == oid
                 and order["symbol"] == "BTCUSDT" and order["orderStatus"] in TERMINAL, "order_proof")
+        if kind == "reduce":
+            require(intents[child["intent_id"]].get("action") == "REDUCE", "reduce_parent_action")
+            require(all(row.get("reduceOnly") is True and row.get("orderType") == "Market"
+                        and row.get("timeInForce") == "IOC" and row.get("closeOnTrigger") is True
+                        and row.get("positionIdx") == 0 for row in (request, order)), "reduce_order_terms")
         if kind != "native_sl":
             require(order["orderLinkId"] == request["orderLinkId"] == child["link_id"]
                     and request["symbol"] == "BTCUSDT"
