@@ -181,3 +181,41 @@ def test_inactive_explanation_contract_does_not_change_legacy_wire(scope):
         ctx['explanation_contract_version']=1
     assert response_schema(ctx)==before
     assert before['properties']['rationale']['type']=='string'
+
+
+@pytest.mark.parametrize('scope',['single','flat','pending'])
+def test_runtime_does_not_enable_explanation_for_out_of_scope_inputs(tmp_path,scope):
+    now=1800000000.
+    conn=sqlite3.connect(tmp_path/'out-of-scope.sqlite')
+    broker=Broker(now)
+    # Untrusted broker-supplied interpretation capabilities must be removed.
+    broker.ctx.update(explanation_contract_version=1,explanation_source={'forged':True})
+    if scope=='single':
+        broker.ctx.update(positions=[dict(price=100,quantity=.01)],previous_hard_stop=90)
+    elif scope=='pending':
+        broker.ctx.update(pending_entries=[dict(id='pending',price=100,quantity=.01)],previous_hard_stop=90)
+    mode='action-allocation-single-v1' if scope=='single' else 'legacy'
+    calls=[]
+    def generate(**request):
+        calls.append(request)
+        ctx=restore_model_input(json.loads(request['user_prompt']))['contract_context']
+        assert 'explanation_contract_version' not in ctx
+        assert 'explanation_source' not in ctx
+        wait=wire(ctx,'WAIT')
+        value={'proposal':wait} if scope=='single' else dict(wait_proposal=wait,candidates=[],no_candidate_reason='No new entry')
+        return SimpleNamespace(text=json.dumps(value))
+    adapter=make_calculated_review_proposer(generate=generate,clock=lambda:now,research_mode=mode)
+    r=ScenarioRuntime(conn,broker,lambda *_:pytest.fail('legacy called'),
+        lambda:dict(valid=True,as_of_ms=now*1000),clock=lambda:now,
+        calculated_review_enabled=True,calculated_review_propose=adapter,research_review_mode=mode)
+    if scope!='flat':
+        state=r.state()
+        state['active']=dict(scenario_id='active',initial_equity=10000,side='LONG',hard_stop=90,
+                             revision=0,created_at=now-600,expires_at=now+600)
+        r._save(state)
+    outcome=r.tick()
+    assert outcome['status']=='wait',outcome
+    assert len(calls)==1 and broker.executed==[]
+    saved=json.loads(conn.execute('SELECT context FROM llm_scenario_decisions').fetchone()[0])
+    assert 'explanation_contract_version' not in saved and 'explanation_source' not in saved
+    conn.close()
