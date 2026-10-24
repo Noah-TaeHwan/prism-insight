@@ -4,8 +4,8 @@ import json
 import math
 import sqlite3
 
-from live.scenario_entry_contract import valid_record
-from live.scenario_model_input import project_model_input
+from live.scenario_entry_contract import valid_record, registered_contract, strip_metadata
+from live.scenario_model_input import project_model_input, restore_model_input
 
 MAX_BYTES = 6000
 SCAN_LIMIT = 288
@@ -56,6 +56,25 @@ def _observation(context, now):
 
 
 def project_position_flow_input(payload):
+    history = (payload.get('contract_context') or {}).get('last_closed_trade')
+    if history is None:
+        return _project_position_flow_input(payload)
+    baseline = copy.deepcopy(payload)
+    baseline['contract_context'].pop('last_closed_trade')
+    projected, audit = _project_position_flow_input(baseline)
+    if _size(projected) > _MODEL_INPUT_LIMIT:
+        return projected, audit
+    restored = restore_model_input(projected)
+    # Preserve existing history selection; optional continuity cannot evict facts.
+    for value in (history, dict(status='OMITTED_INPUT_BUDGET')):
+        restored['contract_context']['last_closed_trade'] = value
+        candidate, candidate_audit = project_model_input(restored, allow_gap_rescue=True)
+        if _size(candidate) <= _MODEL_INPUT_LIMIT:
+            return candidate, candidate_audit
+    return projected, audit
+
+
+def _project_position_flow_input(payload):
     """Fit optional history only; preserve the mandatory input size rejection.
 
     Projection audit hashes describe the actual trimmed input. The frozen source
@@ -94,6 +113,85 @@ def project_position_flow_input(payload):
     # existing caller rejects it. Never trim safety or candidate evidence here.
     # Try lossless gap reuse only after the legacy history-budget pass fails.
     return project_model_input(candidate, allow_gap_rescue=True)
+
+
+def build_closed_continuity(conn, state, now):
+    """One last filled completion; opinions never establish current reversal edge."""
+    missing = dict(version=1, status='UNAVAILABLE')
+    try:
+        from backtest.scenario_tape import digest
+        from live.scenario_recovery import _confirmed
+        ids = state.get('breaker', {}).get('completed_ids', [])
+        if not isinstance(ids, list) or not _number(now) or now <= 0:
+            return missing
+        if not ids:
+            return dict(version=1, status='MISSING')
+        # Circuit breaker completions contain filled settlements, not cancellations.
+        sid = ids[-1]
+        if not isinstance(sid, str) or not 0 < len(sid) <= 128:
+            return missing
+        row = conn.execute('SELECT substr(evidence,1,?) FROM llm_scenario_settlements WHERE scenario_id=?',
+                           (_ROW_BYTES + 1, sid)).fetchone()
+        settlement = _object(row[0]) if row else {}
+        if not _confirmed(settlement, sid) or not settlement['execution_ids']:
+            return missing
+        events = conn.execute("SELECT event_id,observed_at,substr(body,1,?) FROM llm_scenario_audit_events "
+                              "WHERE kind='settlement_recorded' AND scenario_id=? LIMIT 2",
+                              (_ROW_BYTES + 1, sid)).fetchall()
+        if (len(events) != 1 or not _number(events[0][1]) or not 0 < events[0][1] <= now
+                or digest(_object(events[0][2]).get('settlement')) != digest(settlement)):
+            return missing
+        event_id, observed, _ = events[0]
+        row = conn.execute('SELECT substr(body,1,?) FROM llm_scenario_entry_contracts WHERE scenario_id=?',
+                           (_ROW_BYTES + 1, sid)).fetchone()
+        contract = _object(row[0]) if row else {}
+        if not valid_record(contract, sid) or not 0 < contract['origin']['registered_at'] <= observed:
+            return missing
+        row = conn.execute('SELECT substr(payload,1,?),status FROM llm_scenario_intents WHERE id=? AND scenario_id=?',
+                           (_ROW_BYTES + 1, contract['origin']['action_id'], sid)).fetchone()
+        plan = _object(row[0]) if row else {}
+        if (not row or row[1] != 'TERMINAL' or plan.get('side') not in {'LONG','SHORT'}
+                or not registered_contract(conn, dict(scenario_id=sid, side=plan['side'], entry_contract=contract))):
+            return missing
+        result = dict(version=1, status='AVAILABLE', scenario_id=sid, side=plan['side'],
+            scope='CLOSED_HISTORY_NOT_CURRENT_FACT_OR_ENTRY_PERMISSION',
+            times=dict(registered_at=contract['origin']['registered_at'], settlement_observed_at=observed,
+                       first_entry_fill_at='UNKNOWN', last_exit_fill_at='UNKNOWN'),
+            original_contract=contract,
+            settlement=dict(kind='CONFIRMED_ACCOUNTING_NOT_CAUSE', evidence_sha256=digest(settlement),
+                source=dict(table='llm_scenario_settlements', scenario_id=sid, audit_event_id=event_id),
+                values=_pick(settlement, ('gross_pnl','fees','funding_net','net_pnl'))),
+            exit_opinion=dict(status='UNAVAILABLE'))
+        rows = conn.execute("SELECT slot,substr(proposal,1,?),substr(outcome,1,?) FROM "
+            "(SELECT slot,proposal,outcome FROM llm_scenario_decisions ORDER BY slot DESC LIMIT ?) "
+            "WHERE json_valid(proposal) AND json_extract(proposal,'$.scenario_id')=? "
+            "AND json_extract(proposal,'$.action')='EXIT' ORDER BY slot DESC LIMIT 1",
+            (_ROW_BYTES + 1, _ROW_BYTES + 1, SCAN_LIMIT, sid)).fetchall()
+        if rows:
+            slot, raw_proposal, raw_outcome = rows[0]
+            proposal, outcome = _object(raw_proposal), _object(raw_outcome)
+            intent = conn.execute('SELECT substr(payload,1,?),status FROM llm_scenario_intents WHERE id=? AND scenario_id=?',
+                                  (_ROW_BYTES + 1, proposal.get('action_id'), sid)).fetchone()
+            intent_plan = _object(intent[0]) if intent else {}
+            # Match the runtime metadata boundary and core EXIT normalization.
+            execution_plan = {k:v for k,v in strip_metadata(proposal).items()
+                              if k not in {'review','recovery','stop_revision'}}
+            assessment = proposal.get('thesis_assessment')
+            if (type(slot) is int and 0 < slot * 300 <= observed
+                    and outcome.get('status') == 'intent_pending' and intent and intent[1] == 'TERMINAL'
+                    and all(isinstance(proposal.get(k), str) and proposal[k] for k in
+                            ('action_id','input_id','rationale'))
+                    and digest(intent_plan) == digest(execution_plan)):
+                if (isinstance(assessment, dict) and assessment.get('contract_id') == contract['contract_id']
+                        and set(assessment) == {'contract_id','status','reason'}
+                        and isinstance(assessment.get('reason'), str) and 1 <= len(assessment['reason']) <= 240
+                        and assessment.get('status') in {'INTACT','WEAKENING','FAILED','UNKNOWN'}):
+                    result['exit_opinion'] = dict(status='AVAILABLE', kind='HISTORICAL_MODEL_OPINION_NOT_FILL_CAUSE',
+                        source=dict(decision_slot=slot, action_id=proposal['action_id'], proposal_sha256=digest(proposal)),
+                        assessment=assessment)
+        return result if _size(result) <= 3000 else dict(version=1,status='UNAVAILABLE',reason='history_size')
+    except (sqlite3.Error, ValueError, TypeError, KeyError, OverflowError, AttributeError):
+        return missing
 
 
 def build_position_flow(conn, active, context, now):

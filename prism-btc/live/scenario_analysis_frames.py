@@ -93,7 +93,7 @@ def analysis_model_view(payload):
             if isinstance(recovery.get(key), dict):
                 recovery[key] = {k:v for k,v in recovery[key].items() if allowed_evidence_path(k)}
         _omit_retired_opinions(recovery.get('historical_outcomes'))
-    for key in ('position_flow', 'previous_thesis_assessment', 'review_memory',
+    for key in ('position_flow', 'last_closed_trade', 'previous_thesis_assessment', 'review_memory',
                 'current_plan', 'recent_actions', 'recent_waits'):
         _omit_retired_opinions(ctx.get(key))
     _schema_frames(result.get('response_contract'))
