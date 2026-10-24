@@ -891,7 +891,7 @@ Qualitative FAILED is a separate model judgment, not proof that the host's numer
 failure rule was met. Explain it as model-assessed invalidation; never claim the
 code verified that judgment or invent confirmed numeric failure observations.
 In two-pass calculated review, wait_proposal and every candidate must carry the
-exact same thesis_assessment. A FAILED wait_proposal is a NONEXECUTABLE TEMPLATE
+same contract_id and status; reason wording may differ. A FAILED wait_proposal is a NONEXECUTABLE TEMPLATE
 only: supply a valid EXIT candidate; WAIT is excluded from selection. Do not use
 INTACT in the WAIT template to contradict FAILED in an EXIT candidate. Single-pass
 FAILED likewise requires EXIT. The host enforces this action constraint, not the
@@ -975,16 +975,21 @@ def immediate_reduce_instructions(text, context):
         text += '\nUse holding_price_order when available for exact numeric comparisons: do not group a level beyond a TP with levels before that TP. It proves neither support nor active orders; missing/omitted display is unavailable, so use original sources.\n'
     return text + '''
 REDUCE is available only when the response schema offers it for confirmed protected
-holdings without pending/unknown orders. Compare a justified immediate partial
+holdings with no pending_entries and no unknown_intents. Verified LIVE TP/partial-SL
+orders are not pending entries; the executor separately reconciles their cancellation.
+Compare a justified immediate partial
 reduction against WAIT, conditional ADJUST and full EXIT; it is not mandatory.
 REDUCE uses reduce_fraction strictly between 0 and 1, null side/hard_stop/chase,
 empty entries/take_profits/partial_stops/cancel_entry_ids, and no pending renewal.
 Other actions require reduce_fraction=null. The host floors quantity to step and
 requires valid nonzero reduction and remainder; never supply reduce_plan.
-REDUCE preserves the native Full SL and original target prices; verified unfilled
+REDUCE does not request changing the native Full SL. On successful target restoration,
+original target prices are retained and verified unfilled
 target quantities are proportionally scaled to the actual remainder, never above
-their original unfilled quotas and never recreating already filled targets;
-it does not reset the entry thesis, budget or filled quotas. Actual fees/slippage
+their original unfilled quotas and never recreating already filled targets.
+Use immediate_reduce_result and current verified order evidence: RESTORE_FAILED and
+SKIPPED_FAILED are not successful restoration or proof that retained targets are live.
+REDUCE does not reset the entry thesis, budget or filled quotas. Actual fees/slippage
 and fill timing remain unknown. FAILED requires full EXIT, never partial delay.
 '''
 
