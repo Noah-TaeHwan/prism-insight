@@ -372,6 +372,19 @@ def _check_execution_stalled(conn, mode: str, now: datetime) -> dict | None:
         from live.scenario_control import legacy_management_allowed
         if legacy_management_allowed(conn):
             return None
+        current = now.timestamp()
+        try:
+            decision = json.loads(tracking.get_meta(conn,'scenario_health_decision',mode) or '{}')
+            if not isinstance(decision, dict):
+                decision = {}
+        except Exception:
+            decision = {}
+        stamp = decision.get('at')
+        if (decision.get('status') == 'blocked' and decision.get('reason') == 'quarantine_release_required'
+                and type(stamp) in (int,float) and math.isfinite(stamp) and 0 <= current-stamp <= 360):
+            return dict(level='alert',code='management_release_required',msg=(
+                '관리 승인 해제 검토가 필요하여 새 판단이 보류되어 있습니다. '
+                '거래소 근거·정산·보호 상태를 대조한 뒤 별도 해제해야 하며, 정상 매매 재개를 뜻하지 않습니다.'))
         if not conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' LIMIT 1").fetchone():
             return None
         unknown = conn.execute("SELECT c.created_at FROM llm_scenario_children c JOIN llm_scenario_intents i "
@@ -382,7 +395,6 @@ def _check_execution_stalled(conn, mode: str, now: datetime) -> dict | None:
             if not row:
                 return None
             stamps = [row[0]*300]
-        current = now.timestamp()
         if any(type(s) not in (int,float) or not math.isfinite(s) or not 0 < s <= current for s in stamps):
             age_text = '대기 시각 확인 불가'
         else:
@@ -400,6 +412,14 @@ def _check_execution_stalled(conn, mode: str, now: datetime) -> dict | None:
         protected = (protection.get('status') == 'protection_checked' and type(stamp) in (int,float)
                      and math.isfinite(stamp) and 0 <= current-stamp <= 180)
         detail = '최근 보호 점검은 정상이나 판단 재개와는 별개입니다.' if protected else '최근 보호 상태도 별도 확인이 필요합니다.'
+        at, until = decision.get('at'), decision.get('management_expires_at')
+        if (len(unknown) == 1 and decision.get('status') == 'wait' and decision.get('management_only') is True
+                and type(at) in (int,float) and math.isfinite(at) and 0 <= current-at <= 360
+                and type(until) in (int,float) and math.isfinite(until) and current < until):
+            return dict(level='alert',code='execution_stalled',msg=(
+                f'주문 결과 미확정 {len(unknown)}건을 보존하고 있습니다 — {age_text}. '
+                '최근 보유 관망 판단은 제한 관리 범위에서 완료됐지만 신규 진입은 차단되어 있습니다. '
+                f'원 주문과 전체 정산이 확인된 것은 아닙니다. {detail}'))
         return dict(level='alert',code='execution_stalled',msg=(
             f'주문 결과 미확정으로 새 매매 판단이 보류되어 있습니다 — {age_text}, 미확정 주문 {len(unknown)}건. '
             f'시세 관측이 갱신되어도 해결된 상태가 아닙니다. {detail}'))
@@ -555,6 +575,7 @@ _CODE_TAG = {
     "error_burst": "에러폭주",
     "price_stale": "시세정지",
     "execution_stalled": "주문확인정체",
+    "management_release_required": "관리해제대기",
     "decision_halted": "판단중단",
     "equity_missing": "자산없음",
     "equity_zero": "자산이상",

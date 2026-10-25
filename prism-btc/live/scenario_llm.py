@@ -965,6 +965,15 @@ def parse_proposal(text: str) -> dict:
 
 
 def immediate_reduce_instructions(text, context):
+    if context.get('management_quarantine'):
+        return text + '''
+Administrative management quarantine overrides other offered-action guidance:
+only WAIT or full EXIT is allowed. Original UNKNOWN/PENDING and accounting pending
+remain unresolved; this authorization is NOT exchange evidence or settlement.
+No OPEN, ADJUST, REDUCE, pending renewal or cancellation IDs. Preserve the original
+entry contract: confirmed failure still requires full EXIT. Native Full SL remains
+independent protection. Never claim the unknown order was absent or cancelled.
+'''
     if context.get('immediate_reduce_version') != 1:
         return text
     text = text.replace('Immediate partial market reduction is unsupported; do not invent an\naction',

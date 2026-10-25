@@ -19,6 +19,7 @@ import math
 import sqlite3
 import time
 import uuid
+from live import scenario_management_quarantine as quarantine
 from contextlib import ExitStack, contextmanager
 
 from core.llm_scenario import update_circuit_breaker
@@ -581,6 +582,10 @@ class ScenarioRuntime:
             return False
 
     def _entry_contract_exit(self, state, ctx, slot):
+        if ctx.get('management_quarantine_block'):
+            return dict(status='blocked', reason={'RELEASE_REQUIRED': 'quarantine_release_required',
+                'FLAT_UNSETTLED': 'flat_quarantined_unsettled'}.get(ctx['management_quarantine_block'],
+                'management_quarantine_authority_invalid'), model_called=False)
         """Commit a latched sampled failure through the normal broker EXIT adapter."""
         observation = ctx.get("entry_contract_observation") or {}
         active = state.get("active") or {}
@@ -627,7 +632,8 @@ class ScenarioRuntime:
             return None
         if ctx["legacy_fenced"] or not ctx["protection_ok"]:
             return dict(status="fenced")
-        if self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING'").fetchone():
+        if (self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' OR status IS NULL").fetchone()
+                and not quarantine.pending_allowed(self.broker, ctx)):
             return dict(status="intent_pending")
         for body, in self.conn.execute("SELECT payload FROM llm_scenario_intents WHERE scenario_id=? AND status!='TERMINAL'",
                                        (state["active"]["scenario_id"],)):
@@ -661,6 +667,8 @@ class ScenarioRuntime:
         state["version"] += 1
         self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
                           (identity, validated["scenario_id"], _json(validated)))
+        if ctx.get('management_quarantine'):
+            quarantine.bind_exit(self.broker, validated, ctx['management_quarantine'])
         self._save(state)
         from live.scenario_provenance import record_hashed
         record_hashed("entry_contract_failure_exit", dict(contract=record, observation=observation,
@@ -672,7 +680,8 @@ class ScenarioRuntime:
             from live.scenario_broker import BrokerCancellationPending
             return dict(status="intent_pending", reason="awaiting_cancellation" if isinstance(
                 exc, BrokerCancellationPending) else "submission_unknown", model_called=False)
-        return dict(status="intent_pending", reason="awaiting_exact_evidence", model_called=False)
+        return dict(status="intent_pending", reason="awaiting_exact_evidence", model_called=False,
+                    **({'management_quarantine': ctx['management_quarantine']} if ctx.get('management_quarantine') else {}))
 
     def _tick(self, claimed):
         """One synchronous tick; callers may run independent protection separately."""
@@ -689,6 +698,10 @@ class ScenarioRuntime:
                 if not self._enabled():
                     return {"status": "execution_disabled", "reason": "broker_capabilities_unverified"}
                 ctx = self._context(state)
+                if ctx.get('management_quarantine_block'):
+                    return dict(status='blocked', reason={'RELEASE_REQUIRED': 'quarantine_release_required',
+                        'FLAT_UNSETTLED': 'flat_quarantined_unsettled'}.get(ctx['management_quarantine_block'],
+                        'management_quarantine_authority_invalid'))
                 if ctx["legacy_fenced"] or not ctx["protection_ok"]:
                     return {"status": "fenced"}
                 if ctx["new_risk_blocked"] and state["active"] is None:
@@ -697,7 +710,8 @@ class ScenarioRuntime:
                                 and ctx.get("pending_entries") == []
                                 and ctx.get("accounting_status") == "confirmed"
                                 and not self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status IS NULL OR status!='TERMINAL'").fetchone())}
-                if self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING'").fetchone():
+                if (self.conn.execute("SELECT 1 FROM llm_scenario_intents WHERE status='PENDING' OR status IS NULL").fetchone()
+                        and not quarantine.pending_allowed(self.broker, ctx)):
                     return {"status": "intent_pending"}
                 contract_exit = self._entry_contract_exit(state, ctx, slot)
                 if contract_exit is not None:
@@ -935,6 +949,11 @@ class ScenarioRuntime:
                         or review_envelope['outcome']['result']['selected']['id'] != 'WAIT_RENEWAL'
                         or review_envelope['outcome']['result']['calls'] != 2):
                     raise ValueError('pending_renewal_selected_two_phase_required')
+                if ctx.get('management_quarantine') != fresh.get('management_quarantine'):
+                    raise ValueError('management_quarantine_authority_changed')
+                if fresh.get('management_quarantine'):
+                    quarantine.pending_allowed(self.broker, fresh)
+                    quarantine.validate_action(validated, fresh)
                 if validated["action"] == "WAIT" and not validated.get("cancel_entry_ids") and not validated.get('pending_renewal'):
                     if state["active"] and payload.get("thesis_assessment") is not None:
                         state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
@@ -943,7 +962,8 @@ class ScenarioRuntime:
                                                  ctx["review_memory"], input_id, slot,
                                                  observed_at=commit_at if self.calculated_review_enabled else None)
                     self._save(state)
-                    return {"status": "wait", **({"review_update_receipt": receipt} if receipt else {})}
+                    return {"status": "wait", **({"review_update_receipt": receipt} if receipt else {}),
+                            **({'management_quarantine': fresh['management_quarantine']} if fresh.get('management_quarantine') else {})}
                 stage = "execution"
                 ident = validated["action_id"]
                 if state["active"] is None:
@@ -995,6 +1015,8 @@ class ScenarioRuntime:
                         receipt=final_guard["receipt"]),commit=False)
                 self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
                                   (ident, validated["scenario_id"], _json(validated)))
+                if fresh.get('management_quarantine'):
+                    quarantine.bind_exit(self.broker, validated, fresh['management_quarantine'])
                 if validated['action'] == 'REDUCE':
                     self.broker.prepare_reduce(validated, ident)
                 self._save(state)  # Intent precedes the first exchange side effect.
@@ -1043,7 +1065,8 @@ class ScenarioRuntime:
                     return {"status": "intent_pending", "reason": reason,
                             "review_update_receipt": receipt}
                 return {"status": "intent_pending", "reason": "awaiting_exact_evidence",
-                        "review_update_receipt": receipt}
+                        "review_update_receipt": receipt,
+                        **({'management_quarantine': fresh['management_quarantine']} if fresh.get('management_quarantine') else {})}
         except ScenarioModelError as exc:
             self.conn.rollback()
             # Fixed codes only: never expose a response, account or transport error.

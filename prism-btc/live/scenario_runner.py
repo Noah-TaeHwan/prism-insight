@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sqlite3
 import time
 import uuid
@@ -130,20 +131,33 @@ def record_health(conn,result,*,snapshot=None,loop=None,clock=time.time):
     # Separate latest outcomes: protection success must not overwrite a failed
     # decision loop, and a legacy heartbeat is never this evidence.
     if loop in {"decision", "protection"}:
+        management = {}
+        authority = result.get('management_quarantine')
+        if (loop == 'decision' and status == 'wait' and result.get('market_observation_only') is not True
+                and isinstance(authority, dict) and authority.get('status') == 'AUTHORIZED'
+                and authority.get('purpose') == 'ADMIN_AUTHORIZATION_NOT_EXCHANGE_EVIDENCE'
+                and authority.get('allowed_actions') == ['WAIT', 'EXIT']
+                and isinstance(authority.get('approval_id'), str) and authority['approval_id']
+                and isinstance(authority.get('approval_sha256'), str) and len(authority['approval_sha256']) == 64
+                and type(authority.get('expires_at')) in (int, float)
+                and math.isfinite(authority['expires_at']) and clock() < authority['expires_at']):
+            management = dict(management_only=True, management_approval_id=authority['approval_id'],
+                management_approval_sha256=authority['approval_sha256'], management_expires_at=authority['expires_at'])
         observation = ({"market_observation_only": True, "model_called": False,
                         "market_observation_status": result.get('market_observation_status')}
                        if result.get('market_observation_only') is True else {})
         tracking.set_meta(conn,"scenario_health_"+loop,json.dumps({
             "at":clock(),"status":status,"reason":result.get("reason"),
             "verified_flat_halt":result.get("verified_flat_halt") is True,
-            "verified_flat":result.get("verified_flat") is True, **observation},allow_nan=False),"demo")
+            "verified_flat":result.get("verified_flat") is True, **observation, **management},allow_nan=False),"demo")
     if (snapshot is not None and snapshot.get("valid") is True
             and result.get('market_observation_status') != 'failed'):
         observed_ms = snapshot_input_time(snapshot)*1000
         tracking.set_meta(conn,"scenario_market_observed_ms",observed_ms,"demo")
         if result.get('market_observation_only') is not True:
             tracking.set_meta(conn,"scenario_input_asof_ms",observed_ms,"demo")
-    if status=="blocked" and result.get("reason")!="new_risk_halted":
+    if status=="blocked" and result.get("reason") not in {
+            'new_risk_halted', 'quarantine_release_required', 'flat_quarantined_unsettled'}:
         detail="scenario tick blocked: "+str(result.get("reason","unknown"))
         if result.get("failure_stage") in _FAILURE_STAGES:
             detail+="; failure_stage="+result["failure_stage"]
@@ -289,7 +303,10 @@ def main():
         result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
                         snapshot=snapshot,proposal=operational_propose,
                         calculated_review=args.calculated_review, entry_contract_enabled=args.entry_contract)
-        if args.execute and result.get('status') == 'intent_pending' and not snapshots:
+        pending_observation = (result.get('status') == 'intent_pending' or
+            (result.get('status') == 'blocked' and result.get('reason') in {
+                'quarantine_release_required', 'flat_quarantined_unsettled'}))
+        if args.execute and pending_observation and not snapshots:
             # Runtime returned before snapshot collection and released its locks.
             # Keep observation alive without bypassing the unresolved-order fence.
             result = observe_pending_market(result, snapshot)

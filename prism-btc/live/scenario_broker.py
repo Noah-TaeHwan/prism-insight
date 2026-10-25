@@ -488,6 +488,12 @@ class ScenarioDemoBroker(ScenarioExecution):
         return update_daily_risk(self.conn,observed,dict(start_ms=start,end_ms=end,complete=complete,flows=flows))
 
     def context(self):
+        from live import scenario_management_quarantine as quarantine
+        quarantine_ready = True
+        try:
+            quarantine.refresh_known(self)
+        except Exception:
+            quarantine_ready = False
         observed=self.capture_account()
         active=self._active()
         from live.scenario_recovery import risk_fraction
@@ -511,6 +517,20 @@ class ScenarioDemoBroker(ScenarioExecution):
                 accounting=dict(positions=[dict(price=float(observed["position"]["avgPrice"]),quantity=size)] if size else [],
                     realized_loss=None,fees_paid=None,funding_paid=None)
         protection=not float(observed["position"]["size"]) or bool(active and self._verify_protection(observed,active["hard_stop"],active["side"]))
+        management = None
+        management_block = None
+        if quarantine_ready:
+            try:
+                management = quarantine.project(self, observed, active, self.children(active['scenario_id']) if active else [])
+            except Exception:
+                management = None  # Invalid authority never changes the ordinary UNKNOWN fence.
+        if management is None:
+            try:
+                management_block = quarantine.projection_failure(self, observed)
+            except Exception:
+                management_block = 'INVALID'
+        if management:
+            financial_ok = False  # Administrative permission is not accounting evidence.
         from live.scenario_runner_economics import runner_economics
         review_finance = runner_economics(accounting=accounting,
             side=active["side"] if active else None, mark_price=observed["mark_price"],
@@ -532,6 +552,8 @@ class ScenarioDemoBroker(ScenarioExecution):
             legacy_fenced=observed["legacy_fenced"], pending_entries=pending, positions=accounting["positions"],
             unknown_intents=any(c["status"] == "UNKNOWN" or not c["evidence"] for c in children))
         return dict(entry_thesis=initial_entry_evidence, stop_policy=stop_policy, scenario_risk_fraction=fraction, conditional_entry_version=1, account_version=observed["account_version"],legacy_fenced=observed["legacy_fenced"],
+            **({'management_quarantine': management} if management else {}),
+            **({'management_quarantine_block': management_block} if management_block else {}),
             **reduction_status,
             account_captured_at=observed["captured_at"], runner_economics=review_finance,
             observed_execution_fee_evidence=accounting.get("observed_execution_fee_evidence", flat_fees),
@@ -733,7 +755,9 @@ class ScenarioDemoBroker(ScenarioExecution):
                 except Exception:
                     unknown=True
         protection=self._verify_protection(observed,active["hard_stop"],active["side"])
-        if exiting and self.execution_enabled and not stop_hit and not unknown and not observed["legacy_fenced"]:
+        from live.scenario_management_quarantine import bound_exit
+        quarantine_exit = bool(exiting and bound_exit(self, json.loads(latest[0])['action_id']))
+        if exiting and self.execution_enabled and not stop_hit and (not unknown or quarantine_exit) and not observed["legacy_fenced"]:
             try:
                 if self._continue_unsubmitted_exit(active):
                     observed=self.capture_account()
