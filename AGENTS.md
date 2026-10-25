@@ -76,6 +76,7 @@ keep this file to "what to always know" and "where to look first".
 | 배포·장애 수리 | `docs/SERVER_GIT_OPERATIONS_ko.md`의 변경 범위별 검증 게이트 | |
 | 2주 정기 점검 | `docs/TWO_WEEK_REVIEW_ko.md`, 하네스의 프롬프트 주기 점검 | `tools/two_week_review.py` |
 | 매매 복기, 특정 종목·포지션의 판단 경과 | `docs/PRISM_OBSERVABILITY.md`의 "Trace linkage" | `prism-trade-review`, `tools/clickstack_query.py` |
+| 책·외부 지식을 읽고 우리 로직에 녹이기, 예전에 읽은 지식 찾기 | `docs/knowledge/INDEX_ko.md`, `docs/knowledge/README_ko.md`(가공 원칙·카드 양식) | `prism-knowledge-intake` |
 | 새 가설·관측 등록, 지금 LIVE·SHADOW 상태 확인 | `docs/HYPOTHESIS_REGISTRY_ko.md`(등록일 기록, 2주 점검 때 재측정) | `tools/feature_status.py` |
 
 ## 이 헌장이 들어오는 길
