@@ -280,6 +280,12 @@ class ScenarioExecution:
         from live.scenario_broker import read_evidence_pages
         from live.exchange_snapshot import read_complete
         link = child["link_id"]
+        # In-memory optimization evidence only. An attempted recheck invalidates
+        # the old proof; ordinary exact reconciliation always performs its GETs.
+        verified_terminals = getattr(self, '_quarantine_terminal_observations', None)
+        if verified_terminals is None:
+            verified_terminals = self._quarantine_terminal_observations = {}
+        verified_terminals.pop(link, None)
         native=child["kind"]=="native_sl"
         exact={"orderId":child["order_id"]} if native else {"orderLinkId":link}
         result = read_complete(self._call,"get_open_orders",category="linear",symbol="BTCUSDT",**exact)
@@ -336,7 +342,11 @@ class ScenarioExecution:
         self.conn.execute("UPDATE llm_scenario_children SET status=?,order_id=?,evidence=? WHERE link_id=?",
             (status,order["orderId"],encoded(evidence),link))
         self.conn.commit()
-        return dict(child,status=status,order_id=order["orderId"],evidence=evidence)
+        result = dict(child,status=status,order_id=order["orderId"],evidence=evidence)
+        if status == 'TERMINAL' and not native:
+            verified_terminals[link] = hashlib.sha256(encoded(dict(
+                main_uid=self.expected_main_uid, endpoint=self.session.endpoint, child=result)).encode()).hexdigest()
+        return result
 
     def _retain_native(self, observed, active):
         """Persist exact native IDs while visible; never infer unseen stop fills."""

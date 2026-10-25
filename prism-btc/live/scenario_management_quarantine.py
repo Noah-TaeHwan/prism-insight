@@ -144,12 +144,18 @@ def _inspect(broker, event, observed, active, children, self_exit=None):
 
 
 def refresh_known(broker, self_exit=None):
-    """Exact reads only; designated unresolved child remains untouched."""
+    """Reuse same-instance exact terminal observations; live protection stays fresh."""
+    from live.scenario_execution import encoded
     event = _approval(broker)
     if not event:
         return
     for c in broker.children(event['body']['scenario_id']):
         if c['link_id'] != event['body']['unknown_link_id']:
+            if c['status'] == 'TERMINAL' and c['kind'] != 'native_sl':
+                fingerprint = hashlib.sha256(encoded(dict(main_uid=broker.expected_main_uid,
+                    endpoint=broker.session.endpoint, child=c)).encode()).hexdigest()
+                if getattr(broker, '_quarantine_terminal_observations', {}).get(c['link_id']) == fingerprint:
+                    continue
             broker._query_child(c)
 
 

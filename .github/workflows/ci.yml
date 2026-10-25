@@ -330,6 +330,7 @@ jobs:
             prism-btc/tests/test_management_quarantine_health.py \
             prism-btc/tests/test_scenario_management_quarantine.py \
             prism-btc/tests/test_scenario_management_quarantine_runtime.py \
+            prism-btc/tests/test_scenario_quarantine_terminal_reuse.py \
             prism-btc/tests/test_scenario_management_prompt_contract.py \
             prism-btc/tests/test_scenario_forward_packet.py \
             prism-btc/tests/test_scenario_notice.py \
