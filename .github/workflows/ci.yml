@@ -282,6 +282,7 @@ jobs:
             prism-btc/tests/test_scenario_llm.py \
             prism-btc/tests/test_scenario_review_memory.py \
             prism-btc/tests/test_scenario_review_capture.py \
+            prism-btc/tests/test_review_capture_boundaries.py \
             prism-btc/tests/test_scenario_stop_revision.py \
             prism-btc/tests/test_scenario_snapshot_lock.py \
             prism-btc/tests/test_scenario_net_recovery.py \
