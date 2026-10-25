@@ -324,8 +324,10 @@ class ScenarioExchange:
             executable = price * (1 + sign * (self.slippage + self.spread / 2)) if market else _d(order["price"])
             if market:
                 executable = (executable / self.tick).to_integral_value(rounding=ROUND_CEILING if sign > 0 else ROUND_FLOOR) * self.tick
-            crossed = market or (quote <= executable if sign > 0 else quote >= executable)
             maker = not market and bool(order.get("_rested"))
+            # Resting liquidity matches trades at its limit, not a taker's opposite quote.
+            reference = price if maker else quote
+            crossed = market or (reference <= executable if sign > 0 else reference >= executable)
             if crossed and not market and not maker:
                 slipped = price * (1 + sign * (self.slippage + self.spread / 2))
                 slipped = (slipped / self.tick).to_integral_value(rounding=ROUND_CEILING if sign > 0 else ROUND_FLOOR) * self.tick
