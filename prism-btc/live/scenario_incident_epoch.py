@@ -58,17 +58,22 @@ def epoch(conn):
 
 def _snapshot(broker):
     conn = broker.conn
-    tables = ('llm_scenario_intents', 'llm_scenario_children', 'llm_scenario_reductions',
-              'llm_scenario_entry_contracts', 'llm_scenario_pending_leases')
+    queries = (
+        ('llm_scenario_intents', 'PRAGMA table_info(llm_scenario_intents)',
+         'SELECT * FROM llm_scenario_intents WHERE scenario_id=? ORDER BY rowid'),
+        ('llm_scenario_children', 'PRAGMA table_info(llm_scenario_children)',
+         'SELECT * FROM llm_scenario_children WHERE scenario_id=? ORDER BY rowid'),
+        ('llm_scenario_reductions', 'PRAGMA table_info(llm_scenario_reductions)',
+         'SELECT * FROM llm_scenario_reductions WHERE intent_id IN (SELECT id FROM llm_scenario_intents WHERE scenario_id=?) ORDER BY rowid'),
+        ('llm_scenario_entry_contracts', 'PRAGMA table_info(llm_scenario_entry_contracts)',
+         'SELECT * FROM llm_scenario_entry_contracts WHERE scenario_id=? ORDER BY rowid'),
+        ('llm_scenario_pending_leases', 'PRAGMA table_info(llm_scenario_pending_leases)',
+         'SELECT * FROM llm_scenario_pending_leases WHERE scenario_id=? ORDER BY rowid'),
+    )
     rows = {}
-    for table in tables:
-        columns = [r[1] for r in conn.execute('PRAGMA table_info(' + table + ')')]
+    for table, schema_query, query in queries:
+        columns = [r[1] for r in conn.execute(schema_query)]
         require(bool(columns), 'schema_missing')
-        field = 'scenario_id' if 'scenario_id' in columns else 'intent_id'
-        if field == 'intent_id':
-            query = 'SELECT * FROM ' + table + ' WHERE intent_id IN (SELECT id FROM llm_scenario_intents WHERE scenario_id=?) ORDER BY rowid'
-        else:
-            query = 'SELECT * FROM ' + table + ' WHERE scenario_id=? ORDER BY rowid'
         rows[table] = [list(row) for row in conn.execute(query, (SCENARIO,))]
     rows['management'] = _events(conn, 'management_quarantine_v1')
     rows['management_exits'] = _events(conn, 'management_quarantine_exit_v1')

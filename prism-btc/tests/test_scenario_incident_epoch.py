@@ -112,6 +112,33 @@ def test_idempotent_approval_returns_receipt_without_reprobing(flat_incident):
         policy.cutover(i['broker'], approval=altered, quiescence_probe=None)
 
 
+def test_snapshot_scenario_filter_remains_a_bound_value(flat_incident, monkeypatch):
+    broker = flat_incident['broker']
+    baseline = policy._snapshot(broker)
+    monkeypatch.setattr(policy, 'SCENARIO', "s1' OR 1=1 --")
+    snapshot = policy._snapshot(broker)
+    assert all(not rows for table, rows in snapshot.items() if table.startswith('llm_scenario_'))
+    assert snapshot['management'] == baseline['management']
+
+
+@pytest.mark.parametrize('table', [
+    'llm_scenario_intents', 'llm_scenario_children', 'llm_scenario_reductions',
+    'llm_scenario_entry_contracts', 'llm_scenario_pending_leases',
+])
+def test_snapshot_requires_every_fixed_schema(flat_incident, table):
+    broker = flat_incident['broker']
+    statements = {
+        'llm_scenario_intents': 'DROP TABLE llm_scenario_intents',
+        'llm_scenario_children': 'DROP TABLE llm_scenario_children',
+        'llm_scenario_reductions': 'DROP TABLE llm_scenario_reductions',
+        'llm_scenario_entry_contracts': 'DROP TABLE llm_scenario_entry_contracts',
+        'llm_scenario_pending_leases': 'DROP TABLE llm_scenario_pending_leases',
+    }
+    broker.conn.execute(statements[table])
+    with pytest.raises(ValueError, match='incident_epoch_schema_missing'):
+        policy._snapshot(broker)
+
+
 @pytest.mark.parametrize('mutation', ['expired', 'hash', 'uid', 'endpoint', 'risk_acceptance', 'probe', 'worker_alive', 'inflight', 'extra_intent'])
 def test_denials_do_not_separate_or_post(flat_incident, mutation):
     i = flat_incident
