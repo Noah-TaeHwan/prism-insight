@@ -222,6 +222,28 @@ def test_spread_and_marketable_amend_charge_taker():
     assert Decimal(fill["execFee"]) == Decimal('.2002')
 
 
+@pytest.mark.parametrize('side,first,last', [('Buy',101,99.95),('Sell',99,100.05)])
+def test_resting_limit_crosses_last_trade_without_taker_spread(side, first, last):
+    s = OfflineBybitSession(slippage_bps=5, spread=.002, maker_fee=.001, taker_fee=.002)
+    ident = order(s, side=side, price='100')
+    s.advance(100, first, first, 1000)
+    assert not s.executions
+    s.advance(200, last, last, 1000)
+    assert s.orders[ident]['orderStatus'] == 'Filled'
+    assert s.executions[0]['isMaker'] is True
+    assert Decimal(s.executions[0]['execPrice']) == Decimal('100')
+    assert Decimal(s.executions[0]['execFee']) == Decimal('.1')
+
+
+@pytest.mark.parametrize('side,price', [('Buy',100.05),('Sell',99.95)])
+def test_resting_limit_keeps_no_fill_on_wrong_side(side, price):
+    s = OfflineBybitSession(spread=.002)
+    order(s,side=side,price='100')
+    s.advance(100,101 if side=='Buy' else 99,100,1000)
+    s.advance(200,price,price,1000)
+    assert not s.executions
+
+
 def test_stop_amendment_effect_is_delayed_and_old_stop_stays():
     s = session(amend_latency_ms=200)
     order(s, stopLoss="95", slTriggerBy="MarkPrice", tpslMode="Full")
