@@ -112,6 +112,32 @@ def test_idempotent_approval_returns_receipt_without_reprobing(flat_incident):
         policy.cutover(i['broker'], approval=altered, quiescence_probe=None)
 
 
+def test_idle_deployment_needs_inventory_but_no_invented_stopped_worker(flat_incident):
+    i = flat_incident
+    i['proof']['stopped_workers'] = []
+    i['proof']['process_inventory_before'] = 'fixture inventory: no runner processes'
+    i['approval']['quiescence_sha256'] = digest(i['proof'])
+    assert transition(i)['deployment_proof']['stopped_workers'] == []
+    assert i['exchange'].writes == []
+    assert i['broker'].children('s1') == i['old_children']
+
+
+@pytest.mark.parametrize('field,value', [
+    ('stopped_workers', None), ('stopped_workers', {}),
+    ('process_inventory_before', ''), ('process_inventory_after', ''),
+    ('scheduler_after', 'decision-and-protection-enabled'),
+])
+def test_idle_deployment_still_requires_complete_stop_proof(flat_incident, field, value):
+    i = flat_incident
+    i['proof']['stopped_workers'] = []
+    i['proof'][field] = value
+    i['approval']['quiescence_sha256'] = digest(i['proof'])
+    with pytest.raises(ValueError, match='deployment_proof_incomplete'):
+        transition(i)
+    assert policy.receipt(i['broker'].conn) is None
+    assert i['exchange'].writes == []
+
+
 def test_snapshot_scenario_filter_remains_a_bound_value(flat_incident, monkeypatch):
     broker = flat_incident['broker']
     baseline = policy._snapshot(broker)
