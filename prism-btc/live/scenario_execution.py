@@ -137,7 +137,7 @@ class ScenarioExecution:
                 result = [c for c in result if c['scenario_id'] != historical['scenario_id']]
         return result
 
-    def _write(self, method, *, _restore_rejection=False, _single_attempt=False, **params):
+    def _write(self, method, *, _restore_rejection=False, _single_attempt=False, _before_send=None, **params):
         from live.shared_entry_coordinator import mutation_lock
         from live.scenario_incident_epoch import guard_write, TRANSPORT
         from live.scenario_management_quarantine import _append
@@ -151,13 +151,13 @@ class ScenarioExecution:
             self._incident_transport_active = True
             try:
                 return self._write_transport(method, _restore_rejection=_restore_rejection,
-                    _single_attempt=_single_attempt, **params)
+                    _single_attempt=_single_attempt, _before_send=_before_send, **params)
             finally:
                 self._incident_transport_active = False
                 _append(self.conn, TRANSPORT, dict(call_id=call_id, state='RETURNED'), self.clock())
                 self.conn.commit()
 
-    def _write_transport(self, method, *, _restore_rejection=False, _single_attempt=False, **params):
+    def _write_transport(self, method, *, _restore_rejection=False, _single_attempt=False, _before_send=None, **params):
         if not self.execution_enabled:
             self._fail("scenario_execution_disabled")
         self._identity()  # Includes endpoint recheck on every mutation.
@@ -195,6 +195,8 @@ class ScenarioExecution:
                 operation = getattr(self.session, method)
                 from live.scenario_incident_epoch import guard_write
                 guard_write(self, method, params)  # No REST after this final freshness check.
+                if _before_send is not None:
+                    _before_send()
                 attempted = True
                 response = operation(**params)
             finally:
@@ -218,7 +220,7 @@ class ScenarioExecution:
                     if proof:
                         raise RestorationNotAccepted(proof) from exc
             if probe:
-                self._probe_exchange_journal("EXCHANGE_ERROR", dict(audit, error="submission_unknown"))
+                self._probe_exchange_journal("EXCHANGE_ERROR", dict(audit, error="submission_unknown" if attempted else "submission_not_attempted"))
             self._fail("submission_unknown")
         exchange_call(method, params, started, response=response)
         if _restore_rejection and isinstance(response, dict):
@@ -464,11 +466,42 @@ class ScenarioExecution:
         batch=self.conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id=?",(intent_id,)).fetchone()
         if kind=="entry" and batch and batch[0] in {"ABORTED","INTERRUPTED"}:
             self._fail("unsubmitted_children_abandoned")
-        self.conn.executemany("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,'UNKNOWN',NULL,NULL,?)",
-            [(link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock())])
-        self.conn.commit()  # Crash after this point can only recover by exact ID.
+        def before_send():
+            # Persist only after local guards pass, but always before transport.
+            self.conn.execute("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,'UNKNOWN',NULL,NULL,?)",
+                (link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock()))
+            self.conn.commit()  # Crash after this point can only recover by exact ID.
+            if kind == "entry":
+                from live.scenario_incident_epoch import guard_write
+                try:
+                    guard_write(self, "place_order", request)
+                except Exception as exc:
+                    # Only this invocation's unattempted entry may be archived.
+                    from live.scenario_management_quarantine import _append
+                    self.conn.execute("SAVEPOINT entry_pretransport_abort")
+                    try:
+                        child = self.conn.execute("SELECT * FROM llm_scenario_children WHERE link_id=?", (link,)).fetchone()
+                        require(child is not None, 'pretransport_child_missing')
+                        _append(self.conn, "entry_pretransport_abort", dict(version=1,
+                            child=list(child), transport_attempted=False,
+                            basis="FINAL_LOCAL_GUARD_BEFORE_SDK", error_type=type(exc).__name__), self.clock())
+                        batch = self.conn.execute("INSERT INTO llm_scenario_execution_batches VALUES(?,'ABORTED') "
+                            "ON CONFLICT(intent_id) DO UPDATE SET status='ABORTED' WHERE status IN ('EXECUTING','COMPLETE')", (intent_id,))
+                        require(batch.rowcount == 1, 'pretransport_batch_conflict')
+                        deleted = self.conn.execute("DELETE FROM llm_scenario_children WHERE link_id=? AND intent_id=? "
+                            "AND status='UNKNOWN' AND order_id IS NULL AND evidence IS NULL AND request=?",
+                            (link, intent_id, encoded(request)))
+                        require(deleted.rowcount == 1, 'pretransport_child_conflict')
+                        self.conn.execute("RELEASE entry_pretransport_abort")
+                        self.conn.commit()
+                    except Exception:
+                        self.conn.rollback()
+                        raise
+                    raise
+        if kind != "entry":
+            before_send()
         try:
-            response = self._write("place_order", _single_attempt=single_attempt, _restore_rejection=(payload.get('action') == 'REDUCE'
+            response = self._write("place_order", _before_send=before_send if kind == "entry" else None, _single_attempt=single_attempt, _restore_rejection=(payload.get('action') == 'REDUCE'
                 and kind == 'partial_sl' and local_id.startswith('reduce:')), **request)
         except RestorationNotAccepted as exc:
             exc.created_this_invocation = True
