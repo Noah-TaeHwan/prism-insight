@@ -86,6 +86,10 @@ KEYWORDS = {
         "복기", "왜 샀", "왜 팔았", "왜 안 샀", "왜 안 팔", "왜 매수", "왜 매도", "왜 손절", "왜 보유",
         "trace_id", "추적번호", "추적 번호", "clickstack", "클릭스택", "clickhouse", "매매 기록", "매매 내역",
     ),
+    "knowledge": (
+        "책 읽", "읽은 책", "책 내용", "책에서", "책 사진", "책 첨부", "인사이트 축적", "인사이트 누적",
+        "지식 카드", "저자가", "저자는",
+    ),
     "analysis": ("매수품질", "진입품질", "리플레이", "replay", "재생", "승격", "evidence packet", "패킷"),
     "stock": (
         "매수", "매도", "손절", "익절", "재진입", "증액", "비중", "스크리닝", "트리거", "국면",
@@ -133,6 +137,12 @@ FULL = {
         "- MISSING은 모름. 운영에서 LLM이 승인하는 규칙은 LLM 재생으로 판정. 가상 표본은 (시장·종목·규칙·날짜) 중복 제거.",
         "- 승격 순서는 사전등록 → 재생 → SHADOW → 제한 LIVE. SHADOW·LIVE 자동 승격 금지, LIVE는 명시 승인.",
     ],
+    "knowledge": [
+        "[PRISM 하네스] 책·외부 지식 흡수 요청입니다.",
+        "- `prism-knowledge-intake` 스킬: docs/knowledge/INDEX_ko.md를 먼저 보고, 같은 주장의 카드가 있으면 덮어써 갱신한다.",
+        "- 원문 요약은 SOURCE, 주장은 카드(유형·적용 범위·북극성 적합도·증거 상태·가공 결론). 이상형을 게이트로 만들지 않는다.",
+        "- 카드는 매매 규칙을 직접 바꾸지 않는다. 변경은 prism-trading-change-review로 간다.",
+    ],
     "review": [
         "[PRISM 하네스] 매매 복기·판단 이유 확인 요청입니다.",
         "- `prism-trade-review` 스킬: 먼저 `python tools/clickstack_query.py ticker <종목>` → `trace <trace_id>`로"
@@ -148,8 +158,9 @@ SHORT = {
     "deploy": "[PRISM 하네스] (재알림) 머지·배포 → SERVER_GIT_OPERATIONS 게이트, 모든 상태 검사 SUCCESS, 배포·첫 정기 실행 따로 보고.",
     "review": "[PRISM 하네스] (재알림) 복기 → tools/clickstack_query.py ticker·trace로 원장부터, 없으면 MISSING.",
     "analysis": "[PRISM 하네스] (재알림) 분석 → Evidence Packet·MISSING 보존·LLM 재생·중복 제거.",
+    "knowledge": "[PRISM 하네스] (재알림) 책·외부 지식 → docs/knowledge 카드 갱신, 북극성 대조, 매매 변경은 하네스로.",
 }
-ORDER = ("btc", "stock", "prompt", "review", "analysis", "deploy")
+ORDER = ("btc", "stock", "prompt", "review", "analysis", "knowledge", "deploy")
 PATCH_FILE = re.compile(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$|^\*\*\* Move to: (.+)$", re.M)
 
 
