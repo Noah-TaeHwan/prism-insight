@@ -21,7 +21,7 @@ def explanation(target='CURRENT:TP:old',side='LONG',missing=False):
             target_ref=target)])
 
 
-def run_pipeline(tmp_path,action='WAIT',side='LONG',missing=False,failed=False,advance=False,host_failed=False):
+def run_pipeline(tmp_path,action='WAIT',side='LONG',missing=False,failed=False,advance=False,host_failed=False,capture_audit=False):
     now=NOW/1000
     ticks=[0]
     def clock():
@@ -102,7 +102,12 @@ def run_pipeline(tmp_path,action='WAIT',side='LONG',missing=False,failed=False,a
             observe_contract(active,previous,int(now//300)-1,now-300)
     state['active']=active
     r._save(state)
-    outcome=r.tick()
+    if capture_audit:
+        from live.scenario_provenance import run_capture
+        with run_capture(conn):
+            outcome=r.tick()
+    else:
+        outcome=r.tick()
     recorded=conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()
     tape=json.loads(recorded[0]) if recorded else None
     return r,broker,outcome,tape,requests,old_plan

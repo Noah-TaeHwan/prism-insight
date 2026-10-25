@@ -31,7 +31,6 @@ from live.scenario_review_memory import apply_review, observe_review, review_con
 from live import scenario_recovery as recovery
 from live.scenario_entry_contract import (bind_contract, contract_context, observe_contract,
                                           strip_metadata, validate_metadata)
-from live.scenario_entry_contract import valid_record
 
 REQUIRED_CAPABILITIES = frozenset({"exact_fills", "atomic_protection",
     "exact_settlement", "idempotent_intents", "fresh_risk_context"})
@@ -251,13 +250,15 @@ class ScenarioRuntime:
         self.conn.execute("UPDATE llm_scenario_state SET body=? WHERE id=1", (_json(state),))
         self.conn.commit()
 
-    def _apply_review(self, active, payload, validated, presented, input_id, slot, *, observed_at=None):
+    def _apply_review(self, active, payload, validated, presented, input_id, slot, *, observed_at=None,
+                      persisted_proposal_json=None):
         """Optional audit failures must never interrupt advisory apply or EXIT."""
         stamp, boundary = self.clock() if observed_at is None else observed_at, None
         try:
             from live.scenario_provenance import begin_review_capture
             boundary = begin_review_capture(active, presented, payload, validated,
-                input_id=input_id, slot=slot, applied_at=stamp)
+                input_id=input_id, slot=slot, applied_at=stamp,
+                persisted_proposal_json=persisted_proposal_json)
         except Exception:
             boundary = None
         receipt = apply_review(active, payload.get("review"), validated["action_id"],
@@ -839,8 +840,9 @@ class ScenarioRuntime:
             # Persist the proposal even if independent protection owns the trading
             # mutex when the model returns. This does NOT authorize execution.
             stage = "proposal_persist"
+            persisted_proposal_json = _json(payload)
             self.conn.execute("UPDATE llm_scenario_decisions SET proposal=? WHERE slot=? AND proposal IS NULL",
-                              (_json(payload), slot))
+                              (persisted_proposal_json, slot))
             self.conn.commit()
             stage = "post_model_reconcile"
             with _post_model_mutation_lock(self.conn):
@@ -960,7 +962,8 @@ class ScenarioRuntime:
                         state["active"]["last_thesis_assessment_at"] = ctx["now"]
                     receipt = self._apply_review(state["active"], payload, validated,
                                                  ctx["review_memory"], input_id, slot,
-                                                 observed_at=commit_at if self.calculated_review_enabled else None)
+                                                 observed_at=commit_at if self.calculated_review_enabled else None,
+                                                 persisted_proposal_json=persisted_proposal_json)
                     self._save(state)
                     return {"status": "wait", **({"review_update_receipt": receipt} if receipt else {}),
                             **({'management_quarantine': fresh['management_quarantine']} if fresh.get('management_quarantine') else {})}
@@ -991,7 +994,8 @@ class ScenarioRuntime:
                                   commit_at if self.calculated_review_enabled else self.clock())
                 receipt = self._apply_review(state["active"], payload, validated,
                                              ctx["review_memory"], input_id, slot,
-                                             observed_at=commit_at if self.calculated_review_enabled else None)
+                                             observed_at=commit_at if self.calculated_review_enabled else None,
+                                             persisted_proposal_json=persisted_proposal_json)
                 if payload.get("thesis_assessment") is not None:
                     state["active"]["last_thesis_assessment"] = dict(payload["thesis_assessment"])
                     state["active"]["last_thesis_assessment_at"] = ctx["now"]

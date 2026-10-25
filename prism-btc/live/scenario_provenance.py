@@ -304,7 +304,8 @@ def record_hashed(kind, body, **keys):
         _gap()
 
 
-def begin_review_capture(active, presented, proposal, validated, *, input_id, slot, applied_at):
+def begin_review_capture(active, presented, proposal, validated, *, input_id, slot, applied_at,
+                         persisted_proposal_json=None):
     """Optional immediate pre-apply copy; no reads/writes of trading state.
 
     Hashes use this module's ensure_ascii=True canonical JSON, not the offline
@@ -318,12 +319,18 @@ def begin_review_capture(active, presented, proposal, validated, *, input_id, sl
         from live.scenario_review_memory import _saved_rows_valid, valid_review
         if not _saved_rows_valid(before) or not _saved_rows_valid(presented) or not valid_review(review):
             raise ValueError('invalid_review_boundary')
+        original = json.loads(persisted_proposal_json) if persisted_proposal_json is not None else proposal
+        if (any(original.get(key) != proposal.get(key) for key in
+                ('input_id', 'action_id', 'scenario_id', 'action'))
+                or original.get('review') != review):
+            raise ValueError('review_original_identity_changed')
         value = dict(input_id=input_id, action_id=validated['action_id'],
             scenario_id=validated['scenario_id'], action=validated['action'],
             decision_slot=slot, applied_at=applied_at, before=before, presented=presented,
-            original_review=review, original_proposal_hash=digest(proposal),
+            original_review=review, original_proposal_hash=digest(original),
             validated_payload_hash=digest(validated),
-            requires_intent=validated['action'] != 'WAIT' or bool(validated.get('cancel_entry_ids')),
+            requires_intent=(validated['action'] != 'WAIT' or bool(validated.get('cancel_entry_ids'))
+                             or bool(validated.get('pending_renewal'))),
             core_validated=True, core_validation_scope='VALIDATOR_RETURNED_BEFORE_CAPTURE_NOT_REEXECUTED',
             hash_basis='CANONICAL_JSON_SORTED_ASCII_SHA256',
             commit_status='OBSERVATIONAL_UNCOMMITTED')
