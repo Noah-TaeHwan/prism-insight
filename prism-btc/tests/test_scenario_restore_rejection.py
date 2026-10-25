@@ -335,7 +335,8 @@ def test_typed_exception_from_retry_property_is_not_exchange_rejection(live, mon
         broker.execute(payload, 'r1')
     assert len(attempts) == (0 if stage == 'configure' else 1)
     assert 'rejected_restorations' not in load(broker, 'r1')
-    assert any(c['kind'] == 'partial_sl' and c['status'] == 'UNKNOWN' for c in broker.children())
+    assert any(c['kind'] == 'partial_sl' and c['status'] == 'UNKNOWN'
+               for c in broker.children()) is (stage == 'restore')
 
 
 def test_nonrestoration_orders_keep_original_retry_configuration(live):

@@ -872,3 +872,21 @@ def test_children_do_not_cache_absent_receipt_across_cutover(flat_incident):
     transition(i)
     assert i['broker'].children() == []
     assert i['broker'].children('s1') == before
+
+
+def test_final_epoch_expiry_does_not_create_unsubmitted_unknown(flat_incident, monkeypatch):
+    i = flat_incident
+    _, broker = open_new(i)
+    identity = broker._identity
+    def delayed_identity():
+        identity()
+        i['now'][0] += 11
+    monkeypatch.setattr(broker, '_identity', delayed_identity)
+    before_children = copy.deepcopy(broker.children())
+    before_writes = copy.deepcopy(i['exchange'].writes)
+    with pytest.raises(ValueError):
+        broker._submit(dict(scenario_id='new-scenario', action='OPEN'),
+            'never-sent', 'entry', 'late-entry', dict(side='Buy', qty='.1',
+                orderType='Limit', price='100', reduceOnly=False))
+    assert broker.children() == before_children
+    assert i['exchange'].writes == before_writes

@@ -1467,3 +1467,49 @@ def test_runtime_aborted_adjust_settles_no_fills_then_requests_fresh_model(live)
     assert rt.state()["active"] is None
     assert rt.state()["breaker"].get("consecutive_losses", 0) == 0
     assert e.writes == writes
+
+
+@pytest.mark.parametrize('blocked_check', [1, 2])
+def test_entry_pretransport_guard_failure_leaves_no_unknown_child(live, monkeypatch, blocked_check):
+    from live import scenario_incident_epoch
+    broker, exchange = live
+    payload = persist(broker)
+    checks = []
+    def guard(*args):
+        checks.append(1)
+        if len(checks) == blocked_check:
+            raise ValueError('incident_epoch_new_risk_halted')
+    monkeypatch.setattr(scenario_incident_epoch, 'guard_write', guard)
+    with pytest.raises((ValueError, BrokerNotReady)):
+        broker.execute(payload, payload['action_id'])
+    assert exchange.writes == []
+    assert broker.children() == []
+    assert broker.conn.execute('SELECT status FROM llm_scenario_execution_batches').fetchone()[0] == 'ABORTED'
+    with pytest.raises(BrokerNotReady):
+        broker.execute(payload, payload['action_id'])
+    assert exchange.writes == []
+
+
+def test_child_is_durable_before_transport_and_timeout_never_reposts(live, monkeypatch):
+    broker, exchange = live
+    payload = persist(broker)
+    sent = []
+    def lost_ack(**request):
+        other = sqlite3.connect(broker.conn.execute('PRAGMA database_list').fetchone()[2])
+        try:
+            row = other.execute('SELECT status,request FROM llm_scenario_children WHERE link_id=?',
+                                (request['orderLinkId'],)).fetchone()
+        finally:
+            other.close()
+        assert row[0] == 'UNKNOWN'
+        assert json.loads(row[1]) == request
+        sent.append(request)
+        raise TimeoutError('ack lost')
+    monkeypatch.setattr(exchange, 'place_order', lost_ack)
+    with pytest.raises(BrokerNotReady):
+        broker.execute(payload, payload['action_id'])
+    assert len(sent) == 1
+    assert broker.children()[0]['status'] == 'UNKNOWN'
+    with pytest.raises(BrokerNotReady):
+        broker.execute(payload, payload['action_id'])
+    assert len(sent) == 1
