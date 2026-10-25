@@ -130,7 +130,7 @@ class ScenarioExecution:
             result.append(item)
         return result
 
-    def _write(self, method, *, _restore_rejection=False, **params):
+    def _write(self, method, *, _restore_rejection=False, _single_attempt=False, **params):
         if not self.execution_enabled:
             self._fail("scenario_execution_disabled")
         self._identity()  # Includes endpoint recheck on every mutation.
@@ -161,7 +161,7 @@ class ScenarioExecution:
             absent = object()
             previous_retry_settings = {}
             try:
-                if _restore_rejection:
+                if _restore_rejection or _single_attempt:
                     for name, value in (('max_retries', 1), ('force_retry', False)):
                         previous_retry_settings[name] = getattr(self.session, name, absent)
                         setattr(self.session, name, value)
@@ -403,7 +403,7 @@ class ScenarioExecution:
                 parent_order_link_id=parent["link_id"],execution_ids=[e["execId"] for e in verified["evidence"]["executions"]]))
             known.add(oid)
 
-    def _submit(self, payload, intent_id, kind, local_id, request):
+    def _submit(self, payload, intent_id, kind, local_id, request, *, single_attempt=False):
         link = stable_link(intent_id,kind,local_id)
         request = dict(request,category="linear",symbol="BTCUSDT",positionIdx=0,orderLinkId=link)
         previous = next((c for c in self.children() if c["link_id"]==link),None)
@@ -418,7 +418,7 @@ class ScenarioExecution:
             [(link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock())])
         self.conn.commit()  # Crash after this point can only recover by exact ID.
         try:
-            response = self._write("place_order", _restore_rejection=(payload.get('action') == 'REDUCE'
+            response = self._write("place_order", _single_attempt=single_attempt, _restore_rejection=(payload.get('action') == 'REDUCE'
                 and kind == 'partial_sl' and local_id.startswith('reduce:')), **request)
         except RestorationNotAccepted as exc:
             exc.created_this_invocation = True
@@ -879,6 +879,12 @@ class ScenarioExecution:
             active=self._active()
             if not active or active["scenario_id"]!=payload["scenario_id"]:
                 self._fail("active_scenario_required")
+            from live import scenario_management_quarantine as quarantine
+            if quarantine.bound_exit(self, intent_id):
+                return quarantine.execute_exit(self, payload, intent_id)
+            if quarantine._approval(self):
+                # No unbound management or new-risk action may use the exception.
+                self._fail('management_quarantine_bound_exit_required')
             if payload["action"] == "REDUCE":
                 return self._execute_reduce(payload, intent_id)
             # Maintain existing protection before potentially failing recovery.
@@ -983,6 +989,10 @@ class ScenarioExecution:
         payload=json.loads(body)
         if payload["action"]!="EXIT":
             return False
+        from live import scenario_management_quarantine as quarantine
+        if quarantine.bound_exit(self, ident):
+            quarantine.execute_exit(self, payload, ident)
+            return True
         batch=self.conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id=?",(ident,)).fetchone()
         if not batch or batch[0] not in {"ABORTED","INTERRUPTED"}:
             return False

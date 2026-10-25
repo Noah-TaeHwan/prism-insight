@@ -23,6 +23,8 @@ _REQUIRED_STABLE = (
     "accounting_status", "protection_ok", "legacy_fenced",
 )
 _OPTIONAL_STABLE = (
+    'management_quarantine',
+    'management_quarantine_block',
     "side", "scenario_risk_fraction", "seen_action_ids", "current_plan", "stop_policy",
     "execution_price_policy", "conditional_entry_version",
     "review_contract_version", "recovery_hard_blocked", "unknown_intents",

@@ -105,6 +105,11 @@ def response_schema(context):
     if context.get('pending_renewal_version') == 1:
         properties['pending_renewal'] = {'anyOf': [_object({'offer_id': {
             'type': 'string', 'enum': [context['pending_renewal_offer']['offer_id']]}}), {'type': 'null'}]}
+    if context.get('management_quarantine'):
+        properties['action']['enum'] = ['WAIT', 'EXIT']
+        properties['cancel_entry_ids']['maxItems'] = 0
+        if 'pending_renewal' in properties:
+            properties['pending_renewal'] = {'type': 'null'}
     return _object(properties)
 
 
@@ -142,6 +147,8 @@ def validate_wire_proposal(payload, context, *, _allow_failed_wait_template=Fals
     schema = response_schema(context)
     if not isinstance(payload, dict):
         raise ValueError("response_contract_mismatch")
+    from live.scenario_management_quarantine import validate_action
+    validate_action(payload, context)
     if explanation_enabled(context):
         # Keep original model objects in the caller's raw receipt. Only this
         # economic wire copy receives text; missing explanation is not a veto.
