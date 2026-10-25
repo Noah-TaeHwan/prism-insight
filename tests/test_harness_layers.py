@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = (
     "prism-trading-change-review", "prism-btc-change-review", "prism-entry-quality-analysis", "prism-trade-review",
+    "prism-knowledge-intake",
 )
 
 
@@ -97,6 +98,8 @@ def test_hook_configs_call_shared_script():
     ("PR 머지하고 배포해줘", {"deploy"}),
     ("LLY 왜 샀는지 복기해줘", {"review"}),
     ("이 trace_id 경과 보여줘", {"review"}),
+    ("오늘도 책 읽은 거 첨부할게", {"knowledge"}),
+    ("책에서 저자가 말한 매도 규칙 정리해줘", {"knowledge", "stock"}),
 ])
 def test_prompt_domains(text, expected):
     assert hook.prompt_domains(text) == expected
