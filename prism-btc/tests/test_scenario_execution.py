@@ -1488,6 +1488,10 @@ def test_entry_pretransport_guard_failure_leaves_no_unknown_child(live, monkeypa
     with pytest.raises(BrokerNotReady):
         broker.execute(payload, payload['action_id'])
     assert exchange.writes == []
+    reconciled = broker.reconcile()
+    item = next(r for r in reconciled['intents'] if r['intent_id'] == payload['action_id'])
+    assert item['terminal'] and item['orders_reconciled']
+    assert item['filled_quantity'] == 0 and item['execution_ids'] == []
 
 
 def test_child_is_durable_before_transport_and_timeout_never_reposts(live, monkeypatch):
