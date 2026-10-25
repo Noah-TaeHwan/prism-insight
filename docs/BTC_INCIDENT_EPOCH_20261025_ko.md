@@ -82,6 +82,19 @@ equity 변화는 모든 이상을 자동 중단시키지 않습니다. 일일 �
 
 공식 주문 조회 문서는 `orderFilter` 생략 시 모든 주문 종류를 반환한다고 명시합니다([Bybit 주문 조회](https://bybit-exchange.github.io/docs/v5/order/open-order)). 이를 사용해 spot 조회를 한 번으로 줄였습니다. 별도 읽기 전용 실제 데모 호환 검사에서 derivative 포지션/열린 주문과 spot 열린 주문 9개 조회가 모두 성공·페이지 완료·빈 목록이었고 합계 약0.708초였습니다. 이것은 한 시점의 호환성 근거이며 전환 승인·quiescence·미래 지연 보장이 아닙니다. [데모 API 제한](https://bybit-exchange.github.io/docs/v5/demo)을 고려해 지원하지 않는 응답은 계속 차단합니다.
 
+## 전환 사전 점검의 펀딩 분류 보완 (2026-10-25)
+
+사용자의 격리 실행 승인 후 실제 전환 시도에서 Funding execution 한 건의 orderId가
+주문 child 원장에 없다는 이유로 `incident_epoch_unowned_execution`이 발생했습니다.
+전환은 커밋되지 않았고 decision/protection cron은 원문으로 복원했습니다.
+해당 펀딩은 거래소 SETTLEMENT와 execId/tradeId·orderId·수량·시각·부호가 반대인
+수수료/펀딩 값까지 기존 `_verify_funding_execution`으로 일치함을 확인했습니다.
+
+최초 격리 금융 검사는 Funding에 한해 기존 검증 함수를 재사용합니다. 원문은 격리 금융
+근거에 보존하고 주문이나 정산 완료 기록을 새로 만들지 않습니다. 누락·중복·불일치 펀딩과
+소유권 없는 일반 체결은 계속 차단합니다. 전환 후 원 금융 근거의 변경 감시도 유지합니다.
+구현·관련 회귀·CI·배포·실제 전환·24시간 관측은 별도로 기록합니다.
+
 ## 되돌리기
 
 새 진입을 중지하고 현재 버전에서 새 포지션 보호/정산을 이어갑니다.

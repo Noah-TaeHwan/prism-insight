@@ -242,7 +242,7 @@ def account_sources(broker):
 
 def historical_finance(broker, start_ms, end_ms, children, *, query_end_ms=None, initial=True):
     """Append-only financial observations, not a reconstructed settlement."""
-    from live.scenario_broker import read_evidence_pages
+    from live.scenario_broker import read_evidence_pages, _verify_funding_execution
     query_end_ms = end_ms if query_end_ms is None else query_end_ms
     require(0 <= start_ms <= query_end_ms and query_end_ms-start_ms <= 7*86400*1000, 'financial_window_unavailable')
     ids = {c['order_id'] for c in children if c['order_id']}
@@ -252,7 +252,13 @@ def historical_finance(broker, start_ms, end_ms, children, *, query_end_ms=None,
     transactions = read_evidence_pages(broker._call, 'get_transaction_log', accountType='UNIFIED',
         currency='USDT', startTime=start_ms, endTime=query_end_ms, limit=50)
     if initial:
-        require(all(r.get('orderId') in ids for r in executions), 'unowned_execution')
+        for row in executions:
+            if row.get('execType') == 'Funding':
+                matches = [t for t in transactions if t.get('tradeId') == row['execId']]
+                require(row.get('symbol') == 'BTCUSDT' and len(matches) == 1, 'funding_pair_missing_or_ambiguous')
+                _verify_funding_execution(row, matches[0], start_ms, query_end_ms)
+            else:
+                require(row.get('orderId') in ids, 'unowned_execution')
     # The bounded pre-cutover interval catches late old flows even without an
     # orderId; exact old IDs catch corrections supplied after the cutover time.
     return dict(executions=sorted([r for r in executions if r.get('orderId') in ids
