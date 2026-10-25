@@ -471,8 +471,10 @@ class ScenarioExecution:
             self.conn.execute("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,'UNKNOWN',NULL,NULL,?)",
                 (link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock()))
             self.conn.commit()  # Crash after this point can only recover by exact ID.
+        if kind != "entry":
+            before_send()
         try:
-            response = self._write("place_order", _before_send=before_send, _single_attempt=single_attempt, _restore_rejection=(payload.get('action') == 'REDUCE'
+            response = self._write("place_order", _before_send=before_send if kind == "entry" else None, _single_attempt=single_attempt, _restore_rejection=(payload.get('action') == 'REDUCE'
                 and kind == 'partial_sl' and local_id.startswith('reduce:')), **request)
         except RestorationNotAccepted as exc:
             exc.created_this_invocation = True
