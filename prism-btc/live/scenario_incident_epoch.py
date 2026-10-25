@@ -199,7 +199,7 @@ def validate_quiescence(probe, approval, now):
             and proof['process_inventory_before'] and proof['process_inventory_after']
             and proof['launcher_manifest']['epoch_protocol'] == 1
             and proof['launcher_manifest']['code_sha256'] == approval['code_sha256']
-            and proof['stopped_workers'], 'deployment_proof_incomplete')
+            and isinstance(proof['stopped_workers'], list), 'deployment_proof_incomplete')
     for worker in proof['stopped_workers']:
         require(type(worker['pid']) is int and worker['pid'] > 1 and worker['command']
                 and worker['started_at'] and worker['termination_evidence'], 'worker_identity_missing')
