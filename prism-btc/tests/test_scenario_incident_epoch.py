@@ -74,6 +74,67 @@ def transition(i):
     return policy.cutover(i['broker'], approval=i['approval'], quiescence_probe=lambda: i['proof'])
 
 
+@pytest.fixture
+def epoch_funding(flat_incident):
+    i = flat_incident
+    when = str(int(i['now'][0] * 1000) - 1000)
+    execution = dict(execId='epoch-funding', orderId='funding-order', symbol='BTCUSDT',
+        side='Buy', execType='Funding', execQty='.001', execFee='.00500415', execTime=when)
+    transaction = dict(id='funding-txn', tradeId='epoch-funding', orderId='funding-order',
+        symbol='BTCUSDT', currency='USDT', type='SETTLEMENT', side='Buy', qty='.001',
+        funding='-.00500415', fee='0', cashFlow='0', transactionTime=when)
+    executions, transactions = i['exchange'].get_executions, i['exchange'].get_transaction_log
+    def with_funding(**kw):
+        response = executions(**kw)
+        if (not kw.get('orderId') and not kw.get('orderLinkId')
+                and kw.get('startTime', 0) <= int(when) <= kw.get('endTime', 2**63-1)):
+            response['result']['list'].append(execution)
+        return response
+    pairs = [transaction]
+    def with_settlement(**kw):
+        response = transactions(**kw)
+        if kw.get('startTime', 0) <= int(when) <= kw.get('endTime', 2**63-1):
+            response['result']['list'].extend(pairs)
+        return response
+    i['exchange'].get_executions = with_funding
+    i['exchange'].get_transaction_log = with_settlement
+    return i, execution, transaction, pairs
+
+
+def test_epoch_preserves_exact_funding_pair_without_inventing_order(epoch_funding):
+    i, execution, transaction, _ = epoch_funding
+    result = transition(i)
+    assert execution in result['financial_sources']['executions']
+    assert transaction in result['financial_sources']['transactions']
+    assert i['broker'].children('s1') == i['old_children']
+    assert i['exchange'].writes == []
+    assert policy.monitor(restarted(i), refresh=True) is not None
+    assert not policy.halted(i['broker'].conn)
+
+
+@pytest.mark.parametrize('bad', ['missing', 'duplicate', 'quantity', 'fee', 'type', 'symbol', 'trade'])
+def test_epoch_denies_unverified_funding_and_foreign_trade(epoch_funding, bad):
+    i, execution, transaction, pairs = epoch_funding
+    if bad == 'missing':
+        pairs.clear()
+    elif bad == 'duplicate':
+        pairs.append(dict(transaction, id='other-funding-txn'))
+    elif bad == 'quantity':
+        transaction['qty'] = '.002'
+    elif bad == 'fee':
+        transaction['funding'] = '0'
+    elif bad == 'type':
+        transaction['type'] = 'TRADE'
+    elif bad == 'symbol':
+        execution['symbol'] = 'ETHUSDT'
+    else:
+        execution['execType'] = 'Trade'
+    with pytest.raises(ValueError, match='funding|unowned_execution'):
+        transition(i)
+    assert policy.receipt(i['broker'].conn) is None
+    assert i['exchange'].writes == []
+
+
 def restarted(i):
     return ScenarioDemoBroker(i['broker'].conn, session=i['exchange'], expected_main_uid='123',
                               clock=lambda: i['now'][0], execution_enabled=True)
