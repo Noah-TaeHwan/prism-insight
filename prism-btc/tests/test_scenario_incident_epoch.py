@@ -890,3 +890,46 @@ def test_final_epoch_expiry_does_not_create_unsubmitted_unknown(flat_incident, m
                 orderType='Limit', price='100', reduceOnly=False))
     assert broker.children() == before_children
     assert i['exchange'].writes == before_writes
+
+
+@pytest.mark.parametrize('archive_failure', [False, True])
+@pytest.mark.parametrize('batch_status', [None, 'COMPLETE'])
+def test_entry_database_commit_delay_cannot_bypass_final_epoch_guard(flat_incident, archive_failure, batch_status):
+    i = flat_incident
+    _, broker = open_new(i)
+    conn = broker.conn
+    class DelayedCommit:
+        def __getattr__(self, name):
+            return getattr(conn, name)
+        def commit(self):
+            conn.commit()
+            if conn.execute("SELECT 1 FROM llm_scenario_children WHERE intent_id='commit-delayed'").fetchone():
+                i['now'][0] += 11
+    broker.conn = DelayedCommit()
+    if batch_status:
+        conn.execute("INSERT INTO llm_scenario_execution_batches VALUES('commit-delayed',?)", (batch_status,))
+        conn.commit()
+    if archive_failure:
+        conn.execute("CREATE TRIGGER block_abort_archive BEFORE INSERT ON llm_scenario_broker_evidence "
+            "WHEN NEW.kind='entry_pretransport_abort' BEGIN SELECT RAISE(ABORT,'archive unavailable'); END")
+        conn.commit()
+    before = copy.deepcopy(i['exchange'].writes)
+    with pytest.raises(ValueError):
+        broker._submit(dict(scenario_id='new-scenario', action='OPEN'),
+            'commit-delayed', 'entry', 'delayed', dict(side='Buy', qty='.1',
+                orderType='Limit', price='100', reduceOnly=False))
+    assert i['exchange'].writes == before
+    if archive_failure:
+        assert conn.execute("SELECT status FROM llm_scenario_children WHERE intent_id='commit-delayed'").fetchone()[0] == 'UNKNOWN'
+        assert not conn.execute("SELECT 1 FROM llm_scenario_broker_evidence WHERE kind='entry_pretransport_abort'").fetchone()
+        return
+    assert not conn.execute("SELECT 1 FROM llm_scenario_children WHERE intent_id='commit-delayed'").fetchone()
+    assert conn.execute("SELECT status FROM llm_scenario_execution_batches WHERE intent_id='commit-delayed'").fetchone()[0] == 'ABORTED'
+    proof = json.loads(conn.execute("SELECT body FROM llm_scenario_broker_evidence WHERE kind='entry_pretransport_abort'").fetchone()[0])
+    assert proof['child'][1] == 'commit-delayed'
+    assert proof['child'][6] == 'UNKNOWN' and proof['transport_attempted'] is False
+    with pytest.raises(ValueError):
+        broker._submit(dict(scenario_id='new-scenario', action='OPEN'),
+            'commit-delayed', 'entry', 'delayed', dict(side='Buy', qty='.1',
+                orderType='Limit', price='100', reduceOnly=False))
+    assert i['exchange'].writes == before

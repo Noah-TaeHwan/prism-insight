@@ -471,6 +471,33 @@ class ScenarioExecution:
             self.conn.execute("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,'UNKNOWN',NULL,NULL,?)",
                 (link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock()))
             self.conn.commit()  # Crash after this point can only recover by exact ID.
+            if kind == "entry":
+                from live.scenario_incident_epoch import guard_write
+                try:
+                    guard_write(self, "place_order", request)
+                except Exception as exc:
+                    # Only this invocation's unattempted entry may be archived.
+                    from live.scenario_management_quarantine import _append
+                    self.conn.execute("SAVEPOINT entry_pretransport_abort")
+                    try:
+                        child = self.conn.execute("SELECT * FROM llm_scenario_children WHERE link_id=?", (link,)).fetchone()
+                        require(child is not None, 'pretransport_child_missing')
+                        _append(self.conn, "entry_pretransport_abort", dict(version=1,
+                            child=list(child), transport_attempted=False,
+                            basis="FINAL_LOCAL_GUARD_BEFORE_SDK", error_type=type(exc).__name__), self.clock())
+                        batch = self.conn.execute("INSERT INTO llm_scenario_execution_batches VALUES(?,'ABORTED') "
+                            "ON CONFLICT(intent_id) DO UPDATE SET status='ABORTED' WHERE status IN ('EXECUTING','COMPLETE')", (intent_id,))
+                        require(batch.rowcount == 1, 'pretransport_batch_conflict')
+                        deleted = self.conn.execute("DELETE FROM llm_scenario_children WHERE link_id=? AND intent_id=? "
+                            "AND status='UNKNOWN' AND order_id IS NULL AND evidence IS NULL AND request=?",
+                            (link, intent_id, encoded(request)))
+                        require(deleted.rowcount == 1, 'pretransport_child_conflict')
+                        self.conn.execute("RELEASE entry_pretransport_abort")
+                        self.conn.commit()
+                    except Exception:
+                        self.conn.rollback()
+                        raise
+                    raise
         if kind != "entry":
             before_send()
         try:
