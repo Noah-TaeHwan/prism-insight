@@ -18,6 +18,7 @@ ALLOCATION_PROFILES = {
 REJECTION_PROFILES = {
     "economic-reject-single-v1": "economic-reject-single-v1",
     "economic-reject-calculated-v1": "economic-reject-calculated-v1",
+    "economic-reject-goal-v2": "economic-reject-calculated-v1",
 }
 RESEARCH_PROFILES = {**ALLOCATION_PROFILES, **REJECTION_PROFILES}
 ECONOMIC_PROFILES = {"single-pass-economic-v4", "calculated-economic-v4", *RESEARCH_PROFILES}

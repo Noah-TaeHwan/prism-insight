@@ -112,7 +112,7 @@ def verify_calculated_registry_contract(contract, registry, variant):
             "calculated_contract_schema_required")
     require(contract["policy_profile"] in {"single-pass-economic-v4", "calculated-economic-v4",
             "allocation-single-economic-v1", "allocation-calculated-economic-v1",
-            "economic-reject-single-v1", "economic-reject-calculated-v1"},
+            "economic-reject-single-v1", "economic-reject-calculated-v1", "economic-reject-goal-v2"},
             "unregistered_economic_profile")
     require(contract["economic_clock_contract"] == "NATIVE_MONOTONIC_INTEGER_MS_FULL_TICK_V1",
             "economic_clock_contract_mismatch")
@@ -243,7 +243,7 @@ def verify_calculated_completion(report, exchange):
 
 def verify_economic_rejections(directory, report):
     """Independently recount durable evidence, including mixed-candidate rejections."""
-    profiles = {"economic-reject-single-v1", "economic-reject-calculated-v1"}
+    profiles = {"economic-reject-single-v1", "economic-reject-calculated-v1", "economic-reject-goal-v2"}
     if report["contract"].get("policy_profile") not in profiles:
         require("economic_rejections" not in report, "unexpected_rejection_protocol")
         return
