@@ -205,7 +205,10 @@ class ScenarioDemoBroker(ScenarioExecution):
             liquidation = capture_liquidation(self._call, wallet, position if size else None, started)
             # totalEquity is USD; scenario prices/costs/budget are USDT.
             equity=equity/liquidation["fx"]
-            tickers = self._call("get_tickers", category="linear", symbol="BTCUSDT").get("result", {}).get("list")
+            ticker_started = self.clock()
+            ticker_response = self._call("get_tickers", category="linear", symbol="BTCUSDT")
+            ticker_received = self.clock()
+            tickers = ticker_response.get("result", {}).get("list")
             if not isinstance(tickers, list) or len(tickers) != 1 or tickers[0].get("symbol") != "BTCUSDT":
                 raise BrokerNotReady("ticker_evidence_missing")
             mark = _number(tickers[0].get("markPrice"), minimum=0)
@@ -237,6 +240,13 @@ class ScenarioDemoBroker(ScenarioExecution):
             observed["native_stops"] = native
             observed["wallet"] = wallet
             observed["ticker"] = tickers[0]
+            # Response time is not a quote-update or matching-engine timestamp.
+            server_ms = ticker_response.get("time")
+            valid_server_ms = (type(server_ms) in (int, float) and 0 < server_ms < 2**53
+                               and server_ms == int(server_ms))
+            observed["ticker_timing"] = dict(request_started_at=ticker_started,
+                response_received_at=ticker_received,
+                exchange_response_time_ms=int(server_ms) if valid_server_ms else None)
             if active:
                 self._retain_native(observed,active)
             # Ordinary market drift must not stale every out-of-lock proposal;
