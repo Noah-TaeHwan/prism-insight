@@ -49,6 +49,8 @@ POLICY_PROFILES = {
     "allocation-calculated-economic-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
     "economic-reject-single-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
     "economic-reject-calculated-v1": {"recovery_enabled": True, "automatic_normalization_enabled": True},
+    "economic-reject-goal-v2": {"recovery_enabled": True, "automatic_normalization_enabled": True,
+        "entry_contract_enabled": True, "entry_goal_enabled": True, "pending_renewal_enabled": True},
 }
 _identity_scope_lock = threading.Lock()
 INPUT_PREPARATION_CODES = {"snapshot_unavailable", "snapshot_stale", "invalid_contract_context",
@@ -198,6 +200,8 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
         latencies=dict(entry=5000,market=5000,cancel=2000,amend=2000,model="measured_and_taped_ms"),
         decision_interval_ms=300000,protection_interval_ms=60000,
         terminal_policy="NO_FORCED_CLOSE_MARK_OPEN_POSITION",liquidity="previous_minute_volume_shared_across_four_path_points")
+    if policy_profile == "economic-reject-goal-v2":
+        contract["context_contracts"].update(entry_contract_version=2, pending_renewal_version=1)
     if policy_profile in ECONOMIC_PROFILES:
         import inspect
         from live.scenario_contract import response_schema
