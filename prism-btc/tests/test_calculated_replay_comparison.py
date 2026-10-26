@@ -237,3 +237,12 @@ def test_rehashed_completion_flags_failure_evidence_crosschecks_fail_closed(tmp_
     assert result["arms"][0]["status"] == "INVALID"
     assert result["arms"][0]["diagnostic_only"]
     assert not result["comparison_complete"]
+
+
+def test_goal_profile_cannot_pin_legacy_process_identity_as_new_contract(tmp_path):
+    registry = registered(tmp_path)
+    contract = comparison.read(tmp_path/'A/fresh/report.json')['contract']
+    contract['policy_profile'] = 'economic-reject-goal-v2'
+    registry['contract_comparison']['expected_arm_contracts']['A']['policy_profile'] = contract['policy_profile']
+    with pytest.raises(ValueError, match='economic_identity_contract_mismatch'):
+        comparison.verify_calculated_registry_contract(contract, registry, registry['variants'][0])
