@@ -308,3 +308,51 @@ def test_short_paid_and_received_funding_once(setup, funding, rate, net):
     assert result["net_pnl"] == net
     assert result["fees"] == .1
     assert result["settlement"]["flat_confirmed"] is True
+
+
+def test_ticker_request_span_is_saved_without_extra_read_or_changed_account_version(setup):
+    import json
+    b, session = setup
+    before = b.capture_account()
+    now = [1800000000.0]
+    b.clock = lambda: now[0]
+    calls = []
+    original = session.get_tickers
+
+    def ticker(**kwargs):
+        calls.append(kwargs)
+        now[0] += .125
+        return dict(original(**kwargs), time=1800000000100)
+
+    session.get_tickers = ticker
+    observed = b.capture_account()
+    assert calls == [dict(category='linear', symbol='BTCUSDT')]
+    assert observed['ticker_timing'] == dict(request_started_at=1800000000.0,
+        response_received_at=1800000000.125, exchange_response_time_ms=1800000000100)
+    saved = json.loads(b.conn.execute("SELECT body FROM llm_scenario_broker_evidence WHERE kind='account' ORDER BY rowid DESC LIMIT 1").fetchone()[0])
+    assert saved['ticker_timing'] == observed['ticker_timing']
+    assert observed['account_version'] == before['account_version']
+    assert observed['execution_ready'] is before['execution_ready'] is False
+
+
+@pytest.mark.parametrize('server_time', [None, True, '1800000000000', float('nan'), float('inf'), -1, 1.25, 2**53])
+def test_optional_invalid_ticker_timestamp_stays_missing(setup, server_time):
+    b, session = setup
+    original = session.get_tickers
+    session.get_tickers = lambda **kw: dict(original(**kw), time=server_time)
+    assert b.capture_account()['ticker_timing']['exchange_response_time_ms'] is None
+
+
+def test_ticker_timing_does_not_extend_snapshot_freshness(setup):
+    b, session = setup
+    now = [1800000000.0]
+    b.clock = lambda: now[0]
+    original = session.get_tickers
+
+    def slow_ticker(**kw):
+        now[0] += 10.001
+        return original(**kw)
+
+    session.get_tickers = slow_ticker
+    with pytest.raises(BrokerNotReady, match='account_snapshot_stale'):
+        b.capture_account()

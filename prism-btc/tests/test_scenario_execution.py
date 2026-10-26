@@ -1517,3 +1517,19 @@ def test_child_is_durable_before_transport_and_timeout_never_reposts(live, monke
     with pytest.raises(BrokerNotReady):
         broker.execute(payload, payload['action_id'])
     assert len(sent) == 1
+
+
+def test_ticker_timing_is_not_a_trading_input_or_permission(live, monkeypatch):
+    broker, exchange = live
+    with_timing = broker.context()
+    original = broker.capture_account
+
+    def without_timing():
+        observed = original()
+        observed.pop('ticker_timing')
+        return observed
+
+    monkeypatch.setattr(broker, 'capture_account', without_timing)
+    assert broker.context() == with_timing
+    assert 'ticker_timing' not in json.dumps(with_timing)
+    assert exchange.writes == []
