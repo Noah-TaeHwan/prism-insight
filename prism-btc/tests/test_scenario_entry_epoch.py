@@ -154,3 +154,59 @@ def test_receipt_chain_tamper_fails_closed(entry_incident,fault):
         c.execute('UPDATE llm_scenario_broker_evidence SET body=? WHERE kind=?',(json.dumps(event),policy.ENTRY_KIND))
     c.commit()
     with pytest.raises(ValueError):policy.epoch(c)
+
+
+def _ready_third_entry(i):
+    extend(i)
+    i['now'][0] += 300
+    i['exchange'].now = i['now'][0]
+    runtime, broker, price, _ = new_runtime(i)
+    original = runtime.propose
+    runtime.propose = lambda snap,ctx: dict(original(snap,ctx), scenario_id=ctx.get('scenario_id') or 'third-scenario')
+    assert runtime.tick()['status'] == 'wait'
+    i['now'][0] += 300
+    i['exchange'].now = i['now'][0]
+    price[0] += 1
+    return runtime, broker
+
+
+def test_new_entry_refreshes_epoch_after_validation_delay(entry_incident, monkeypatch):
+    i=entry_incident;runtime,broker=_ready_third_entry(i)
+    original=broker.execute
+    historical=[policy._snapshot(broker,r['scenario_id']) for r in policy.receipts(broker.conn)]
+    def delayed(payload,ident):
+        i['now'][0]+=10.25;i['exchange'].now=i['now'][0]
+        return original(payload,ident)
+    monkeypatch.setattr(broker,'execute',delayed)
+    assert runtime.tick()['status']=='intent_pending'
+    children=broker.children()
+    assert len(children)==1 and children[0]['order_id'] is not None
+    assert children[0]['status']!='UNKNOWN' and not policy.halted(broker.conn)
+    assert [policy._snapshot(broker,r['scenario_id']) for r in policy.receipts(broker.conn)]==historical
+
+
+def test_refresh_does_not_hide_new_historical_fill(entry_incident,monkeypatch):
+    i=entry_incident;runtime,broker=_ready_third_entry(i);original=broker.execute
+    before=deepcopy(i['exchange'].writes)
+    def late(payload,ident):
+        child=i['entry_child'];i['now'][0]+=10.25;i['exchange'].now=i['now'][0]
+        i['exchange'].fills.append(dict(execId='late-before-entry',orderId='unknown-order-id',orderLinkId=child['link_id'],symbol='BTCUSDT',side='Buy',execType='Trade',execQty='.001',execPrice='100',execFee='.01',execTime=str(int(i['now'][0]*1000))))
+        return original(payload,ident)
+    monkeypatch.setattr(broker,'execute',late)
+    runtime.tick()
+    assert policy.halted(broker.conn) and broker.children()==[]
+    assert i['exchange'].writes==before
+
+
+@pytest.mark.parametrize('delay',[11,100])
+def test_entry_rejects_expiry_after_fresh_monitor(entry_incident,monkeypatch,delay):
+    i=entry_incident;runtime,broker=_ready_third_entry(i);original=policy.monitor;seen=[]
+    before=deepcopy(i['exchange'].writes)
+    def delayed(b,*,refresh=False):
+        result=original(b,refresh=refresh)
+        if refresh:
+            seen.append(True);i['now'][0]+=delay;i['exchange'].now=i['now'][0]
+        return result
+    monkeypatch.setattr(policy,'monitor',delayed)
+    runtime.tick()
+    assert seen and broker.children()==[] and i['exchange'].writes==before

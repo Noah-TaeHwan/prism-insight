@@ -1533,3 +1533,17 @@ def test_ticker_timing_is_not_a_trading_input_or_permission(live, monkeypatch):
     assert broker.context() == with_timing
     assert 'ticker_timing' not in json.dumps(with_timing)
     assert exchange.writes == []
+
+
+def test_entry_action_expiry_is_rechecked_after_incident_refresh(live, monkeypatch):
+    from live import scenario_incident_epoch
+    b,e=live;now=[1800000000.0];b.clock=lambda:now[0]
+    p=persist(b,expires_at=now[0]+1)
+    def delayed_monitor(broker, *, refresh=False):
+        assert refresh
+        now[0]+=2
+    monkeypatch.setattr(scenario_incident_epoch,'monitor',delayed_monitor)
+    before=copy.deepcopy(e.writes)
+    with pytest.raises(BrokerNotReady,match='expired_scenario_action'):
+        b.execute(p,'a1')
+    assert e.writes==before and b.children()==[]
