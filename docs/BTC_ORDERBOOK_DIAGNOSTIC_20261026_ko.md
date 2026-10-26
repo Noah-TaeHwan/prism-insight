@@ -28,3 +28,13 @@
 실제 주문0·추가 모델 호출0. 운영 전략·위험·백테스트 파라미터 변경0. 공개 데이터는 mainnet이며 [데모 공식 문서](https://bybit-exchange.github.io/docs/v5/demo#domain)가 공개 스트림 공유를 설명하지만, 계좌 체결의 개별 일치를 보장하지는 않는다.
 
 근거: `tasks/btc-execution-timing-20261026/orderbook/`의 source.json, 압축 prefix, extract.py, reconstructed.json, price-comparison.json, response-time-comparison.json. 원 등록·실패 결과는 보존했다.
+
+## 후속 시간순 8체결의 반례
+
+고정 원자료에서 앞선 세 번째 거래 이후 시간순 최대 10개 taker 체결을 사전등록해 골랐으며, 해당 자료에 존재한 후속 표본은 4개 시나리오의 8체결이었다. 왕복 거래 8건으로 세지 않는다. 주문 요청·ACK는 모두 연결됐고 6건은 접수 직후, 2건은 지연·조건부 체결이었다.
+
+공개 호가 복원은 3건 정확 일치, 4건 0.1달러 차이, 1건 10.3달러 차이였다. 같은 개발 표본에서 사후에 검토한 최근 공개 거래가 가설은 7/8건 일치했으나, 마지막 진입은 실제 80298.1 대 공개 80291.7로 달랐다. 해당 0.018 BTC 진입의 비례 수수료 차이까지 계산한 현금흐름 차이는 -0.11513664 USDT다. 이는 전체 거래 순손익이나 인과적 재생 결과가 아니다. 마지막 사례에 청산 leg가 없다는 이유로 제외하면 불일치 사례만 사라지므로 앞선 일치 사례만으로 재현 통과를 주장하지 않는다.
+
+체결 모형·시차·비용·기존 0.01 USDT 기준은 바꾸지 않았다. 최근 거래가가 데모 체결을 항상 설명한다는 가설은 채택하지 않는다. 새 시각 기록이 적용된 이후 자연 체결을 시간순 최초 10개까지 검토하는 후속 등록을 남겼다. 추가 모델 호출·시험 주문·상주 수집기는 없다. 아직 독립 검증이나 수익 개선 증거가 아니다.
+
+후속 호가 압축 prefix SHA256: `fa0ace0446a98dbf424ca76d53b5d1b2871aa0be3a37eb2205e2fe09e43d279b`. 로컬 근거는 `tasks/btc-execution-timing-20261026/next-cohort/`의 registry·bound·comparison·last-price-comparison·price-error-impact이며, 새 표집 등록은 `tasks/btc-forward-execution-timing-20261026/registration.json`이다.
