@@ -15,7 +15,9 @@ extra resident harness or LLM trading batch is added.
    sections of `docs/BTC_ROADMAP_ko.md`. Name the milestone/task ID (M0–M6) and its prerequisites.
 2. Read the current design `docs/BTC_SYSTEM_BLUEPRINT_20261005_ko.md` for the part you touch,
    and any contract the roadmap links for that milestone.
-3. Agent memory and old chats are pointers only, never status evidence.
+3. For backtests, model comparisons or autonomous research, read
+   [the research execution workflow](../../docs/BTC_RESEARCH_WORKFLOW_ko.md).
+4. Agent memory and old chats are pointers only, never status evidence.
 
 ## 2. Priority and separation
 
@@ -51,6 +53,7 @@ substitute strategy capital for broker figures; unknown stays unknown.
 
 ## 5. Close out
 
-Run `prism-btc/tests` (offline) plus targeted tests. Update the roadmap only where evidence
+Run the smallest relevant offline tests locally; follow the user's scope for broader checks
+(the current BTC agreement leaves the full suite to PR CI). Update the roadmap only where evidence
 changed, and state separately: implementation / tests / CI / deployment / forward observation /
 profitability proof. Name the next task. Report in short Korean.
