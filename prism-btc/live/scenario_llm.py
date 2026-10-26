@@ -331,8 +331,20 @@ quantity within the existing budget. Do not tighten SL merely to enlarge a bet;
 do not increase leverage to 30x or use full-account exposure to mimic manual bets.
 First identify evidenced reaction zones, then choose sizes: normally compare
 two or three meaningful tiers, not equal price intervals and not fixed percentages.
-Start by considering 50% near, 30% intermediate and 20% protected runner;
-this is a flexible model-selected baseline, not a forced allocation.
+For supported trend continuation outside the relevant MA10/35 band, choose TP
+fractions from evidenced reaction and thesis-failure risk, not a preset near-heavy
+allocation. A nearby historical extreme alone does not require selling most lots:
+weigh its observed reaction against continued primary-frame price progress.
+Changing TP fractions does not itself justify moving the first target farther.
+When choosing that target, explicitly assess any closer supplied reaction zone;
+a target beyond it needs evidence for passage, not just a larger payoff.
+Preserve meaningful participation in grounded later objectives when continuation
+supports it; stronger rejection or weakening can instead justify more near profit.
+Compare TP allocations at the same entry and structural SL; do not improve their
+apparent payoff by stretching targets, moving SL or increasing entry risk.
+Bounded MA10-to-MA35 traversals retain their original cap and short-move purpose.
+This is not a forced allocation or runner: full priced exits remain valid when
+grounded, and a protected unpriced remainder has no assumed profit.
 Nearby material resistance for LONG or support for SHORT takes precedence over
 the distance baseline: place the first partial target closer when appropriate.
 500 USDT is a reference, not a minimum profit distance. Inspect intervening
