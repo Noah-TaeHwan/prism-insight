@@ -11,3 +11,5 @@
 검증 결과: 관련160개 통과·4개 skip. 알 수 없는 severity도 경고로 유지하는 반례를 추가했다. 전체 검사는 PR CI에 맡기며 아직 배포 완료를 뜻하지 않는다.
 
 2026-10-26 13:40:44 KST: #1135 최종head cd95dd3b의8개 CI 전부 SUCCESS 후1b23410d로 데모 ff-only 배포했다. 소스/운영 Python 스모크와 cron 불변을 확인했다. 첫 실제 정기 점검은14:15 예정이며14:17 단발 검증을 예약했다. 아직 정기 무발송 관측 완료로 표시하지 않는다. 서버 /root/prism-ops/btc-historical-notice-20261026/에 배포·타이머·검증 영수증을 남긴다.
+
+14:15:09 실제 정기 점검 로그에서 `{issues: 1, sent: False, level: info}`와 같은 시각의 health 감사 행을 확인했다. 14:17 단발 검증기는 로거명과 메시지에 반복된 `healthcheck:`를 첫 구분자로 나눠 처음에는 NOT_VERIFIED였다. 원 결과를 보존하고 실제 로그 형식의 실패 self-check 후 마지막 구분자를 사용하도록 보정했으며, 동일 로그 suffix hash로 PASS_NATIVE_INFORMATION_ONLY_NO_SEND를 확인했다. 운영 healthcheck를 재실행하거나 메시지를 보내서 검증하지 않았다.
