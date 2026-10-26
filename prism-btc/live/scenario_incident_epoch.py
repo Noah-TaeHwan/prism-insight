@@ -17,6 +17,7 @@ ENTRY_KIND = 'incident_entry_epoch_v1'
 ENTRY_SCENARIO = 's_55d333c6722dba9c167c4c34'
 ENTRY_UNKNOWN = 'sc_b7cafdb91c0d43da95926732c1a850b4'
 HALT = 'incident_epoch_halt_v1'
+MONITOR_RELEASE = 'incident_monitor_release_v1'
 TRANSPORT = 'incident_epoch_transport_v1'
 FINANCE_CURSOR = 'incident_epoch_finance_cursor_v1'
 SCENARIO = 's_bd46ee3659f6ee1a5c630d1f'
@@ -124,13 +125,65 @@ def historical(conn):
 
 def record_late(broker, evidence):
     body = dict(reason='historical_evidence_changed', evidence=evidence)
-    if not any(digest(e.get('evidence')) == digest(evidence) for e in _events(broker.conn, HALT)):
+    if not any(digest(e.get('evidence')) == digest(evidence) for e in active_halts(broker.conn)):
         _append(broker.conn, HALT, body, broker.clock())
         broker.conn.commit()
 
 
+def active_halts(conn):
+    halts = _events(conn, HALT)
+    releases = _events(conn, MONITOR_RELEASE)
+    if releases:
+        event = releases[-1]
+        require(event.get('sha256') == digest(event.get('body')), 'release_corrupt')
+        body = event['body']
+        require(body.get('epoch_id') == epoch(conn), 'release_epoch_changed')
+        if body.get('halts_sha256') == digest(halts):
+            require(all(h.get('evidence', {}).get('status') == 'HISTORICAL_MONITOR_OR_COVERAGE_GAP'
+                        and set(h.get('evidence', {})) <= {'status', 'error_type', 'reason'} for h in halts),
+                    'release_contains_financial_evidence')
+            return []
+    return halts
+
+
 def halted(conn):
-    return bool(_events(conn, HALT))
+    return bool(active_halts(conn))
+
+
+def release_monitor_gap(broker, *, expected_halts_sha256):
+    """Explicit operational release after complete revalidation; never called by runner."""
+    with mutation_lock(broker.conn):
+        current = epoch(broker.conn)
+        require(current and current == broker._incident_epoch_bound, 'stale_worker')
+        value = receipt(broker.conn)
+        require(broker.expected_main_uid == value['approval']['main_uid']
+                and broker.session.endpoint == ENDPOINT and broker.environment == 'demo', 'epoch_identity_changed')
+        halts = _events(broker.conn, HALT)
+        require(halts and digest(halts) == expected_halts_sha256, 'release_halts_changed')
+        require(all(h.get('evidence', {}).get('status') == 'HISTORICAL_MONITOR_OR_COVERAGE_GAP'
+                    and set(h.get('evidence', {})) <= {'status', 'error_type', 'reason'} for h in halts),
+                'release_contains_financial_evidence')
+        observed = monitor(broker, refresh=True)
+        account = flat_probe(broker)['account']
+        require(observed and 0 <= broker.clock()-observed['started_at'] <= 10, 'release_observation_expired')
+        require(digest(_events(broker.conn, HALT)) == expected_halts_sha256, 'release_new_evidence')
+        require(float(account['position']['size']) == 0 and not account['open_orders']
+                and not account['legacy_fenced'] and not unresolved(broker.conn), 'release_not_flat')
+        for historical in receipts(broker.conn):
+            snapshot = _snapshot(broker, historical['scenario_id'])
+            expected = dict(historical['snapshot'])
+            expected['management'] = expected['management'] + ([historical['management_revocation']]
+                if historical.get('management_revocation') else [])
+            require(snapshot == expected, 'release_history_changed')
+        new_risk_blocked(broker)  # Validate unchanged recovery permissions before releasing this halt.
+        require(digest(_events(broker.conn, HALT)) == expected_halts_sha256, 'release_new_evidence')
+        require(0 <= broker.clock()-observed['started_at'] <= 10, 'release_observation_expired')
+        body = dict(epoch_id=current, halts_sha256=expected_halts_sha256,
+                    source_sha256=observed['source_sha256'], observed_at=observed['started_at'],
+                    released_at=broker.clock())
+        _append(broker.conn, MONITOR_RELEASE, dict(body=body, sha256=digest(body)), broker.clock())
+        broker.conn.commit()
+        return body
 
 
 def monitor(broker, *, refresh=False):
@@ -201,8 +254,10 @@ def monitor(broker, *, refresh=False):
         require(0 <= broker.clock()-started <= 10, 'monitor_deadline')
         broker._incident_observation = dict(epoch_id=receipt(broker.conn)['epoch_id'], started_at=started,
                                             source_sha256=digest(observed_bodies))
-    except Exception:
-        record_late(broker, dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP'))
+    except Exception as exc:
+        reason = str(exc) if isinstance(exc, ValueError) and str(exc).startswith('incident_epoch_') else 'observation_failed'
+        record_late(broker, dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP',
+                                error_type=type(exc).__name__, reason=reason))
     return broker._incident_observation
 
 
@@ -509,7 +564,7 @@ def new_risk_blocked(broker):
         current['management'] = historical['snapshot']['management']
         altered = current != historical['snapshot'] or management_changed
         changed = changed or altered
-        if altered and not _events(broker.conn, HALT):
+        if altered and not halted(broker.conn):
             _append(broker.conn, HALT, dict(reason='historical_evidence_changed',
                 epoch_id=value['epoch_id'], scenario_id=historical['scenario_id'], observed_sha256=digest(current)), broker.clock())
             broker.conn.commit()

@@ -386,9 +386,9 @@ def _check_execution_stalled(conn, mode: str, now: datetime) -> dict | None:
             return dict(level='alert',code='management_release_required',msg=(
                 '관리 승인 해제 검토가 필요하여 새 판단이 보류되어 있습니다. '
                 '거래소 근거·정산·보호 상태를 대조한 뒤 별도 해제해야 하며, 정상 매매 재개를 뜻하지 않습니다.'))
-        from live.scenario_incident_epoch import pending, historical, _events, HALT
+        from live.scenario_incident_epoch import pending, historical, halted
         excluded = historical(conn)
-        if excluded and _events(conn, HALT):
+        if excluded and halted(conn):
             return dict(level='alert', code='incident_epoch_halted', msg=(
                 '과거 미정산 사건의 새 증거나 계좌 조회 공백으로 신규 진입을 중단했습니다. 현재 포지션 보호는 유지합니다.'))
         current_pending = set(pending(conn, ('PENDING',)))

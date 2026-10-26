@@ -1041,6 +1041,9 @@ class ScenarioExecution:
                 if existing:
                     self._query_child(existing)
                     continue
+                # Final review can outlive the cached incident proof; refresh before risk capture.
+                from live.scenario_incident_epoch import monitor
+                monitor(self, refresh=True)
                 observed=self.capture_account()
                 if observed["legacy_fenced"]:
                     self._fail("legacy_exposure_or_unknown_order")
@@ -1055,6 +1058,8 @@ class ScenarioExecution:
                 if "trigger_price" in entry:
                     request.update(triggerPrice=self._aligned(entry["trigger_price"], instrument["tick"]),
                                    triggerBy="MarkPrice", triggerDirection=1 if payload["side"] == "LONG" else 2)
+                if self.clock() >= payload["expires_at"]:
+                    self._fail("expired_scenario_action")
                 self._submit(payload,intent_id,"entry",entry["id"],request)
             self._sync_exits(payload,intent_id)
 

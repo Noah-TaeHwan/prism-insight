@@ -933,3 +933,56 @@ def test_entry_database_commit_delay_cannot_bypass_final_epoch_guard(flat_incide
             'commit-delayed', 'entry', 'delayed', dict(side='Buy', qty='.1',
                 orderType='Limit', price='100', reduceOnly=False))
     assert i['exchange'].writes == before
+
+
+def test_monitor_gap_release_preserves_history_and_later_halts(flat_incident):
+    i=flat_incident;transition(i);broker=restarted(i)
+    policy.record_late(broker, dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP'))
+    before=copy.deepcopy(policy._events(broker.conn, policy.HALT))
+    history=policy._snapshot(broker, 's1')
+    policy.release_monitor_gap(broker, expected_halts_sha256=digest(before))
+    assert not policy.halted(broker.conn) and not policy.new_risk_blocked(broker)
+    from live.healthcheck import _check_execution_stalled
+    from datetime import datetime,timezone
+    notice=_check_execution_stalled(broker.conn,'demo',datetime.fromtimestamp(i['now'][0],timezone.utc))
+    assert notice['code']=='historical_unsettled_excluded' and notice['level']=='info'
+    assert policy._events(broker.conn, policy.HALT)==before
+    assert policy._snapshot(broker, 's1')==history and i['exchange'].writes==[]
+    policy.record_late(broker, dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP'))
+    assert policy.halted(broker.conn)
+
+
+@pytest.mark.parametrize('fault', ['late_fill','fresh_late','bad_hash','expired','tampered_history','foreign_order','monitor_failure'])
+def test_monitor_gap_release_fails_closed(flat_incident,monkeypatch,fault):
+    i=flat_incident;transition(i);broker=restarted(i)
+    policy.record_late(broker, dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP'))
+    expected=digest(policy._events(broker.conn,policy.HALT))
+    if fault=='bad_hash':expected='bad'
+    if fault=='late_fill':policy.record_late(broker, dict(financial_sources={'executions':[{'execId':'late'}]}))
+    if fault=='fresh_late':
+        i['now'][0]+=11
+        i['exchange'].fills.append(dict(execId='release-late',orderId='opaque-original-id',orderLinkId=policy.UNKNOWN,symbol='BTCUSDT',side='Sell',execType='Trade',execQty='.001',execPrice='100',execFee='.01',execTime=str(int(i['now'][0]*1000))))
+    if fault=='foreign_order':
+        original=policy.account_sources
+        def foreign(*a):
+            rows=original(*a);next(r for r in rows if 'orders' in r)['orders']['result']['list'].append({'orderId':'foreign'});return rows
+        monkeypatch.setattr(policy,'account_sources',foreign)
+    if fault=='monitor_failure':
+        monkeypatch.setattr(broker,'_query_child',lambda child: (_ for _ in ()).throw(TimeoutError('network unavailable')))
+    if fault=='tampered_history':
+        broker.conn.execute("UPDATE llm_scenario_children SET status='TERMINAL' WHERE scenario_id='s1'");broker.conn.commit()
+    if fault=='expired':
+        original=policy.monitor
+        def delayed(*a,**kw):
+            result=original(*a,**kw);i['now'][0]+=11;return result
+        monkeypatch.setattr(policy,'monitor',delayed)
+    with pytest.raises(ValueError):policy.release_monitor_gap(broker,expected_halts_sha256=expected)
+    assert policy.halted(broker.conn) and i['exchange'].writes==[]
+
+
+def test_corrupt_monitor_release_cannot_hide_halt(flat_incident):
+    i=flat_incident;transition(i);broker=restarted(i)
+    policy.record_late(broker,dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP'))
+    policy.release_monitor_gap(broker,expected_halts_sha256=digest(policy._events(broker.conn,policy.HALT)))
+    broker.conn.execute("UPDATE llm_scenario_broker_evidence SET body='{}' WHERE kind=?",(policy.MONITOR_RELEASE,));broker.conn.commit()
+    with pytest.raises(ValueError):policy.halted(broker.conn)
