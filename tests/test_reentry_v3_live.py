@@ -724,6 +724,28 @@ def test_reviewer_repro_entry_day_real_stop_keeps_the_cooldown_and_a_later_real_
     assert {"date": day2, "reason": "real_buy_forced"} in led["conflicts"]
 
 
+def test_a_missed_run_virtual_position_never_blocks_the_next_real_buy():
+    """2026-10-22 US: the intraday run crashed, the close replay opened BACKFILL virtual positions, and
+    FRO/CRWD/AMD/MRVL/ROKU were never evaluated live again while those stayed open."""
+    bars, setup, trigger = _yc()
+    day, day2 = bars[71]["date"], bars[72]["date"]
+    led = C.replay(setup, bars[:72], 69)                                  # no live decision on day 71
+    first = led["campaigns"]["L97"]["attempts"][0]
+    assert (first["date"], first["mode"], first["status"], first.get("real")) == (day, "BACKFILL", "OPEN", None)
+    assert led["next"]["L97"] == {"eligible": True, "reason": "backfill_position_open", "attempt": 2,
+                                  "mode": "NORMAL", "window": None}
+    assert led["next"]["SS"]["reason"] == "position_open"                # SS stays a virtual record
+    led = C.replay(setup, bars[:73], 69, decisions={day2: _bought(trigger, key="k2")})
+    attempts = led["campaigns"]["L97"]["attempts"]
+    assert [(a["date"], a["status"], a.get("exit_reason"), a.get("real")) for a in attempts] == \
+        [(day, "CLOSED", "superseded_by_real", None), (day2, "OPEN", None, True)]
+    # A live decision that was not bought keeps blocking: its virtual position is the rule's own record.
+    not_bought = dict(_bought(trigger), live={"status": "NOT_BOUGHT", "key": "k"})
+    led = C.replay(setup, bars[:72], 69, decisions={day: not_bought})
+    assert led["campaigns"]["L97"]["attempts"][0]["mode"] == "INTRADAY"
+    assert led["next"]["L97"]["reason"] == "position_open"
+
+
 @pytest.mark.parametrize("stop,expected_next_day", [(True, "stop_cooldown"), (False, "ok")])
 def test_a_real_sell_earlier_today_blocks_a_buy_today(stop, expected_next_day):
     """Position from day 71, sold on the morning of day 75 (before the 14:00 run): the intraday run of
