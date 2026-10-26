@@ -64,7 +64,7 @@ def test_assembled_tp_distance_baseline_is_symmetric_and_preserves_remaining_quo
         'Choose the structural invalidation SL first',
         'Do not tighten SL merely to enlarge a bet',
         'do not increase leverage to 30x or use full-account exposure',
-        '50% near, 30% intermediate and 20% protected runner',
+        'not a preset near-heavy' ,
         'not a forced allocation',
         'support for SHORT takes precedence',
         '500 USDT is a reference, not a minimum profit distance',
