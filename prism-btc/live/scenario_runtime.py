@@ -1057,11 +1057,14 @@ class ScenarioRuntime:
                 try:
                     self.broker.execute(validated, ident)
                 except Exception as exc:
-                    from live.scenario_broker import BrokerCancellationPending, BrokerNotReady
+                    from live.scenario_broker import BrokerCancellationPending, BrokerNotReady, BrokerProtectionPending
                     self._notice("unknown:"+ident,dict(kind="PENDING",timestamp=self.clock()))
                     self.conn.commit()
                     reason = ("awaiting_cancellation" if validated["action"] in {"EXIT", "REDUCE"}
                               and isinstance(exc, BrokerCancellationPending) else "submission_unknown")
+                    if (validated['action'] == 'ADJUST' and not validated.get('entries')
+                            and isinstance(exc, BrokerProtectionPending)):
+                        reason = "awaiting_protection"
                     if (validated['action'] == 'REDUCE' and type(exc) is BrokerNotReady
                             and str(exc) == 'reduce_result_pending'):
                         children = self.conn.execute(
