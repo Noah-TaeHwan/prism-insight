@@ -477,6 +477,18 @@ def eligible(campaign, i, anchor, policy=None):
     return True, "ok"
 
 
+def live_eligible(campaign, i, anchor, policy=None):
+    """eligible() for the next live decision. A virtual position opened on the close of a day without a
+    live decision (a missed run or quote, or before enrollment) never blocks a real buy: the account had
+    no chance to act on it, and a real buy closes it as superseded_by_real (2026-10-22 US: a crashed run
+    left FRO/CRWD/AMD/MRVL/ROKU blocked behind such positions while their real re-entry passed)."""
+    pos = campaign["attempts"][campaign["_pos"]] if campaign["_pos"] is not None else None
+    if pos is None or pos.get("real") or pos.get("mode") != "BACKFILL":
+        return eligible(campaign, i, anchor, policy)
+    ok, why = eligible(dict(campaign, _pos=None), i, anchor, policy)
+    return ok, "backfill_position_open" if ok else why
+
+
 def _excursion(pos, bars, j, price):
     """Max gain/loss while held: full bars before the exit day plus the exit price (the exit day's own
     high/low cannot be ordered against the exit). Observation only."""
@@ -759,8 +771,9 @@ def replay(setup, bars, anchor, *, decisions=None, regime_at=None, pulse_at=None
     complete = a + policy["horizon"] <= n - 1
     upcoming = {}
     if last == n - 1 and not complete:
-        for rule, camp in camps.items():
-            ok, why = eligible(camp, n, a, policy)
+        for rule, camp in camps.items():     # only the primary rule is traded; SS stays a virtual record
+            check = live_eligible if rule == policy["primary_rule"] else eligible
+            ok, why = check(camp, n, a, policy)
             upcoming[rule] = {"eligible": ok, "reason": why, "attempt": len(camp["attempts"]) + 1,
                               "mode": "SHAKEOUT" if camp["window"] else "NORMAL",
                               "window": _window_public(camp["window"], n)}
