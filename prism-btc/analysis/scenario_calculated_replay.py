@@ -50,7 +50,8 @@ class EconomicTape:
             self.rows = [row["decision"] for row in self.ticks if row.get("decision")]
 
     def _write(self, row):
-        self.stream.write(json.dumps(row, sort_keys=True, allow_nan=False) + "\n")
+        # Nested review inputs retain order used by their lossless projection.
+        self.stream.write(json.dumps(row, allow_nan=False) + "\n")
         self.stream.flush()
 
     def begin(self, at):

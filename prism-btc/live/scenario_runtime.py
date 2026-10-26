@@ -792,7 +792,8 @@ class ScenarioRuntime:
                 review_bindings = review_policy_binding(research_mode=self.research_review_mode)
                 review_envelope = self.calculated_review_propose(snap, ctx,
                     record=lambda event: self._record_calculated_review(slot, event))
-                envelope_body = _json(review_envelope)
+                # Input projection records insertion order; sorting loses replay evidence.
+                envelope_body = json.dumps(review_envelope, allow_nan=False)
                 if len(envelope_body.encode()) > MAX_BYTES:
                     raise ValueError("review_tape_bound")
                 self.conn.execute("INSERT INTO llm_scenario_review_tapes VALUES(?,?)",
