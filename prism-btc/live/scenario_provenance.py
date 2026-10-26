@@ -22,6 +22,11 @@ from live import scenario_immediate_reduce, scenario_management_quarantine, scen
 import types
 import importlib.metadata
 import inspect
+from functools import lru_cache
+
+# Cache only source-derived comparisons; inspect live code/configuration every time.
+_compile_expected = lru_cache(maxsize=64)(compile)
+_parse_expected = lru_cache(maxsize=64)(ast.parse)
 
 MAX_RECORD_BYTES = 512 * 1024
 MAX_RUN_BYTES = 4 * 1024 * 1024
@@ -150,7 +155,7 @@ def _loaded_parity(name, source, selected=None):
     module = sys.modules.get(name.removesuffix('.py').replace('/', '.'))
     if module is None:
         return 'UNKNOWN'
-    compiled = _compiled_functions(compile(source, '<audit>', 'exec', dont_inherit=True))
+    compiled = _compiled_functions(_compile_expected(source, '<audit>', 'exec', dont_inherit=True))
     functions = []
     for value in vars(module).values():
         if isinstance(value, types.FunctionType) and value.__module__ == module.__name__:
@@ -173,7 +178,7 @@ def _loaded_parity(name, source, selected=None):
         checked += 1
     # Literal configuration (including the system prompt) is mutable separately
     # from code objects, so code equality alone is not enough.
-    for node in ast.parse(source).body:
+    for node in _parse_expected(source).body:
         if isinstance(node, ast.Assign):
             try:
                 expected = ast.literal_eval(node.value)
