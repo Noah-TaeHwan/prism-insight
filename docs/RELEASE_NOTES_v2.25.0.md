@@ -1,17 +1,18 @@
 # PRISM-INSIGHT v2.25.0 — 재진입 규칙화 · 증명된 종목 오래 들기 · 뉴스·테마 지도 · 분석 원장
 
-> **발행일**: 2026-10-24
-> **범위**: `v2.24.0` (`12ccd839`) → `66315e52` (PR #1105까지) · 제품 변경 커밋 **646개** / 병합 PR **182개**
-> **규모**: 파일 **619개**, **+70,352 / −20,116줄** · 2026-10-04–2026-10-23 UTC (병합 기준)
-> **집계 기준**: 릴리즈 문서·감사 자료 작성 커밋은 위 제품 변경 통계에서 제외합니다. 새 태그에는 이 릴리즈 문서도 포함됩니다.
+> **발행일**: 2026-10-24 (2026-10-27 범위 갱신)
+> **범위**: `v2.24.0` (`12ccd839`) → `10ba6454` (PR #1155까지) · 제품 변경 커밋 **797개** / 병합 PR **224개**
+> **규모**: 파일 **699개**, **+81,653 / −20,165줄** · 2026-10-04–2026-10-26 UTC (병합 기준)
+> **집계 기준**: 릴리즈 문서·감사 자료 작성 커밋(#1106과 이번 갱신)은 위 제품 변경 통계에서 제외합니다. 새 태그에는 이 릴리즈 문서도 포함됩니다.
 
 ## 한눈에 보기
 
-이전 정식 릴리즈는 **v2.24.0, 2026-10-05(KST)**입니다. 이번 버전은 지난 20일의 변경 646개를 오래된 순서부터
+이전 정식 릴리즈는 **v2.24.0, 2026-10-05(KST)**입니다. 이번 버전은 지난 3주의 변경 797개를 오래된 순서부터
 한 번씩 검토해 작업 단위로 묶었습니다. 최근 변경이라고 더 크게 다루지 않았고, 10월 첫 주의 메시지·뉴스 작업과
 마지막 주의 매도 규칙을 같은 무게로 정리했습니다. 지난 버전이 "사는 방식·들고 가는 방식·다시 타는 방식"을 실전에
 올렸다면, 이번 버전은 **그 방식을 실제 운영 기록으로 다듬은 버전**입니다. 앞쪽에는 메시지·뉴스·데이터와 목표가 매도 폐지(10/7)·재진입 규칙화(10/10)·주도주 약세 매도(10/15)가,
-10/18 2주 점검 뒤에는 매수·매도 지시문 정합, 분석 원장, 단계적 신뢰·장기 보유(10/23)가 들어갔습니다.
+10/18 2주 점검 뒤에는 매수·매도 지시문 정합, 분석 원장, 단계적 신뢰·장기 보유(10/23)가, 마지막 사흘(10/24~26)에는 재진입 실행 실패일
+처리, 책 지식 하네스, BTC 데모의 주문 사고 격리·복구가 들어갔습니다.
 
 - **목표가 도달은 더 이상 매도 이유가 아님(실전)**: 큰 종목을 가장 많이 자른 원인이 목표가 매도였습니다. 목표가에 닿으면 파는
   대신 추적 손절을 켭니다(KR·US, BUY·SELL 지시문과 결정론 매도 모두, 10/7).
@@ -20,7 +21,8 @@
   넘긴 종목은 시장당 2개까지 **장기 보유(코어)**로 올려 200일선 이탈까지 들고 갑니다(10/23 16:15 KST 켬).
 - **재진입은 규칙으로(실전)**: AI 재점검이 우연보다 나은 선별을 못 해 빼고, 규칙 신호면 삽니다. 50일선 아래 차단도 풀었습니다.
   대신 공식 공시(공개매수·상장폐지 등) 점검, 업종 보완, **낡은 가격대 차단**을 넣었습니다. 미국 재진입 주문이 10/13~10/20 전부
-  실패하던 문제를 고치고, 이런 실패가 당일 알림으로 오게 했습니다.
+  실패하던 문제를 고치고, 이런 실패가 당일 알림으로 오게 했습니다. 판단 실행이 빠진 날 생긴 가상 포지션이 그 종목의 다음 실매수를
+  막던 문제도 고쳤습니다(10/26).
 - **매수 판단 정리**: 약세·횡보장에도 하루 3종목을 고르고(기존 2), 50일선 조건은 현재가로 보며, 계산 실수로 막던 진입을 기록만
   하고, AI 보유 한도를 실제 사용 비중으로 비교합니다. BUY 지시문을 실행 코드와 맞추고, BUY 직관(축적 교훈)은 지금 상황과 맞는 것만
   넣습니다. 미국 기업 현황에 분기 영업이익 표를 코드로 붙였습니다.
@@ -35,12 +37,14 @@
   스크리닝부터 매도·재진입까지 잇습니다. 매매 복기는 이 원장(ClickStack)부터 봅니다.
 - **데이터·운영**: 미국 운영 가격을 야후(yfinance) 대신 KIS 시세로 읽고, 야후가 일봉을 빠뜨린 날은 KIS로 채웁니다. 실패하거나 멈춘
   작업을 유지보수 방에 알리는 운영 감시를 넣었습니다.
-- **BTC 데모**: 커밋 수로는 이번 버전의 가장 큰 묶음(비병합 커밋의 44%)입니다. 판단 입력·위험 관리·주문 수명·공지·감사 기록을
-  보강했고, 판단 모델을 GPT-6.1 Sol(low)로 옮겼으며 15분봉을 판단에서 뺐습니다. 모두 Bybit 데모이며 실자금 변경과 수익성 입증은
+- **BTC 데모**: 커밋 수로는 이번 버전의 가장 큰 묶음(비병합 커밋의 52%)입니다. 판단 입력·위험 관리·주문 수명·공지·감사 기록을
+  보강했고, 판단 모델을 GPT-6.1 Sol(low)로 옮겼으며 15분봉을 판단에서 뺐습니다. 10/24~26에는 결과를 모르는 주문(UNKNOWN)을 과거 기록을
+  고치지 않고 격리·복구하는 절차, 즉시 부분 감축, 추세 익절 배분 조정, 재생 도구 정합을 넣었습니다. 모두 Bybit 데모이며 실자금 변경과 수익성 입증은
   없습니다.
 - **연구**: 포켓피봇 계열(바닥·지속형·재설계·재진입 역할), 진입 위치·약한 신호 비중 축소, 진입 직후 손절 거르기, 장기 보유 공급원 등
   20건 넘는 사전등록 연구를 했습니다. 10/21~10/23 포켓피봇·바닥·장기 보유 계열 연구 중 채택은 **단계적 신뢰**(증명된 종목에서 추적 손절을 끄고 50일선으로 관리) 하나입니다. 결론은 "진입 직후 손절은 큰 종목을 잡는 입장료이고,
-  개선은 증명된 종목을 오래 들고 가는 데서 찾는다"입니다.
+  개선은 증명된 종목을 오래 들고 가는 데서 찾는다"입니다. 책에서 읽은 매매 지식은 검증 카드로 쌓는 장치(`docs/knowledge/`)를 만들었고,
+  첫 카드 검증(50일선 이탈일 거래량 구분, 갭 규칙)은 모두 기각됐습니다.
 
 ## 이전 → 지금: 달라진 동작 (날짜순)
 
@@ -126,6 +130,16 @@
 | 10-23 | **단계적 신뢰·장기 보유** | 증명된 큰 종목도 추적 손절로 20~40거래일 안에 매도 | '증명됨'(20세션·+15%·50>200일선) → 50일선 이틀 이탈 때만 매도, '장기 보유'(40세션·+30%) 시장당 2개 → 200일선 이탈까지 보유. 10/23 16:15 KST 운영 켬 (#1099, #1100) |
 | 10-23 | 증액 워커·경쟁사 표 | 조회 중 찍힌 미국 시세를 "미래 시세"로 거절, 야후 crumb 거절로 경쟁사 칸 비움 | 응답 도착 시각으로 판정, 한 번 더 조회 (#1103, #1104) |
 | 10-23 | BTC 데모 | 판단 모델 GPT-6 Luna, 선택 후보 근거를 자유 설명이 덮어씀, 15분봉을 타이밍 보조로 사용 | GPT-6.1 Sol(low), 후보 근거 보존, 보유 청산 경로·진입 가격 진행 비교, **15분봉 판단 제외**(최소 30분, 1h 우선) (#1094, #1101, #1102, #1105) |
+| 10-23 | BTC 모델 입력 | 호스트 전용 행동 이력(중복 방지용)이 모델 입력에 포함 | 모델 입력 사본에서만 제외(약 9.8KB 축소, 중복 방지는 그대로) (#1107) |
+| 10-23 | 운영 감시 시장 표시 | 시장 표시 없는 미국 KIS 오류 줄을 한국 작업으로 분류 | 로거 이름으로 시장 판정, 미국 추세 청산 15:56 중복 실행을 crontab에서 분리 (#1108) |
+| 10-24~25 | BTC 데모 | 감축은 다음 판단 주기까지 대기, 가격 정책 보정 뒤 위험이 한도를 넘을 수 있음, 확정된 복구 거절도 결과 불명으로 남음 | 진입 진행 비교·직전 종료 근거, 명시적 **즉시 부분 감축**(감축 전용 IOC 1회와 체결 대조), 정책 가격 중 최악 위험으로 최초 수량, 무포지션 수수료 근거·전체 계획 손익비, 확정 거절 보존·실행 정체 경보, 미해결 주문 보존 관리 복구·중복 조회 제거, 감사 결속 (#1109, #1110, #1112–#1114, #1116–#1118) |
+| 10-25 | BTC 사고 격리 | 결과 모르는 주문 하나가 신규 진입을 계속 막음 | 승인된 사고 하나만 기록을 지우지 않고 새 구간으로 분리(꺼진 상태로 배포 → 증거 조회 성능 수정 → 무작업 서버·펀딩 별도 검증) (#1120–#1123) |
+| 10-25 | 하네스·지식 | 사용자 정정이 세션마다 반복, 책 내용이 대화에만 남음 | 정정 4개를 헌장에, 지식 흡수 하네스(`docs/knowledge/`, 스킬 `prism-knowledge-intake`)와 오닐 제자 책 카드 22개 (#1124, #1127) |
+| 10-25~26 | 책 규칙 검증 | — | 50일선 이탈일 거래량 구분(K-SELL-06)·갭 규칙(K-GAP-01) 기각, 250~255쪽 기록 (#1129, #1147, 직접 커밋 `1135aa41`·`57cdff89`) |
+| 10-25~26 | BTC 주문 사고 | 전송 전 검사에서 막힌 진입도 UNKNOWN으로 남아 판단을 막음, 새 진입 UNKNOWN은 복구 경로 없음, 추세 TP 50/30/20 고정, 과거 미정산 2건이 매 점검 경고 | 미전송 진입은 중단(ABORTED)으로 정리, 새 진입 UNKNOWN 분리 복구, 추세 TP 배분을 반응·추세 진행으로, 과거 미정산은 안내로, 호가 조회 시각 기록, 진입 근거 갱신·조회 공백 정지(HALT)의 명시적 복구 (#1130, #1133–#1136, #1139) |
+| 10-25~26 | BTC 재생·연구 | 대기 지정가에도 taker 스프레드 통과 요구, 저장 시 입력 순서 손실, 프로세스마다 재생 해시가 다름 | 대기 지정가는 Last 가격으로 대조, 입력 순서 보존, 목표 계약 재생 프로필·PID 고정, 손절 강화 확인 대기, 정책 검증 소스 파싱 재사용, 무포지션 관망 중복 계좌 조회 제거, 재생·실행 근거 문서 (#1128, #1131, #1137, #1140–#1143, #1145, #1146, #1149–#1155) |
+| 10-26 | 차트 | 상장 기간이 짧은 종목(950260)은 이동평균이 비어 차트 생성 실패, 보고서 가격 차트·오닐 차트 누락 | 값이 없는 이평선만 빼고 그림 (#1138) |
+| 10-26 | **재진입 실행 실패일** | 판단 실행이 빠진 날 종가로 연 가상 포지션이 열려 있으면 그 종목을 다시 판단하지 않음(FRO·CRWD·AMD·MRVL·ROKU) | 가상(BACKFILL) 포지션은 다음 판단을 막지 않고, 실제 매수 때 닫힘 (#1148) |
 
 ## 투자자께: 매수부터 매도·재진입까지 무엇이 달라졌나
 
@@ -180,6 +194,8 @@
 - **미국 재진입 실패 수리**: 10/13~10/20 미국 재진입 신호(PAG·SNDK·CRGY·MDB·DDOG·NVDA 등)가 패키지 이름 충돌로 주문 전에 전부
   실패했습니다. 실행기를 prism-us 패키지에 고정하고 공용 모듈을 파일 경로로 읽게 했으며, 오류 본문을 남기고 당일 알림·운영 감시로
   보이게 했습니다. 일봉이 빈 종목 하나가 실행 전체를 멈추던 문제도 고쳤습니다. (#1040, #1042, #1064–#1066, #1093)
+- **실행이 빠진 날**: 판단 실행이 멈춘 날(10/22 미국) 종가로 연 가상 포지션이 열려 있는 동안 그 종목을 다시 판단하지 않아,
+  FRO 같은 눌림 지지 신호를 놓쳤습니다. 이 가상 포지션은 이제 다음 판단을 막지 않습니다. (#1148)
 
 ### 매수: 판단 입력을 코드와 맞추기
 
@@ -233,6 +249,9 @@
   유지됐습니다. 2주 점검 때 막힌 건 중 +20% 이상이 생기면 끕니다. (#1002, #1052, #1080, #1088, 직접 커밋 `2f5beff4`)
 - 미국 재진입·증액 실행기의 패키지 고정, 공용 매수 관문 모듈의 파일 경로 로딩, 오류 본문·traceback 보존, 일봉 빈 종목 건너뛰기를
   고쳤습니다. (#1040, #1064, #1066, #1093)
+- 실행 실패일 가상 포지션(`BACKFILL`)은 주 기준의 다음 판단 자격에서 무시합니다(`backfill_position_open`). 시도 상한·청산일·손절 다음
+  쉼은 그대로이고, 판단 기록이 있는 날의 가상 포지션은 계속 막습니다. 실제 매수는 기존 경로로 가상 포지션을 `superseded_by_real`로
+  닫습니다. 재진입 매수 대상이 바뀌는 수리라 사용자 승인(10/26) 뒤 배포했습니다. (#1148)
 - 연구 기록: AI 재점검 30건 재생은 승인 7건이 모두 손실이고 이익 6건은 모두 거절해 선별 효과가 없었습니다. 과거 손절 재생과 v4 후보(새 바닥
   돌파·50일선 회복)는 AI 재점검이 없어 손익 판정이 아니라 범위 확인으로만 기록했습니다. (#962, #964)
 
@@ -307,6 +326,8 @@
 - **대시보드**: 운영 보고서 탭(KR·US 낙폭 대 지수, 위기 10건과 수리, 결정 계층 연대표, 연구 판정), 메인·전체 탭을 무채색·숫자 중심으로
   개편(7개 탭 × 다크/라이트 × KR/US × 한/영 확인), 하단 정보(모델·에이전트 수) 갱신, 현금 100% 한국 계좌의 현금 표시, PRISM 로고, 10/1부터
   `max_tokens` 거부로 영어 번역이 실패해 영어 JSON의 약 30%가 한글이던 문제 복구. (#1033–#1037, #1039, #1043)
+- **차트**: 상장 기간이 짧아 120일·40주 이평이 전부 빈 종목에서 차트 생성이 실패해 보고서 가격 차트와 BUY 품질 단계의 오닐 차트가
+  빠지던 문제를, 값이 없는 이평선만 빼는 방식으로 고쳤습니다(보고서·오닐 일봉·주봉 세 곳). (#1138)
 
 ## 8. 분석 원장·관측
 
@@ -327,7 +348,7 @@
 ## 9. 운영 감시·알림·보안
 
 - **운영 감시**: 매도 루프 실패, 멈춘 정기 작업, 시장 건너뜀을 유지보수 방에 [장애]/[주의]로 알리고 08:30에 요약합니다. 한국 오전 배치와
-  증액 워커(journald)도 감시합니다. (#1065, #1089)
+  증액 워커(journald)도 감시합니다. 시장 표시가 없는 증권사 오류 줄은 로거 이름으로 한국·미국을 가립니다. (#1065, #1089, #1108)
 - **주문 알림**: 실전 재진입·증액 주문 오류, 증권사의 실제 매수·증액 거부를 유지보수 방에 당일 알립니다(토큰 가림, 알림 실패가 매매를
   막지 않음). (#1042, #1046)
 - **로그·번역·기억**: 주간 배치 로그 압축 보관, 일본어 PDF 번역 시간 확대, 미국 주간 압축 칼럼 수정. (#920, #947, #967)
@@ -338,7 +359,11 @@
 
 - **하네스**: Claude·Codex 공통 헌장(`docs/HARNESS_CORE_ko.md`), 공용 훅(`tools/harness/hook.py`), 스킬(매매 변경 검토·BTC 변경 검토·매수
   품질 분석·매매 복기)을 두고, `AGENTS.md`를 하나의 공용 지침으로 합쳐 `CLAUDE.md`가 가져오게 했습니다. 매매 사실은 ClickStack 원장부터
-  조회합니다. 수익률은 한 개 평균이 아니라 승률·평균 수익·평균 손실·손익비로 보고합니다. (#1007, #1044, #1045, 직접 커밋 `f561543b`)
+  조회합니다. 수익률은 한 개 평균이 아니라 승률·평균 수익·평균 손실·손익비로 보고합니다. 승인된 작업에 "계속"을 반복 요구하지 않기,
+  실행 복구와 오프라인 연구 병행, 예약 등록과 실제 실행 구분, 반복 폴링 금지를 헌장에 넣었습니다. (#1007, #1044, #1045, #1124, 직접 커밋 `f561543b`)
+- **지식 하네스**: 책·외부 지식을 북극성에 맞게 가공해 남기는 `docs/knowledge/`(색인·카드 양식·증거 상태)와 스킬 `prism-knowledge-intake`를
+  만들고, 오닐 제자 책 카드 22개(포켓피봇 진입 13, 매도 5, 갭 2, 비중 1, 유니버스 1)를 넣었습니다. 카드는 매매 규칙을 직접 바꾸지 않고
+  매매 변경 검토로 넘어갑니다. 250~255쪽 사례도 기록했습니다. (#1127, #1147)
 - **연구 결론(코드 변경 없음, 직접 커밋)**: 연구 교훈 장부(`docs/RESEARCH_LESSONS_ko.md`)와 가설 장부(`docs/HYPOTHESIS_REGISTRY_ko.md`)에
   기록했습니다.
   - 많이 오른 자리의 첫 비중 절반: 기각 — 많이 오른 자리는 큰 종목의 출발점이기도 함(`28b37d50`).
@@ -353,6 +378,8 @@
   - 재진입의 큰 종목 재탑승(`a59935f2`·`135f3564`), 부품 앙상블(`a6703d0c`), 비중 반영 재매수(`adb75a0f`), 진입 직후 손절 거르기(`f253817d`):
     채택 없음. **진입 직후 손절은 큰 종목을 잡는 입장료**이고 스크리닝을 잘라 줄이면 큰 종목도 같이 잃는다는 결론이 다섯 번째로
     반복됐습니다. 처음 보는 과거 구간은 사실상 소진되어 새 가설은 실기록(forward)으로 확인합니다.
+  - 책 규칙 검증: 50일선 이탈일 거래량으로 매도 구분(K-SELL-06, `1135aa41`)과 갭 규칙(K-GAP-01, `57cdff89`) 기각. 책 규칙과 운영 중인
+    50일선 2일 이탈 규칙의 차이는 네 집합 모두 0 근처였습니다. (#1129)
 
 ## 11. BTC 데모
 
@@ -378,34 +405,52 @@
   오프라인 설명 감사·주봉 이평 표시, 손절 후보 검토(전략 배포 근거 부족). (#923, #978, #987, #992–#994, #1006, #1017, #1031, #1075, #1076,
   #1084, #1085)
 - **문서**: 개편된 매매 시스템 설계도 이미지, 지난 BTC 문서 59개 정리(git 이력에 남음). (#926, #929)
+- **10/24~26 주문·위험**: 진입 진행 비교와 직전 종료 근거(입력), 명시적 즉시 부분 감축(버전 관문, 감축 전용 IOC 1회, 취소·체결 대조, 미체결분
+  복원, 네이티브 손절 유지), 정책 가격 보정 후보 중 최악 위험으로 최초 수량을 한 번만 계산, 무포지션 검토의 수수료 근거와 전체 계획 손익비,
+  추세 구조 TP의 50/30/20 출발점 제거(사용자 승인 데모 배포, 비교에서 SHORT은 소폭 악화해 전략 개선으로 주장하지 않음). (#1107, #1109,
+  #1110, #1112, #1113, #1134)
+- **10/24~26 사고 격리·실행 안전**: 결과 모르는 복원 주문(UNKNOWN)이 생긴 뒤, 확정 거절만 보존하고 실행 정체를 별도 경보로 알리며, 미해결
+  주문을 지우지 않은 채 관리(관망·전량 감축 청산)만 허용했습니다. 승인된 사고 하나를 새 구간으로 분리하는 절차는 꺼진 상태로 배포한 뒤 증거
+  조회 성능 문제(7.78GB 증거 표 전체 조회)로 되돌리고 고쳤으며, 무작업 서버와 정상 펀딩 체결을 따로 검증하게 했습니다. 이어 전송 전 검사에서
+  막힌 진입은 중단으로 정리하고, 새 진입 UNKNOWN도 같은 방식으로 분리 복구하고, 조회 공백 정지(HALT)는 정확한 해시와 전체 재조회 뒤에만
+  풀며, 손절 강화 응답 뒤 확인 대기를 구분하고, 과거 미정산 2건의 반복 경고를 안내로 바꿨습니다. 관리 판단의 중복 조회, 무포지션 관망의 중복
+  계좌 조회도 줄였습니다. 과거 UNKNOWN·미정산 기록은 바꾸지 않았습니다. (#1114, #1116, #1117, #1120–#1123, #1130, #1133, #1135, #1139,
+  #1149, #1153)
+- **10/24~26 재생·감사**: 제안 원문·갱신 의도 감사 결속, 대기 지정가와 taker 체결의 재생 분리(실거래 3건 중 2건 정확 일치, 전체는
+  PARITY_NOT_PROVEN), 추가 요청 없는 호가 조회 시각 기록, 저장된 판단 입력의 순서 보존(저장 후 정확 재생 확인), 현재 보유 정책을 켠
+  목표 계약 재생 프로필과 프로세스 간 재생 해시 고정, 정책 검증의 소스 파싱 재사용(반복 검증 중앙값 155ms→9.8ms, 운영 시간 초과 해소는
+  미입증). (#1118, #1128, #1136, #1141, #1146, #1150, #1151)
+- **10/24~26 기록 문서**: 최초 진입 계획 비교, 시각 기록 배포·호가 진단, 복구 배포와 체결 반례, 저장된 재생 검증, 실행 대리 지표 반례,
+  과거 정산 137건 기준선(현재 전략 성과 아님), 재사용 연구 절차, 활성 호출 장부 점검법, 배포·기각 실험·미청산 기록. 24시간 무경보와
+  수익 개선(M5)은 미입증입니다. (#1131, #1137, #1140, #1142, #1143, #1145, #1152, #1154, #1155)
 
 ## 개발자용 상세 — 동일 가중치 커밋 집계
 
-`v2.24.0..66315e52`의 **646개 커밋을 모두 오래된 순서부터 확인**했습니다. 이 범위에는 릴리즈 문서 작성 커밋이 없어 제외한
-커밋은 없습니다. 각 커밋은 1표이며 날짜·최근성·변경 줄 수·작성자·PR 크기에 추가 가중치를 주지 않았습니다.
-비병합 커밋은 소속 PR의 주된 목적 하나에만 배정하고, 병합 커밋은 별도로 집계했습니다. PR이 없는 직접 커밋 **28개**(README 1개,
-연구·하네스 문서 27개)도 포함했습니다. #1016·#1067은 병합 커밋 없이 들어와 PR 병합 커밋은 180개입니다. BTC 비병합 커밋이 165개로
+`v2.24.0..10ba6454`의 **797개 커밋을 모두 오래된 순서부터 확인**했습니다. 릴리즈 문서 작성 커밋 2개(#1106의 `85e43979`와 병합
+`48897296`)만 제외했습니다. 각 커밋은 1표이며 날짜·최근성·변경 줄 수·작성자·PR 크기에 추가 가중치를 주지 않았습니다.
+비병합 커밋은 소속 PR의 주된 목적 하나에만 배정하고, 병합 커밋은 별도로 집계했습니다. PR이 없는 직접 커밋 **30개**(README 1개,
+연구·하네스 문서 29개)도 포함했습니다. #1016·#1067은 병합 커밋 없이 들어와 PR 병합 커밋은 222개입니다. BTC 비병합 커밋이 247개로
 많은 것은 BTC 작업이 작은 커밋을 많이 남기는 방식이기 때문이며, 커밋 수가 중요도·완성도·수익성 점수라는 뜻은 아닙니다.
 
 <details>
-<summary>646개 커밋의 주제별 집계 펼치기</summary>
+<summary>797개 커밋의 주제별 집계 펼치기</summary>
 
 | 작업 묶음 | 커밋 | 비율 |
 |---|---:|---:|
-| 매도·보유 규칙(목표가·주도주 약세·단계적 신뢰·코어 보유·매도 지시문) (`sell_hold`) | 25 | 3.9% |
-| 재진입 규칙화·주문 실패 수리 (`reentry`) | 16 | 2.5% |
-| 매수 판단·BUY 지시문·직관·사실값 블록 (`buy_rules`) | 19 | 2.9% |
-| 초분할 증액·B3 워커 (`micro_split`) | 4 | 0.6% |
-| 스크리닝·시장 데이터(미국 KIS 시세·새 관측 트리거) (`screening_data`) | 17 | 2.6% |
-| 뉴스·테마(KIS 제목·테마 지도·얼럿·보고서) (`news_theme`) | 37 | 5.7% |
-| 텔레그램 메시지·대시보드 개편 (`messages_dashboard`) | 23 | 3.6% |
-| 분석 원장·관측(trace·사후 결과·체결 확인) (`observability`) | 22 | 3.4% |
-| 운영 감시·알림·보안·로그 (`ops_security`) | 12 | 1.9% |
-| 하네스·연구 기록·가설 장부 (`harness_research`) | 37 | 5.7% |
+| 매도·보유 규칙(목표가·주도주 약세·단계적 신뢰·코어 보유·매도 지시문) (`sell_hold`) | 25 | 3.1% |
+| 재진입 규칙화·주문 실패 수리 (`reentry`) | 17 | 2.1% |
+| 매수 판단·BUY 지시문·직관·사실값 블록 (`buy_rules`) | 19 | 2.4% |
+| 초분할 증액·B3 워커 (`micro_split`) | 4 | 0.5% |
+| 스크리닝·시장 데이터(미국 KIS 시세·새 관측 트리거) (`screening_data`) | 17 | 2.1% |
+| 뉴스·테마(KIS 제목·테마 지도·얼럿·보고서) (`news_theme`) | 37 | 4.6% |
+| 텔레그램 메시지·대시보드 개편 (`messages_dashboard`) | 24 | 3.0% |
+| 분석 원장·관측(trace·사후 결과·체결 확인) (`observability`) | 22 | 2.8% |
+| 운영 감시·알림·보안·로그 (`ops_security`) | 13 | 1.6% |
+| 하네스·연구 기록·가설 장부 (`harness_research`) | 49 | 6.1% |
 | README (`readme`) | 2 | 0.3% |
-| BTC 데모(판단·위험·주문·공지·감사) (`btc`) | 165 | 25.5% |
-| 병합 커밋 (`merge`) — PR 병합 180개 + 동기화 병합 87개 | 267 | 41.3% |
-| **합계** | **646** | 100% |
+| BTC 데모(판단·위험·주문·공지·감사) (`btc`) | 247 | 31.0% |
+| 병합 커밋 (`merge`) — PR 병합 222개 + 동기화 병합 99개 | 321 | 40.3% |
+| **합계** | **797** | 100% |
 
 </details>
 
@@ -418,10 +463,11 @@
 | 2026-10-07 – 2026-10-10 | 76 | 58 | 134 |
 | 2026-10-11 – 2026-10-15 | 53 | 28 | 81 |
 | 2026-10-16 – 2026-10-19 | 63 | 56 | 119 |
-| 2026-10-20 – 2026-10-24 | 125 | 76 | 201 |
-| **합계** | **379** | **267** | **646** |
+| 2026-10-20 – 2026-10-24 | 159 | 84 | 243 |
+| 2026-10-25 – 2026-10-27 | 63 | 46 | 109 |
+| **합계** | **476** | **321** | **797** |
 
-첫 구간은 v2.24.0 태그(10/5 01:34 KST) 직후부터입니다. 구간마다 커밋이 고르게 있으며, 마지막 구간이 많은 것은 BTC 데모와 10/21 분석 원장·
+첫 구간은 v2.24.0 태그(10/5 01:34 KST) 직후부터입니다. 구간마다 커밋이 고르게 있으며, 뒤 두 구간이 많은 것은 BTC 데모(10/24~26 주문 사고 복구 포함)와 10/21 분석 원장·
 10/22~23 연구 문서가 몰렸기 때문입니다. 이 문서는 구간과 관계없이 모든 PR을 같은 무게로 다뤘습니다.
 
 </details>
@@ -433,7 +479,7 @@ PR 연결은 제목 추측이 아니라 GitHub가 기록한 병합 커밋과 병
 ## 개발자용 상세 — PR별 변경 규모
 
 <details>
-<summary>병합 PR 182개 펼치기</summary>
+<summary>병합 PR 224개 펼치기</summary>
 
 | PR | 제목 | 규모 |
 |---|---|---|
@@ -619,20 +665,64 @@ PR 연결은 제목 추측이 아니라 GitHub가 기록한 병합 커밋과 병
 | [#1103](https://github.com/dragon1086/prism-insight/pull/1103) | fix(b3): judge US quote freshness when the response arrives | 2 files, +29/−1 |
 | [#1104](https://github.com/dragon1086/prism-insight/pull/1104) | fix(us-peers): fetch yfinance info once more after a crumb rejection | 2 files, +50/−1 |
 | [#1105](https://github.com/dragon1086/prism-insight/pull/1105) | fix(btc): exclude 15m signals from model decisions | 25 files, +481/−49 |
+| [#1107](https://github.com/dragon1086/prism-insight/pull/1107) | fix(btc): exclude host-only action history from model inputs | 6 files, +118/−1 |
+| [#1108](https://github.com/dragon1086/prism-insight/pull/1108) | fix(watchdog): market of untagged broker lines from the logger name | 2 files, +16/−1 |
+| [#1109](https://github.com/dragon1086/prism-insight/pull/1109) | feat(btc): compare entry progress and preserve last closed thesis context | 8 files, +420/−10 |
+| [#1110](https://github.com/dragon1086/prism-insight/pull/1110) | feat(btc): add explicit immediate partial reduction with durable reconciliation | 39 files, +3,122/−57 |
+| [#1112](https://github.com/dragon1086/prism-insight/pull/1112) | fix(btc): reserve policy-price risk before initial sizing | 5 files, +235/−7 |
+| [#1113](https://github.com/dragon1086/prism-insight/pull/1113) | fix(btc): supply verified flat-review fee evidence and whole-plan payoff | 10 files, +409/−17 |
+| [#1114](https://github.com/dragon1086/prism-insight/pull/1114) | fix(btc): preserve definitive restore rejection and expose execution stalls | 10 files, +780/−11 |
+| [#1116](https://github.com/dragon1086/prism-insight/pull/1116) | BTC M0: bounded management recovery preserving unresolved orders | 17 files, +1,433/−16 |
+| [#1117](https://github.com/dragon1086/prism-insight/pull/1117) | BTC M0: remove duplicate terminal reads from management reviews | 5 files, +238/−2 |
+| [#1118](https://github.com/dragon1086/prism-insight/pull/1118) | fix(btc): preserve raw proposal and renewal intent audit bindings | 7 files, +102/−11 |
+| [#1120](https://github.com/dragon1086/prism-insight/pull/1120) | feat(btc): gated incident epoch recovery (inactive) | 18 files, +1,504/−36 |
+| [#1121](https://github.com/dragon1086/prism-insight/pull/1121) | fix(btc): eliminate inactive per-child evidence scans | 4 files, +129/−2 |
+| [#1122](https://github.com/dragon1086/prism-insight/pull/1122) | fix(btc): accept verified idle deployment during incident recovery | 3 files, +29/−1 |
+| [#1123](https://github.com/dragon1086/prism-insight/pull/1123) | fix(btc): verify funding separately during incident cutover | 3 files, +82/−2 |
+| [#1124](https://github.com/dragon1086/prism-insight/pull/1124) | docs: preserve user corrections in shared PRISM harness | 2 files, +18/−0 |
+| [#1127](https://github.com/dragon1086/prism-insight/pull/1127) | docs: knowledge-intake harness and O'Neil-disciple book cards | 13 files, +449/−2 |
+| [#1128](https://github.com/dragon1086/prism-insight/pull/1128) | fix(btc): separate resting-limit and taker spread matching in replay | 5 files, +134/−1 |
+| [#1129](https://github.com/dragon1086/prism-insight/pull/1129) | docs(knowledge): K-SELL-06, K-GAP-01, K-SELL-05 results (rejected) | 2 files, +30/−20 |
+| [#1130](https://github.com/dragon1086/prism-insight/pull/1130) | fix: prevent BTC pretransport guards leaving unknown orders | 5 files, +216/−8 |
+| [#1131](https://github.com/dragon1086/prism-insight/pull/1131) | docs: record BTC initial-plan comparison and pending recovery | 5 files, +151/−0 |
+| [#1133](https://github.com/dragon1086/prism-insight/pull/1133) | fix: recover current BTC UNKNOWN entry without rewriting history | 6 files, +377/−110 |
+| [#1134](https://github.com/dragon1086/prism-insight/pull/1134) | fix: tune BTC trend TP allocation without preset early-exit weights | 8 files, +68/−5 |
+| [#1135](https://github.com/dragon1086/prism-insight/pull/1135) | fix: stop repeated warnings for preserved BTC historical settlements | 5 files, +70/−8 |
+| [#1136](https://github.com/dragon1086/prism-insight/pull/1136) | feat: retain BTC quote timing evidence without extra requests | 6 files, +92/−1 |
+| [#1137](https://github.com/dragon1086/prism-insight/pull/1137) | docs: record BTC timing deployment and bounded orderbook diagnostic | 5 files, +43/−0 |
+| [#1138](https://github.com/dragon1086/prism-insight/pull/1138) | fix(chart): skip moving-average lines with no values on short histories | 2 files, +21/−6 |
+| [#1139](https://github.com/dragon1086/prism-insight/pull/1139) | fix: refresh BTC entry proof and verify explicit monitor-gap recovery | 8 files, +222/−7 |
+| [#1140](https://github.com/dragon1086/prism-insight/pull/1140) | docs: record BTC recovery deployment and execution counterexample | 4 files, +24/−0 |
+| [#1141](https://github.com/dragon1086/prism-insight/pull/1141) | fix: preserve BTC review input order in persisted tapes | 4 files, +55/−2 |
+| [#1142](https://github.com/dragon1086/prism-insight/pull/1142) | docs: verify native persisted BTC review replay | 2 files, +10/−0 |
+| [#1143](https://github.com/dragon1086/prism-insight/pull/1143) | docs: preserve BTC execution proxy counterexamples | 1 files, +17/−0 |
+| [#1145](https://github.com/dragon1086/prism-insight/pull/1145) | docs: record BTC historical trade baseline and evidence limits | 1 files, +52/−0 |
+| [#1146](https://github.com/dragon1086/prism-insight/pull/1146) | fix: replay BTC holding decisions with explicit goal contracts | 5 files, +138/−2 |
+| [#1147](https://github.com/dragon1086/prism-insight/pull/1147) | docs(knowledge): book pages 250-255 (AAPL·CERN·GMCR 2009) | 3 files, +96/−8 |
+| [#1148](https://github.com/dragon1086/prism-insight/pull/1148) | fix(reentry): missed-run virtual position no longer blocks the next real buy | 3 files, +41/−2 |
+| [#1149](https://github.com/dragon1086/prism-insight/pull/1149) | fix: keep verified SL tightening pending until confirmation | 5 files, +176/−1 |
+| [#1150](https://github.com/dragon1086/prism-insight/pull/1150) | fix: make isolated BTC replay audits reproducible across processes | 6 files, +130/−7 |
+| [#1151](https://github.com/dragon1086/prism-insight/pull/1151) | fix: reuse BTC source parsing while rechecking live policy state | 3 files, +75/−2 |
+| [#1152](https://github.com/dragon1086/prism-insight/pull/1152) | docs: make BTC research workflow reusable and preserve verified outcomes | 3 files, +40/−2 |
+| [#1153](https://github.com/dragon1086/prism-insight/pull/1153) | fix: avoid duplicate account capture for verified flat BTC WAIT | 3 files, +207/−6 |
+| [#1154](https://github.com/dragon1086/prism-insight/pull/1154) | docs: inspect active BTC call ledgers without reopening guards | 1 files, +1/−0 |
+| [#1155](https://github.com/dragon1086/prism-insight/pull/1155) | docs: record BTC deployment, rejected experiment and open-trade evidence | 4 files, +54/−1 |
 
 </details>
 
 ## 검증
 
-- 커밋 집합을 `git rev-list v2.24.0..66315e52`와 대조해 646개 전부가 한 번씩, 하나의 분류로만 들어갔는지 확인했습니다.
-  병합 PR 182개의 병합 커밋 SHA를 GitHub 기록과 대조했고, 이 문서 본문이 182개 PR과 직접 커밋 28개를 모두 언급하는지 스크립트로
+- 커밋 집합을 `git rev-list v2.24.0..10ba6454`(릴리즈 문서 커밋 2개 제외)와 대조해 797개 전부가 한 번씩, 하나의 분류로만 들어갔는지 확인했습니다.
+  병합 PR 224개의 병합 커밋 SHA를 GitHub 기록과 대조했고, 이 문서 본문이 224개 PR과 직접 커밋 30개를 모두 언급하는지 스크립트로
   확인했습니다.
 - `v2.24.0` 태그는 `12ccd839`(PR #915, v2.24.0 노트 병합)를 가리킵니다. 이번 범위는 그 다음부터이며 #916은 v2.24.0에 포함되어 있습니다.
 - 실전 전환(목표가 매도 폐지 #963, 약세·횡보 3종목 #965, 주도주 약세 매도 #1021, 재진입 규칙화 #995·#996, 낡은 가격대 차단 #1080,
-  단계적 신뢰·장기 보유 #1099·#1100 등)은 각 PR의 CI 통과 뒤 병합해 운영 서버에 ff-only로 배포했고(db-server가 `66315e52`에 있음을 읽기 전용으로 확인), 스위치로 켜는 기능은 사용자
+  단계적 신뢰·장기 보유 #1099·#1100 등)은 각 PR의 CI 통과 뒤 병합해 운영 서버에 ff-only로 배포했고(db-server가 `c6e28ac2`(#1153)에 있음을 읽기 전용으로 확인, 그 뒤 #1154·#1155는 문서만), 스위치로 켜는 기능은 사용자
   승인 뒤 켰습니다.
-- **아직 관측하지 않은 것**: 단계적 신뢰·장기 보유의 첫 실제 판정(미국 10/24 06:10 KST 첫 실행 확인 필요), BUY 직관 첫 주간
-  재생성(10/25 03:00), 미국 재진입 장중 실행의 수리 후 첫 정상 실행(10/24 02:50 KST), 새 관측 트리거 두 개의 2주 점검.
+- **첫 정기 실행 확인(서버 로그, 읽기 전용)**: 단계적 신뢰·장기 보유 관찰기는 10/24부터 매일 정상 실행됐고 아직 승격은 0건입니다(10/27
+  미국 7종목 관찰 중, 한국 2종목은 승격 전 매도). BUY 직관 첫 주간 재생성은 10/25 03:00에 끝났습니다(한국 5개·미국 7개 새로 등록,
+  오류 0). 미국 재진입 장중 실행은 10/24 02:52와 #1148 배포 뒤 10/27 02:50에 끝까지 실행됐습니다.
+- **아직 관측하지 않은 것**: 단계적 신뢰·장기 보유의 첫 실제 승격·매도, 새 관측 트리거 두 개의 2주 점검, BTC 사고 복구 뒤 24시간 무경보.
 - 테스트·스모크는 실제 주문이나 정기 배치의 성공을 뜻하지 않으며, 관측(SHADOW)·재생 결과는 수익성의 증명이 아닙니다.
 
 ## 업데이트 방법
@@ -673,7 +763,8 @@ git show --no-patch --oneline v2.25.0
 - BUY 직관은 승인된 직관이 시장당 1개 정도로 얇습니다. 미국 옛 기록은 당시 국면이 없어 업종만으로 태깅됩니다.
 - 미국 스크리닝 메타데이터·재무·애널리스트 자료는 아직 야후입니다. 야후 일봉 결측은 KIS로 채우지만 지수(SPX·VIX) 거래량은 모릅니다.
 - 뉴스·테마는 설명 자료이며 매매 근거로 쓰지 않습니다. 보조 모델이 묶은 테마 이름은 틀릴 수 있습니다.
-- BTC 변경은 데모 범위이고, 어떤 변경도 수익성을 입증하지 않았습니다.
+- BTC 변경은 데모 범위이고, 어떤 변경도 수익성을 입증하지 않았습니다. 결과를 모르는 과거 주문과 미정산 2건은 기록 그대로 남아 성과에서
+  제외됩니다.
 - 처음 보는 과거 구간이 사실상 소진되어, 이후 새 매매 가설은 과거 재현보다 실기록(forward)으로 판정합니다.
 
 ## 텔레그램 공지
@@ -683,7 +774,7 @@ git show --no-patch --oneline v2.25.0
 ```text
 🚀 PRISM-INSIGHT v2.25.0 — 재진입 규칙화 · 증명된 종목 오래 들기 · 뉴스·테마 지도
 
-10월 5일 이후 646개 커밋과 182개 PR을 날짜순으로 빠짐없이 묶었습니다. 지난 버전에 실전으로 올린 나눠 사기·주도주 보유·재진입을 실제 운영 기록으로 다듬었습니다. 핵심은 크게 가는 종목을 일찍 팔지 않는 것입니다.
+10월 5일 이후 797개 커밋과 224개 PR을 날짜순으로 빠짐없이 묶었습니다. 지난 버전에 실전으로 올린 나눠 사기·주도주 보유·재진입을 실제 운영 기록으로 다듬었습니다. 핵심은 크게 가는 종목을 일찍 팔지 않는 것입니다.
 
 🏃 크게 가는 종목 오래 들기
 · 목표가에 닿아도 팔지 않고, 그때부터 고점 대비 손절선으로 관리합니다
@@ -695,6 +786,7 @@ git show --no-patch --oneline v2.25.0
 · AI 재점검이 우연보다 나은 선별을 못 해 빼고, 규칙 신호면 다시 삽니다
 · 50일선 아래 차단은 풀고, 공시 점검·업종 확인·낡은 가격대 차단을 넣었습니다
 · 미국 재진입 주문이 실패하던 문제를 고치고, 주문 오류는 당일 알림이 옵니다
+· 판단 실행이 빠진 날 생긴 가상 보유가 다음 매수를 막던 문제도 고쳤습니다
 
 🎯 매수 판단
 · 약세·횡보장에도 하루 3종목을 고릅니다
@@ -712,9 +804,11 @@ git show --no-patch --oneline v2.25.0
 ⚙️ 기록·운영
 · 스크리닝부터 매도까지 한 번호로 이어지는 분석 원장과 실제 체결 확인을 넣었습니다
 · 미국 가격은 KIS 시세로 읽고, 실패하거나 멈춘 작업은 운영 감시가 알립니다
+· 책에서 얻은 매매 지식을 검증 카드로 쌓는 장치를 만들었습니다(규칙을 직접 바꾸지 않음)
 
 ₿ BTC 데모
-· 판단 입력·위험 관리·주문 안전·공지를 보강하고 판단 모델을 GPT-6.1 Sol로 옮겼습니다(데모 계좌, 수익성 미입증)
+· 판단 입력·위험 관리·주문 안전·공지를 보강하고 판단 모델을 GPT-6.1 Sol로 옮겼습니다
+· 결과를 모르는 주문 사고를 기록을 지우지 않고 격리·복구하고, 즉시 부분 감축과 추세 익절 배분을 넣었습니다(데모 계좌, 수익성 미입증)
 
 ※ 20건 넘는 매매 연구 결론: 사자마자 손절되는 것은 큰 종목을 잡는 입장료이고, 개선은 증명된 종목을 오래 들고 가는 데서 찾습니다
 
@@ -729,7 +823,7 @@ https://github.com/dragon1086/prism-insight/releases/tag/v2.25.0
 ```text
 🚀 PRISM-INSIGHT v2.25.0 — Rule-based re-entry · Holding proven winners · News and theme maps
 
-This release groups all 646 commits and 182 PRs since October 5. It tunes the split entries, leader holding and re-entry that went live last time, using real operating records. The main goal: stop selling big winners early.
+This release groups all 797 commits and 224 PRs since October 5. It tunes the split entries, leader holding and re-entry that went live last time, using real operating records. The main goal: stop selling big winners early.
 
 🏃 Holding big winners longer
 · Reaching the target price is no longer a sell reason; from there a trailing stop takes over
@@ -741,6 +835,7 @@ This release groups all 646 commits and 182 PRs since October 5. It tunes the sp
 · The AI recheck picked no better than chance, so rule signals now buy directly
 · The 50-day-line block is lifted; filing checks, sector checks and a stale-level guard were added
 · US re-entry orders that were failing are fixed, and order errors now alert the same day
+· A virtual position opened on a missed-run day no longer blocks the next real buy
 
 🎯 Buy decisions
 · Weak and sideways markets now pick three names a day
@@ -758,9 +853,11 @@ This release groups all 646 commits and 182 PRs since October 5. It tunes the sp
 ⚙️ Records and operations
 · An analysis ledger links screening to exit under one trace number, with post-close fill confirmation
 · US prices now come from KIS quotes, and a watchdog reports failed or stalled jobs
+· Book knowledge is now stored as testable cards that never change rules directly
 
 ₿ BTC demo
-· Stronger inputs, risk handling, order safety and notices; decisions moved to GPT-6.1 Sol (demo account, profitability not proven)
+· Stronger inputs, risk handling, order safety and notices; decisions moved to GPT-6.1 Sol
+· Orders with unknown results are isolated and recovered without rewriting history, plus immediate partial reduction and trend take-profit sizing (demo account, profitability not proven)
 
 From more than 20 trading studies: early stop-outs are the entry fee for catching big winners, so gains come from holding proven stocks longer.
 
