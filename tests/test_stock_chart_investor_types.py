@@ -25,3 +25,12 @@ def test_daily_chart_prefers_exact_other_total():
         "개인",
         "기타합계",
     ]
+
+
+def test_moving_average_without_any_value_is_not_drawn():
+    """A new listing (950260, 2026-10-26) has no 120-day MA yet; mplfinance raises on an all-NaN line."""
+    from cores.stock_chart import _drawable
+
+    short = {"data": pd.Series([1.0, 2.0])}
+    empty = {"data": pd.Series([float("nan"), float("nan")])}
+    assert _drawable([short, empty]) == [short]

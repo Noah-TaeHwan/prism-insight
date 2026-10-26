@@ -366,6 +366,12 @@ def get_chart_as_base64_html(ticker, company_name, chart_function, chart_name, w
         logger.error(f"Error occurred during chart generation: {str(e)}")
         return  None
 
+def _drawable(plots):
+    """Drop overlay lines with no value at all: a new listing has no 120-day/40-week MA yet,
+    and mplfinance raises on an all-NaN addplot instead of skipping it (950260, 2026-10-26)."""
+    return [plot for plot in plots if plot['data'].notna().any()]
+
+
 # Custom mplfinance style for Korean text display
 def create_mpf_style(base_mpl_style='seaborn-v0_8-whitegrid'):
     """
@@ -529,12 +535,12 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
     title = f"{company_name} ({ticker}) - Price Chart"
 
     # Configure moving average overlay plots
-    additional_plots = [
+    additional_plots = _drawable([
         mpf.make_addplot(df['MA5'], color='#00aa44', width=1),  # 5-day MA (green)
         mpf.make_addplot(df['MA20'], color='#ff9500', width=1),  # 20-day MA (orange)
         mpf.make_addplot(df['MA60'], color='#0066cc', width=1.5),  # 60-day MA (blue)
         mpf.make_addplot(df['MA120'], color='#cc3300', width=1.5, linestyle='--'),  # 120-day MA (red, dashed)
-    ]
+    ])
 
     if KOREAN_FONT_PATH:
         # Apply Korean font to mplfinance charts
@@ -1934,12 +1940,12 @@ def create_oneil_daily_chart(
             f"[ONEIL] RS line omitted for {ticker} (daily); chart still rendered."
         )
 
-    additional_plots = [
+    additional_plots = _drawable([
         mpf.make_addplot(df['MA5'], color='#00aa44', width=1),
         mpf.make_addplot(df['MA20'], color='#ff9500', width=1),
         mpf.make_addplot(df['MA60'], color='#0066cc', width=1.5),
         mpf.make_addplot(df['MA120'], color='#cc3300', width=1.5, linestyle='--'),
-    ]
+    ])
 
     if KOREAN_FONT_PATH:
         font_prop = fm.FontProperties(fname=KOREAN_FONT_PATH)
@@ -2089,10 +2095,10 @@ def create_oneil_weekly_chart(
             f"[ONEIL] RS line omitted for {ticker} (weekly); chart still rendered."
         )
 
-    additional_plots = [
+    additional_plots = _drawable([
         mpf.make_addplot(weekly['MA10'], color='#ff9500', width=1.2),
         mpf.make_addplot(weekly['MA40'], color='#cc3300', width=1.5, linestyle='--'),
-    ]
+    ])
 
     if KOREAN_FONT_PATH:
         font_prop = fm.FontProperties(fname=KOREAN_FONT_PATH)
