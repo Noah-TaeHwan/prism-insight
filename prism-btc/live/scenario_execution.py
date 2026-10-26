@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
@@ -143,7 +144,6 @@ class ScenarioExecution:
         with mutation_lock(self.conn):
             guard_write(self, method, params)
             call_id = uuid.uuid4().hex
-            import os
             _append(self.conn, TRANSPORT, dict(call_id=call_id, state='SENDING',
                 epoch_id=self._incident_epoch_bound, owner_pid=os.getpid(), method=method), self.clock())
             self.conn.commit()

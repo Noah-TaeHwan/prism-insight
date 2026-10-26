@@ -112,7 +112,7 @@ def _replay_uuid_factory(name):
 
 
 @contextmanager
-def replay_identity_scope(*, economic=False):
+def replay_identity_scope(*, economic=False, stable_process_id=False):
     """Replay-only IDs, not authority: restore module adapters even after failure.
 
     Namespace counters by call site so extra audit events cannot alter permit IDs.
@@ -129,13 +129,18 @@ def replay_identity_scope(*, economic=False):
         if economic:
             from live import scenario_execution
             modules.append(scenario_execution)
+        if stable_process_id:
+            if not economic:
+                raise ValueError("process_identity_requires_economic_replay")
+            originals.append((scenario_execution, "os", scenario_execution.os))
+            scenario_execution.os = SimpleNamespace(getpid=lambda: 0)
         for module in modules:
-            originals.append((module, module.uuid))
+            originals.append((module, "uuid", module.uuid))
             module.uuid = SimpleNamespace(uuid4=_replay_uuid_factory(module.__name__))
         yield
     finally:
-        for module, original in originals:
-            module.uuid = original
+        for module, name, original in reversed(originals):
+            setattr(module, name, original)
         _identity_scope_lock.release()
 
 
@@ -212,6 +217,8 @@ def contract_for(bundle,path,cost_multiplier,initial_equity,origin="luna",policy
             phase_contracts={"profile":policy_profile,
                 "schema_builder_sha256":hashlib.sha256(inspect.getsource(response_schema).encode()).hexdigest(),
                 "SINGLE_PASS":hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()})
+        if policy_profile == "economic-reject-goal-v2":
+            contract["identity_scheme"] = "EXACT_REPLAY_UUID5_CALLSITE_PID0_V2"
         if policy_profile in REVIEW_PROFILES:
             from live.scenario_calculated_review import DRAFT_PROMPT, SELECT_PROMPT, research_review
             from live.scenario_provenance import review_policy_binding
@@ -459,7 +466,8 @@ class Decisions:
 
 
 def run_replay(bundle,market,output,**kwargs):
-    with replay_identity_scope(economic=kwargs.get("policy_profile", "") in ECONOMIC_PROFILES):
+    with replay_identity_scope(economic=kwargs.get("policy_profile", "") in ECONOMIC_PROFILES,
+                               stable_process_id=kwargs.get("policy_profile") == "economic-reject-goal-v2"):
         return _run_replay(bundle,market,output,**kwargs)
 
 

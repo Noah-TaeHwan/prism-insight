@@ -116,7 +116,10 @@ def verify_calculated_registry_contract(contract, registry, variant):
             "unregistered_economic_profile")
     require(contract["economic_clock_contract"] == "NATIVE_MONOTONIC_INTEGER_MS_FULL_TICK_V1",
             "economic_clock_contract_mismatch")
-    require(contract["identity_scheme"] == "EXACT_REPLAY_UUID5_MODULE_CALLSITE_SEQUENCE_V1",
+    expected_identity = ("EXACT_REPLAY_UUID5_CALLSITE_PID0_V2"
+                         if contract["policy_profile"] == "economic-reject-goal-v2"
+                         else "EXACT_REPLAY_UUID5_MODULE_CALLSITE_SEQUENCE_V1")
+    require(contract["identity_scheme"] == expected_identity,
             "economic_identity_contract_mismatch")
     observed = contract["observed_data"]
     require(isinstance(observed, dict) and observed.get("mode") == "observed",
