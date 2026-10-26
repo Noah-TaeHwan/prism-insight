@@ -38,3 +38,20 @@
 체결 모형·시차·비용·기존 0.01 USDT 기준은 바꾸지 않았다. 최근 거래가가 데모 체결을 항상 설명한다는 가설은 채택하지 않는다. 새 시각 기록이 적용된 이후 자연 체결을 시간순 최초 10개까지 검토하는 후속 등록을 남겼다. 추가 모델 호출·시험 주문·상주 수집기는 없다. 아직 독립 검증이나 수익 개선 증거가 아니다.
 
 후속 호가 압축 prefix SHA256: `fa0ace0446a98dbf424ca76d53b5d1b2871aa0be3a37eb2205e2fe09e43d279b`. 로컬 근거는 `tasks/btc-execution-timing-20261026/next-cohort/`의 registry·bound·comparison·last-price-comparison·price-error-impact이며, 새 표집 등록은 `tasks/btc-forward-execution-timing-20261026/registration.json`이다.
+
+## 요청 시각 규칙과 과거 분리5표본
+
+개발8체결 중 이미 ACK_NEAR_FILL로 분류된6건에 `EXCHANGE_REQUEST.observed_at` 직전 공개 거래가를 적용하는 별도 규칙을 고정했다. 임의 시차를 맞추지 않았으며5/6건만 일치했다. 기존 반례는 실제80298.1 대 요청 시각의 공개80287.9로 여전히 달랐다. 이 규칙을 채택하지 않았다.
+
+기존 개발7시나리오를 제외한 원 체결 기록145개의 날짜·유형만 조사한 뒤, UTC10/21~23의 조건부가 아닌 taker Market/Limit5체결을 고정했다. 모두 원 요청·응답·체결ID와 연결됐고, 가격을 확인한 후 표본을 교체하지 않았다. 접수 직후 분류 문구의 오류는 조회 전에 별도 정정 문서로 보존하고 기존 `abs(execTime-responseTime)<=1000ms` 규칙을 유지했다.
+
+| 고정 가격 규칙 | 시장가3체결 | 지정가2체결 | 합계 가격 일치 |
+|---|---:|---:|---:|
+| 기록 execTime 직전 공개 거래가 | 2/3 | 2/2 | 4/5 |
+| 호스트 요청 기록 직전 공개 거래가 | 2/3 | 2/2 | 4/5 |
+
+불일치 시장가 체결은 실제81308.1 대 execTime 기준81307.8이었다. 해당0.01BTC의 가격 현금흐름 차이는 수수료 전0.003USDT다. 요청 시각에는 동일 timestamp에81311.1·81311.2·81312.1이 함께 있어 하나를 고르지 않았다. 이 검사는 개별 체결의 가격 진단이며 전체 거래 순손익·수수료 재현 통과가 아니다. 시계 차이와 독립 펀딩도 미검증이다.
+
+고정5시나리오의 원 체결 전체를 따로 대조하니 체결ID집합·수량 균형·gross·수수료 합계는 정산 기록과 모두 일치했다. net 산술은 정산의 funding_net을 사용했으므로 독립 펀딩 검증으로 부르지 않는다. 전략 OOS/forward·승률 또는 수익 개선 증거로 쓰지 않는다.
+
+공개 [10/22 거래 자료](https://public.bybit.com/trading/BTCUSDT/BTCUSDT2026-10-22.csv.gz)와 [10/23 거래 자료](https://public.bybit.com/trading/BTCUSDT/BTCUSDT2026-10-23.csv.gz)의 제한 prefix만 읽었다. 날짜별64MiB·200만 레코드 상한 안에서 각각50,200,608/17,956,896바이트를 소비했다. 전체 gzip CRC는 검증하지 않았으며 사용 prefix의SHA256을 보존했다. 원 가격·시각·비용·기준은 바꾸지 않았고 추가 모델 호출·주문은0건이다. 근거는 `tasks/btc-execution-timing-20261026/earlier-coverage/`와 `next-cohort/request-time-comparison.json`이다.
