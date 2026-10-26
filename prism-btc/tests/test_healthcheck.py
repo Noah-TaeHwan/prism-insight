@@ -852,3 +852,45 @@ def test_fetch_key_expiry_parses_get_only_response(monkeypatch, raw, expected):
     monkeypatch.setattr(ut, "HTTP", FakeHTTP)
     assert healthcheck._fetch_key_expiry("BYBIT_DEMO_") == expected
     assert calls[0]["demo"] is True
+
+
+@pytest.mark.parametrize('daily', [False, True])
+def test_historical_information_is_audited_without_repeated_warning(monkeypatch, captured, daily):
+    conn = _healthy_conn()
+    notice = dict(level='info', code='historical_unsettled_excluded',
+                  msg='과거 미정산 사건 2건을 보존하고 성과 통계에서 제외합니다.')
+    monkeypatch.setattr(healthcheck, 'run_healthcheck', lambda *a, **k: [notice])
+    result = healthcheck.notify_health(conn, 'demo', daily=daily, now=_NOW)
+    assert result['level'] == 'info'
+    assert result['sent'] is daily
+    row = conn.execute("SELECT level,message FROM btc_events WHERE kind='health' ORDER BY id DESC LIMIT 1").fetchone()
+    assert row['level'] == 'info' and 'historical_unsettled_excluded' in row['message']
+    if daily:
+        assert len(captured) == 1 and '점검 안내' in captured[0]
+        assert '2건' in captured[0] and '확인 필요' not in captured[0]
+        assert '정상 가동 중' not in captured[0]
+    else:
+        assert captured == []
+    # The CLI uses this same renderer for --no-send.
+    rendered = healthcheck._build_alert_message([notice], 'demo', now=_NOW)
+    assert '점검 경고' not in rendered and '확인 필요' not in rendered
+
+
+@pytest.mark.parametrize('level,code', [('warn','key_expiry'), ('alert','execution_stalled'),
+                                        ('alert','incident_epoch_halted')])
+def test_historical_information_never_suppresses_current_problem(monkeypatch, captured, level, code):
+    notices = [dict(level='info', code='historical_unsettled_excluded', msg='과거 미정산 2건'),
+               dict(level=level, code=code, msg='현재 점검 필요')]
+    monkeypatch.setattr(healthcheck, 'run_healthcheck', lambda *a, **k: notices)
+    result = healthcheck.notify_health(_healthy_conn(), 'demo', now=_NOW)
+    assert result['level'] == level and result['sent']
+    assert len(captured) == 1 and '현재 점검 필요' in captured[0]
+    assert '확인 필요' in captured[0] and 'ℹ️' in captured[0]
+
+
+def test_unrecognized_severity_is_not_silently_downgraded(monkeypatch, captured):
+    monkeypatch.setattr(healthcheck, 'run_healthcheck', lambda *a, **k: [
+        dict(level='unexpected', code='unknown_check', msg='점검 상태 불명')])
+    result = healthcheck.notify_health(_healthy_conn(), 'demo', now=_NOW)
+    assert result['level'] == 'warn' and result['sent']
+    assert '점검 경고' in captured[0] and '확인 필요' in captured[0]

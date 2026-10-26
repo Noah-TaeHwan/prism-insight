@@ -140,7 +140,7 @@ def test_health_reports_two_historical_incidents_not_current_order_stall(entry_i
     from live.healthcheck import _check_execution_stalled
     i=entry_incident;extend(i)
     issue=_check_execution_stalled(i['entry_broker'].conn,'demo',datetime.fromtimestamp(i['now'][0]+3600,timezone.utc))
-    assert issue['code']=='historical_unsettled_excluded' and issue['level']=='warn'
+    assert issue['code']=='historical_unsettled_excluded' and issue['level']=='info'
     assert '2건' in issue['msg']
 
 
