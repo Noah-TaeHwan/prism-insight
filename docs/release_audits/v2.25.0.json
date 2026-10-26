@@ -3,32 +3,32 @@
  "release": "v2.25.0",
  "previous_tag": "v2.24.0",
  "previous_tag_commit": "12ccd839d21dbb7bbf047321580e9ec7e859f601",
- "source_cutoff": "66315e52971561f65c41b95a4c252613397e34e8",
- "source_range": "v2.24.0..66315e52971561f65c41b95a4c252613397e34e8",
+ "source_cutoff": "10ba645445ff4ad825a12589c947e9dc39eee726",
+ "source_range": "v2.24.0..10ba645445ff4ad825a12589c947e9dc39eee726",
  "release_preparation_commits_excluded": true,
  "method": "Every reachable source commit reviewed once, weight=1; one primary category per nonmerge commit (from its owning PR), merges counted separately. Dates, churn, author and recency do not alter weight. PR association uses merge-first-parent..merge-second-parent reachability (earliest merged PR wins), not title guessing.",
  "counts": {
-  "all": 646,
-  "nonmerge": 379,
-  "merge": 267,
-  "pr_merges": 180,
-  "other_merges": 87,
-  "direct_nonmerge": 28,
-  "prs": 182
+  "all": 797,
+  "nonmerge": 476,
+  "merge": 321,
+  "pr_merges": 222,
+  "other_merges": 99,
+  "direct_nonmerge": 30,
+  "prs": 224
  },
- "diff": "619 files changed, 70352 insertions(+), 20116 deletions(-)",
+ "diff": "699 files changed, 81653 insertions(+), 20165 deletions(-)",
  "categories": {
   "readme": 2,
-  "merge": 267,
-  "messages_dashboard": 23,
-  "ops_security": 12,
-  "btc": 165,
+  "merge": 321,
+  "messages_dashboard": 24,
+  "ops_security": 13,
+  "btc": 247,
   "screening_data": 17,
   "news_theme": 37,
   "observability": 22,
-  "harness_research": 37,
+  "harness_research": 49,
   "sell_hold": 25,
-  "reentry": 16,
+  "reentry": 17,
   "buy_rules": 19,
   "micro_split": 4
  },
@@ -64,9 +64,16 @@
   {
    "start": "2026-10-20",
    "end": "2026-10-24",
-   "total": 201,
-   "nonmerge": 125,
-   "merge": 76
+   "total": 243,
+   "nonmerge": 159,
+   "merge": 84
+  },
+  {
+   "start": "2026-10-25",
+   "end": "2026-10-27",
+   "total": 109,
+   "nonmerge": 63,
+   "merge": 46
   }
  ],
  "commits": [
@@ -8678,6 +8685,2019 @@
    ],
    "category": "merge",
    "weight": 1
+  },
+  {
+   "sha": "ae157c0f7460688be11762da4ba3c25f4823e253",
+   "date": "2026-10-24T01:16:45+09:00",
+   "parents": [
+    "48897296525b542d8e6e59bb88fab46453ed52a4"
+   ],
+   "subject": "fix(btc): exclude host action history from model inputs",
+   "prs": [
+    1107
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "b4d87f349724433c51953e1c1069a7e7063b3112",
+   "date": "2026-10-24T01:17:03+09:00",
+   "parents": [
+    "ae157c0f7460688be11762da4ba3c25f4823e253"
+   ],
+   "subject": "docs(btc): scope host-only input history trimming",
+   "prs": [
+    1107
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "71458e6332501af5ea4743ba57e0457d0ff2a74c",
+   "date": "2026-10-24T01:17:38+09:00",
+   "parents": [
+    "b4d87f349724433c51953e1c1069a7e7063b3112"
+   ],
+   "subject": "test(btc): retain fresh guard action-history rejection",
+   "prs": [
+    1107
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "b176afdfc987a63dc5dcc624c1b05bbd0728f281",
+   "date": "2026-10-24T01:31:15+09:00",
+   "parents": [
+    "48897296525b542d8e6e59bb88fab46453ed52a4",
+    "71458e6332501af5ea4743ba57e0457d0ff2a74c"
+   ],
+   "subject": "Merge pull request #1107 from dragon1086/fix/btc-model-input-trim-20261024",
+   "prs": [
+    1107
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "a1b983a521df02056376e744743b2e72e2237ab1",
+   "date": "2026-10-24T06:37:59+09:00",
+   "parents": [
+    "b176afdfc987a63dc5dcc624c1b05bbd0728f281"
+   ],
+   "subject": "fix(watchdog): file untagged broker lines under the market their logger names",
+   "prs": [
+    1108
+   ],
+   "category": "ops_security",
+   "weight": 1
+  },
+  {
+   "sha": "e826638a543c731f5a3f20d0e3f8f75e2c0cdba7",
+   "date": "2026-10-24T06:51:22+09:00",
+   "parents": [
+    "b176afdfc987a63dc5dcc624c1b05bbd0728f281",
+    "a1b983a521df02056376e744743b2e72e2237ab1"
+   ],
+   "subject": "Merge pull request #1108 from dragon1086/fix/watchdog-market-by-logger-20261024",
+   "prs": [
+    1108
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "14991fdc4028c5d1188ed41fb6cf4f504d4d2405",
+   "date": "2026-10-24T17:00:07+09:00",
+   "parents": [
+    "e826638a543c731f5a3f20d0e3f8f75e2c0cdba7"
+   ],
+   "subject": "feat(btc): add bounded closed-trade continuity to judgment",
+   "prs": [
+    1109
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "1c7a0b41634fa0d351dea38cbde8d8d05ba7fe13",
+   "date": "2026-10-24T17:01:47+09:00",
+   "parents": [
+    "14991fdc4028c5d1188ed41fb6cf4f504d4d2405"
+   ],
+   "subject": "fix(btc): bind closed exit opinion to exact execution payload",
+   "prs": [
+    1109
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "e027a301d14a0616e0ecc4c57170f639735798a9",
+   "date": "2026-10-24T17:09:23+09:00",
+   "parents": [
+    "1c7a0b41634fa0d351dea38cbde8d8d05ba7fe13"
+   ],
+   "subject": "feat: execute durable one-shot BTC partial reductions safely",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "adc0ff9108dc1ec5e1fd92b3ff713be891a243aa",
+   "date": "2026-10-24T17:12:47+09:00",
+   "parents": [
+    "1c7a0b41634fa0d351dea38cbde8d8d05ba7fe13"
+   ],
+   "subject": "fix(btc): keep verified closure context within the bounded input budget",
+   "prs": [
+    1109
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "38dcb0c078b1912a80b9ddf27f554fab422681f8",
+   "date": "2026-10-24T17:15:55+09:00",
+   "parents": [
+    "e027a301d14a0616e0ecc4c57170f639735798a9"
+   ],
+   "subject": "fix: cap restored BTC exits after racing sibling fills",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "809a78f56cab44dace5ea32e5d9fecbb4a5d4078",
+   "date": "2026-10-24T17:16:44+09:00",
+   "parents": [
+    "38dcb0c078b1912a80b9ddf27f554fab422681f8"
+   ],
+   "subject": "feat(btc): integrate explicit partial reduction judgment and authorization",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "61ba710ca0ffe726a4349deb8023b5eba9d5fc03",
+   "date": "2026-10-24T17:17:13+09:00",
+   "parents": [
+    "809a78f56cab44dace5ea32e5d9fecbb4a5d4078",
+    "adc0ff9108dc1ec5e1fd92b3ff713be891a243aa"
+   ],
+   "subject": "Merge branch 'feat/btc-entry-continuity-20261024' into feat/btc-immediate-reduce-20261024",
+   "prs": [
+    1110
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "bb8842b134c58470a9946ca4278c776ed3299d16",
+   "date": "2026-10-24T17:27:23+09:00",
+   "parents": [
+    "61ba710ca0ffe726a4349deb8023b5eba9d5fc03"
+   ],
+   "subject": "fix(btc): bind reduction replay state and distinguish acknowledged pending",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "b891288f6011b8bbc3346e38e1474f53b4b80e83",
+   "date": "2026-10-24T17:28:39+09:00",
+   "parents": [
+    "bb8842b134c58470a9946ca4278c776ed3299d16"
+   ],
+   "subject": "fix: retain partial reductions in BTC audit and notice recovery",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "8ee6340cef23571c56b2a1feb8803ea4afaba816",
+   "date": "2026-10-24T17:28:39+09:00",
+   "parents": [
+    "b891288f6011b8bbc3346e38e1474f53b4b80e83"
+   ],
+   "subject": "fix: expose reduction restoration failures and prioritize failed-thesis exits",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "0d1a91b50be6be4f158460a99d9577f3436b696e",
+   "date": "2026-10-24T17:30:52+09:00",
+   "parents": [
+    "8ee6340cef23571c56b2a1feb8803ea4afaba816"
+   ],
+   "subject": "docs(btc): specify immediate reduction safety and rollout contract",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "e3c7361a263d68f7b698f2cc2064977194e91d42",
+   "date": "2026-10-24T17:33:07+09:00",
+   "parents": [
+    "0d1a91b50be6be4f158460a99d9577f3436b696e"
+   ],
+   "subject": "fix: keep financial finality out of failed reduction exit handoff",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "859a6204a83285a2dd8ab922bd15aef119e8bf87",
+   "date": "2026-10-24T17:37:01+09:00",
+   "parents": [
+    "e3c7361a263d68f7b698f2cc2064977194e91d42"
+   ],
+   "subject": "fix(btc): describe proportional unfilled quota restoration accurately",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "ad039b4a80517b35254e0d0f567f906ec051b630",
+   "date": "2026-10-24T17:55:40+09:00",
+   "parents": [
+    "859a6204a83285a2dd8ab922bd15aef119e8bf87"
+   ],
+   "subject": "fix(btc): show bounded numeric holding price order without altering plans",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "fcc9e6ed78a26e37dc073dbdc77a24f88efc3dbe",
+   "date": "2026-10-24T18:16:25+09:00",
+   "parents": [
+    "ad039b4a80517b35254e0d0f567f906ec051b630"
+   ],
+   "subject": "test(btc): include nullable reduce field in price execution fixture",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "96fda5c6611fbd381b149e84c254a0a583bb89fd",
+   "date": "2026-10-24T18:17:34+09:00",
+   "parents": [
+    "fcc9e6ed78a26e37dc073dbdc77a24f88efc3dbe"
+   ],
+   "subject": "fix: keep standalone BTC finance context independent of reduction schema",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "8d24bdb645ba44d9ccf374136bd13b2ff132948a",
+   "date": "2026-10-24T19:02:30+09:00",
+   "parents": [
+    "e826638a543c731f5a3f20d0e3f8f75e2c0cdba7",
+    "adc0ff9108dc1ec5e1fd92b3ff713be891a243aa"
+   ],
+   "subject": "Merge pull request #1109 from dragon1086/feat/btc-entry-continuity-20261024",
+   "prs": [
+    1109
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "d45ca5b13780680dc575202c53958fba81a35f55",
+   "date": "2026-10-24T19:03:54+09:00",
+   "parents": [
+    "96fda5c6611fbd381b149e84c254a0a583bb89fd"
+   ],
+   "subject": "test(btc): include immediate reduce in closed import surface",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "d27edf234020e41fc078bc33f8ace7e8b18e3cf5",
+   "date": "2026-10-24T21:08:35+09:00",
+   "parents": [
+    "d45ca5b13780680dc575202c53958fba81a35f55",
+    "8d24bdb645ba44d9ccf374136bd13b2ff132948a"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into feat/btc-immediate-reduce-20261024",
+   "prs": [
+    1110
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "c29a19ef61bf728b55519f2d5c671edc882f8d11",
+   "date": "2026-10-24T21:14:49+09:00",
+   "parents": [
+    "d27edf234020e41fc078bc33f8ace7e8b18e3cf5"
+   ],
+   "subject": "refactor(btc): establish entry edge before choosing size",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "40ffc8507ecc411ec76e84ee1f2aa5df18c52db9",
+   "date": "2026-10-24T21:17:33+09:00",
+   "parents": [
+    "c29a19ef61bf728b55519f2d5c671edc882f8d11"
+   ],
+   "subject": "fix(btc): align management wording with assessment and reduction outcomes",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "4f913fd598e386f4bbd7482e1a25ba5947dcee42",
+   "date": "2026-10-24T21:29:58+09:00",
+   "parents": [
+    "40ffc8507ecc411ec76e84ee1f2aa5df18c52db9"
+   ],
+   "subject": "test(btc): cover structured explanations through runtime and fresh guard",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "2b88341287a696419f96e8fe7e5eaec7ae736550",
+   "date": "2026-10-24T21:33:16+09:00",
+   "parents": [
+    "4f913fd598e386f4bbd7482e1a25ba5947dcee42"
+   ],
+   "subject": "test(btc): enforce explanation runtime scope and broker flag isolation",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "34c55e5fe17f4e48224af504770c8a0a3acb4147",
+   "date": "2026-10-24T21:34:07+09:00",
+   "parents": [
+    "2b88341287a696419f96e8fe7e5eaec7ae736550"
+   ],
+   "subject": "feat(btc): bind holding price explanations to frozen host facts",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "42cceb2462a550bdb9e10fea947ffac5d6f8132f",
+   "date": "2026-10-24T21:48:36+09:00",
+   "parents": [
+    "8d24bdb645ba44d9ccf374136bd13b2ff132948a"
+   ],
+   "subject": "fix(btc): reserve possible policy-price risk before initial sizing",
+   "prs": [
+    1112
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "040bfe9061fda5d8e8d7a04096ee7e46f9980509",
+   "date": "2026-10-24T22:07:31+09:00",
+   "parents": [
+    "34c55e5fe17f4e48224af504770c8a0a3acb4147"
+   ],
+   "subject": "fix(btc): verify explanation origin and isolate official rendering",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "7ed57af5303728f228b1b03f13daa78d5da6428d",
+   "date": "2026-10-24T22:08:13+09:00",
+   "parents": [
+    "040bfe9061fda5d8e8d7a04096ee7e46f9980509"
+   ],
+   "subject": "Revert \"refactor(btc): establish entry edge before choosing size\"",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "1e2c28e331531acacacac3f7abc1a9b49d96f6bd",
+   "date": "2026-10-24T22:08:13+09:00",
+   "parents": [
+    "7ed57af5303728f228b1b03f13daa78d5da6428d",
+    "42cceb2462a550bdb9e10fea947ffac5d6f8132f"
+   ],
+   "subject": "Merge commit '42cceb2462a550bdb9e10fea947ffac5d6f8132f' into feat/btc-immediate-reduce-20261024",
+   "prs": [
+    1110
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "0e7ab6d7002833571ca677fe86291a0c89c2e739",
+   "date": "2026-10-24T22:30:20+09:00",
+   "parents": [
+    "8d24bdb645ba44d9ccf374136bd13b2ff132948a",
+    "42cceb2462a550bdb9e10fea947ffac5d6f8132f"
+   ],
+   "subject": "Merge pull request #1112 from dragon1086/fix/btc-priced-risk-allocation-20261024",
+   "prs": [
+    1112
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "8ea940771863b7660581496bc2dbb6887e9bbf54",
+   "date": "2026-10-24T22:34:36+09:00",
+   "parents": [
+    "1e2c28e331531acacacac3f7abc1a9b49d96f6bd"
+   ],
+   "subject": "test(btc): include structured explanation in static source binding",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "d34177cc7e1b8db532d0575c76aac5e117664e2d",
+   "date": "2026-10-24T23:21:47+09:00",
+   "parents": [
+    "8ea940771863b7660581496bc2dbb6887e9bbf54"
+   ],
+   "subject": "ci(btc): enforce reduction, explanation and sizing regression boundaries",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "7e0bba0e0958fac598c79617f6b0d11ddbf731d9",
+   "date": "2026-10-24T23:33:18+09:00",
+   "parents": [
+    "d34177cc7e1b8db532d0575c76aac5e117664e2d"
+   ],
+   "subject": "fix(btc): losslessly factor bounded holding explanation input",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "b9cc8c0a7d3345ca6f211997c0eeba2690a679fa",
+   "date": "2026-10-24T23:33:25+09:00",
+   "parents": [
+    "7e0bba0e0958fac598c79617f6b0d11ddbf731d9"
+   ],
+   "subject": "test(btc): seal lossless explanation copy and source codec boundaries",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "c359ddb0feb8c829b4b4fa5758c65eedc865e045",
+   "date": "2026-10-24T23:34:37+09:00",
+   "parents": [
+    "b9cc8c0a7d3345ca6f211997c0eeba2690a679fa",
+    "0e7ab6d7002833571ca677fe86291a0c89c2e739"
+   ],
+   "subject": "Merge commit '0e7ab6d7002833571ca677fe86291a0c89c2e739' into feat/btc-immediate-reduce-20261024",
+   "prs": [
+    1110
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "03f62116005ae9021dfa0529bb62d60ef054e577",
+   "date": "2026-10-24T23:35:17+09:00",
+   "parents": [
+    "c359ddb0feb8c829b4b4fa5758c65eedc865e045"
+   ],
+   "subject": "docs(btc): distinguish deployed sizing repair and rejected entry experiment",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "06df175a884178828e60c95079e6af866cb24415",
+   "date": "2026-10-24T23:52:47+09:00",
+   "parents": [
+    "03f62116005ae9021dfa0529bb62d60ef054e577"
+   ],
+   "subject": "fix(btc): separate constant explanation text from size interpolation",
+   "prs": [
+    1110
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "98065d3353981c13ba9022964ab85535bcd4da9a",
+   "date": "2026-10-25T00:08:25+09:00",
+   "parents": [
+    "0e7ab6d7002833571ca677fe86291a0c89c2e739",
+    "06df175a884178828e60c95079e6af866cb24415"
+   ],
+   "subject": "Merge pull request #1110 from dragon1086/feat/btc-immediate-reduce-20261024",
+   "prs": [
+    1110
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "97d5ddf0cb35cd004c53258f2837dc092ff58383",
+   "date": "2026-10-25T01:14:37+09:00",
+   "parents": [
+    "98065d3353981c13ba9022964ab85535bcd4da9a"
+   ],
+   "subject": "feat(btc): prepare explicit whole-plan fee-only payoff diagnostic",
+   "prs": [
+    1113
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "16caa05e42293bcd11be684bffc31c5dfd3f1dbb",
+   "date": "2026-10-25T01:16:02+09:00",
+   "parents": [
+    "97d5ddf0cb35cd004c53258f2837dc092ff58383"
+   ],
+   "subject": "fix(btc): leave unpriced runner payoff unknown",
+   "prs": [
+    1113
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "d9771be138b5fe77c43967ca1c2b03718d57e9a1",
+   "date": "2026-10-25T01:29:06+09:00",
+   "parents": [
+    "16caa05e42293bcd11be684bffc31c5dfd3f1dbb"
+   ],
+   "subject": "fix(btc): retain same-account verified fee evidence for flat review",
+   "prs": [
+    1113
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "ed74c40e31e14b54b7b45229df87b208f7233d99",
+   "date": "2026-10-25T01:47:25+09:00",
+   "parents": [
+    "d9771be138b5fe77c43967ca1c2b03718d57e9a1"
+   ],
+   "subject": "fix(btc): make optional fee-cache failure return explicit",
+   "prs": [
+    1113
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "af1bca706b84d4bd2fa664104e83318527b5eab3",
+   "date": "2026-10-25T02:06:50+09:00",
+   "parents": [
+    "98065d3353981c13ba9022964ab85535bcd4da9a",
+    "ed74c40e31e14b54b7b45229df87b208f7233d99"
+   ],
+   "subject": "Merge pull request #1113 from dragon1086/feat/btc-style-policy-20261025",
+   "prs": [
+    1113
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "6ed96b2d6a44b9ee3eaba0daa0d27a3faa589d17",
+   "date": "2026-10-25T02:16:01+09:00",
+   "parents": [
+    "af1bca706b84d4bd2fa664104e83318527b5eab3"
+   ],
+   "subject": "docs(btc): record verified fee-data release and strategy evidence limits",
+   "prs": [
+    1114
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "a6b0d4c2ab080f92ae21a6c7f3d5d925e8e361a5",
+   "date": "2026-10-25T08:22:38+09:00",
+   "parents": [
+    "6ed96b2d6a44b9ee3eaba0daa0d27a3faa589d17"
+   ],
+   "subject": "fix(btc): distinguish rejected restoration from unresolved orders and stale decisions",
+   "prs": [
+    1114
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "dfb023d00c3ebca22e22fb35a8625c1d0c895b2a",
+   "date": "2026-10-25T08:40:17+09:00",
+   "parents": [
+    "af1bca706b84d4bd2fa664104e83318527b5eab3",
+    "a6b0d4c2ab080f92ae21a6c7f3d5d925e8e361a5"
+   ],
+   "subject": "Merge pull request #1114 from dragon1086/fix/btc-pending-reduce-20261025",
+   "prs": [
+    1114
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "61a0457f1bc82dfe4b2cd8f048be45845585316a",
+   "date": "2026-10-25T11:44:08+09:00",
+   "parents": [
+    "dfb023d00c3ebca22e22fb35a8625c1d0c895b2a"
+   ],
+   "subject": "fix(btc): restore bounded holding management without resolving unknown orders",
+   "prs": [
+    1116
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "3ace965ecf1de5123356dcc12684ed2e9bd26fc8",
+   "date": "2026-10-25T12:02:10+09:00",
+   "parents": [
+    "dfb023d00c3ebca22e22fb35a8625c1d0c895b2a",
+    "61a0457f1bc82dfe4b2cd8f048be45845585316a"
+   ],
+   "subject": "Merge pull request #1116 from dragon1086/fix/btc-management-quarantine-20261025",
+   "prs": [
+    1116
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "bff7e1cd6a5924f4f413e57fb4302b4e70ad12de",
+   "date": "2026-10-25T12:25:16+09:00",
+   "parents": [
+    "3ace965ecf1de5123356dcc12684ed2e9bd26fc8"
+   ],
+   "subject": "fix(btc): reuse exact terminal proofs within bounded management reviews",
+   "prs": [
+    1117
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "2f395f4d5088aa372a30a0a8e422aad041024b04",
+   "date": "2026-10-25T12:42:50+09:00",
+   "parents": [
+    "3ace965ecf1de5123356dcc12684ed2e9bd26fc8",
+    "bff7e1cd6a5924f4f413e57fb4302b4e70ad12de"
+   ],
+   "subject": "Merge pull request #1117 from dragon1086/fix/btc-quarantine-terminal-reuse-20261025",
+   "prs": [
+    1117
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "dda6e4ea8b5a9d34f4b19472ca928dd897d77926",
+   "date": "2026-10-25T14:24:57+09:00",
+   "parents": [
+    "2f395f4d5088aa372a30a0a8e422aad041024b04"
+   ],
+   "subject": "fix(btc): bind review audit to persisted proposal and renewal intent",
+   "prs": [
+    1118
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "8be96d5cf3b7361d984fad5fbee46e5e9da0540c",
+   "date": "2026-10-25T14:43:08+09:00",
+   "parents": [
+    "2f395f4d5088aa372a30a0a8e422aad041024b04",
+    "dda6e4ea8b5a9d34f4b19472ca928dd897d77926"
+   ],
+   "subject": "Merge pull request #1118 from dragon1086/fix/btc-review-audit-link-20261025",
+   "prs": [
+    1118
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "98f5efcc82725b13751e845ca66244c70f71a0b0",
+   "date": "2026-10-25T16:22:00+09:00",
+   "parents": [
+    "8be96d5cf3b7361d984fad5fbee46e5e9da0540c"
+   ],
+   "subject": "feat(btc): implement gated incident epoch recovery without activation",
+   "prs": [
+    1120
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "79461c49a82a9c0a15df97ebca30fbee49cea6dd",
+   "date": "2026-10-25T16:31:24+09:00",
+   "parents": [
+    "98f5efcc82725b13751e845ca66244c70f71a0b0"
+   ],
+   "subject": "fix(btc): use static epoch snapshot SQL and faithful health fixtures",
+   "prs": [
+    1120
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "b456acaae2b14cbf0b78735041a4f47bde65f92f",
+   "date": "2026-10-25T16:55:29+09:00",
+   "parents": [
+    "8be96d5cf3b7361d984fad5fbee46e5e9da0540c",
+    "79461c49a82a9c0a15df97ebca30fbee49cea6dd"
+   ],
+   "subject": "Merge pull request #1120 from dragon1086/feat/btc-incident-epoch-20261025",
+   "prs": [
+    1120
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "f0b0133de032904b3b2643747679e614f454058d",
+   "date": "2026-10-25T17:40:14+09:00",
+   "parents": [
+    "b456acaae2b14cbf0b78735041a4f47bde65f92f"
+   ],
+   "subject": "fix(btc): bound inactive epoch lookup cost and index evidence kind",
+   "prs": [
+    1121
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "2581811c189f9c84d7d3e2d553335537b92d59cb",
+   "date": "2026-10-25T18:06:25+09:00",
+   "parents": [
+    "b456acaae2b14cbf0b78735041a4f47bde65f92f",
+    "f0b0133de032904b3b2643747679e614f454058d"
+   ],
+   "subject": "Merge pull request #1121 from dragon1086/fix/btc-inactive-epoch-scan-20261025",
+   "prs": [
+    1121
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "efe6db0201fb2a8c8bb3a2a2046cb94bb3af5106",
+   "date": "2026-10-25T18:22:19+09:00",
+   "parents": [
+    "2581811c189f9c84d7d3e2d553335537b92d59cb"
+   ],
+   "subject": "fix(btc): permit verified idle workers during incident cutover",
+   "prs": [
+    1122
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "a2a8ca0d5cdeac034076cc84ab226ac81cbe2b53",
+   "date": "2026-10-25T19:35:37+09:00",
+   "parents": [
+    "2581811c189f9c84d7d3e2d553335537b92d59cb",
+    "efe6db0201fb2a8c8bb3a2a2046cb94bb3af5106"
+   ],
+   "subject": "Merge pull request #1122 from dragon1086/fix/btc-idle-cutover-proof-20261025",
+   "prs": [
+    1122
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "1bf8b8b351f12817a32ddc9a937c095560e4d2f5",
+   "date": "2026-10-25T19:40:03+09:00",
+   "parents": [
+    "a2a8ca0d5cdeac034076cc84ab226ac81cbe2b53"
+   ],
+   "subject": "fix(btc): verify funding separately during incident cutover",
+   "prs": [
+    1123
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "53931d3225fe0b6b9ad123cb999561f1183d7ce7",
+   "date": "2026-10-25T21:03:14+09:00",
+   "parents": [
+    "a2a8ca0d5cdeac034076cc84ab226ac81cbe2b53",
+    "1bf8b8b351f12817a32ddc9a937c095560e4d2f5"
+   ],
+   "subject": "Merge pull request #1123 from dragon1086/fix/btc-epoch-funding-proof-20261025",
+   "prs": [
+    1123
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "352bd9fcfe2575d1f41e7b09819e717bd3e57020",
+   "date": "2026-10-25T21:07:35+09:00",
+   "parents": [
+    "53931d3225fe0b6b9ad123cb999561f1183d7ce7"
+   ],
+   "subject": "docs: retain approved-work and automation verification lessons",
+   "prs": [
+    1124
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "486a4e380b1a756f1dff4622122a93f36b893ba0",
+   "date": "2026-10-25T22:23:03+09:00",
+   "parents": [
+    "53931d3225fe0b6b9ad123cb999561f1183d7ce7",
+    "352bd9fcfe2575d1f41e7b09819e717bd3e57020"
+   ],
+   "subject": "Merge pull request #1124 from dragon1086/docs/prism-workflow-lessons-20261025",
+   "prs": [
+    1124
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "fcf58c6d6b6a09c67a6cd0a86e7de2cb030f2c48",
+   "date": "2026-10-26T00:13:39+09:00",
+   "parents": [
+    "486a4e380b1a756f1dff4622122a93f36b893ba0"
+   ],
+   "subject": "docs: add a knowledge-intake harness and the O'Neil-disciple book cards",
+   "prs": [
+    1127
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "fd2839d1df6dbf1e66ef3dd0144ca9f8306880da",
+   "date": "2026-10-26T00:15:47+09:00",
+   "parents": [
+    "fcf58c6d6b6a09c67a6cd0a86e7de2cb030f2c48"
+   ],
+   "subject": "docs(knowledge): pages 246-247, 50-day sell rule split by volume (K-SELL-06)",
+   "prs": [
+    1127
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "407c96987b2f796f5f810dbe1073598c70c56ea0",
+   "date": "2026-10-26T00:16:59+09:00",
+   "parents": [
+    "486a4e380b1a756f1dff4622122a93f36b893ba0"
+   ],
+   "subject": "fix(btc): match resting replay limits against trade prices",
+   "prs": [
+    1128
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "632b9dea9455c857426231b6d037d505d2886e55",
+   "date": "2026-10-26T00:19:10+09:00",
+   "parents": [
+    "fd2839d1df6dbf1e66ef3dd0144ca9f8306880da"
+   ],
+   "subject": "docs(knowledge): pages 248-249, AAPL 2009 simulation into cards",
+   "prs": [
+    1127
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "0535a4b306db9b3af3c62b94ca78cc8ae660f5ec",
+   "date": "2026-10-26T00:19:39+09:00",
+   "parents": [
+    "632b9dea9455c857426231b6d037d505d2886e55"
+   ],
+   "subject": "docs(knowledge): mark K-GAP-01 and K-SELL-06 as handed off for testing",
+   "prs": [
+    1127
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "e3ccec24f046abcf7d0d4e6f41bebd5e91f4f6e0",
+   "date": "2026-10-26T00:37:28+09:00",
+   "parents": [
+    "486a4e380b1a756f1dff4622122a93f36b893ba0",
+    "0535a4b306db9b3af3c62b94ca78cc8ae660f5ec"
+   ],
+   "subject": "Merge pull request #1127 from dragon1086/docs/knowledge-harness-20261026",
+   "prs": [
+    1127
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "f05c8c86e3b8cc8c368a682fb4b3bba866fb7113",
+   "date": "2026-10-26T00:39:37+09:00",
+   "parents": [
+    "407c96987b2f796f5f810dbe1073598c70c56ea0",
+    "e3ccec24f046abcf7d0d4e6f41bebd5e91f4f6e0"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into fix/btc-replay-resting-limit-spread-20261026",
+   "prs": [
+    1128
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "aff26eaf3aeecf5f020c2bb2ce24d15618420cf2",
+   "date": "2026-10-26T00:39:44+09:00",
+   "parents": [
+    "f05c8c86e3b8cc8c368a682fb4b3bba866fb7113"
+   ],
+   "subject": "docs(btc): record recovery evidence and Korean prompt review",
+   "prs": [
+    1128
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "1135aa4157aeb39099fdb55ef1653f6145ec44ed",
+   "date": "2026-10-26T00:51:31+09:00",
+   "parents": [
+    "e3ccec24f046abcf7d0d4e6f41bebd5e91f4f6e0"
+   ],
+   "subject": "docs: record K-SELL-06 MA50 break volume split study (rejected)",
+   "prs": [],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "165242d6ee636977144f836071d1eb70109ef0e7",
+   "date": "2026-10-26T00:52:22+09:00",
+   "parents": [
+    "1135aa4157aeb39099fdb55ef1653f6145ec44ed"
+   ],
+   "subject": "docs(knowledge): K-SELL-06 rejected, K-SELL-02 partly reflected (sell session result)",
+   "prs": [
+    1129
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "77ee26df5d8e5fe4c62409a1ab5b83dc812868a9",
+   "date": "2026-10-26T00:52:53+09:00",
+   "parents": [
+    "165242d6ee636977144f836071d1eb70109ef0e7"
+   ],
+   "subject": "docs(knowledge): K-GAP-01 and K-SELL-05 rejected (buy session result)",
+   "prs": [
+    1129
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "3eef8f4c9f685a058eed02ef3180c1197287c2b1",
+   "date": "2026-10-26T00:56:53+09:00",
+   "parents": [
+    "1135aa4157aeb39099fdb55ef1653f6145ec44ed",
+    "aff26eaf3aeecf5f020c2bb2ce24d15618420cf2"
+   ],
+   "subject": "Merge pull request #1128 from dragon1086/fix/btc-replay-resting-limit-spread-20261026",
+   "prs": [
+    1128
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "57cdff8996a29252fb67be11515ab98a0aaf1189",
+   "date": "2026-10-26T00:52:05+09:00",
+   "parents": [
+    "3eef8f4c9f685a058eed02ef3180c1197287c2b1"
+   ],
+   "subject": "docs: record K-GAP-01 book gap-rule study (rejected)",
+   "prs": [],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "0c29205d259fb8c62fc272b556e5db3e208a9ef6",
+   "date": "2026-10-26T01:08:07+09:00",
+   "parents": [
+    "57cdff8996a29252fb67be11515ab98a0aaf1189",
+    "77ee26df5d8e5fe4c62409a1ab5b83dc812868a9"
+   ],
+   "subject": "Merge pull request #1129 from dragon1086/docs/knowledge-ksell06-20261026",
+   "prs": [
+    1129
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "232f4a9b14886a308a552c746ff2f8ba4879691d",
+   "date": "2026-10-26T01:30:15+09:00",
+   "parents": [
+    "0c29205d259fb8c62fc272b556e5db3e208a9ef6"
+   ],
+   "subject": "fix: persist BTC children only after pretransport guards",
+   "prs": [
+    1130
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "fc7dfdbb2857e67dd53fe9d05387f9c96d429f54",
+   "date": "2026-10-26T01:32:58+09:00",
+   "parents": [
+    "232f4a9b14886a308a552c746ff2f8ba4879691d"
+   ],
+   "subject": "test: verify aborted BTC pretransport entry reconciles flat",
+   "prs": [
+    1130
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "d6633897259eb0cb6929d0f7dba50ad4af934061",
+   "date": "2026-10-26T01:49:33+09:00",
+   "parents": [
+    "fc7dfdbb2857e67dd53fe9d05387f9c96d429f54"
+   ],
+   "subject": "fix: preserve preexisting BTC protective submission fences",
+   "prs": [
+    1130
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "6075f5ab91acd5d1fb43b21d04b9f942680957ef",
+   "date": "2026-10-26T02:01:57+09:00",
+   "parents": [
+    "d6633897259eb0cb6929d0f7dba50ad4af934061"
+   ],
+   "subject": "fix: retain BTC final guard after durable entry commit",
+   "prs": [
+    1130
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "631a9df9e0d9ac14accc6b26aed7bfd301841b82",
+   "date": "2026-10-26T07:39:33+09:00",
+   "parents": [
+    "0c29205d259fb8c62fc272b556e5db3e208a9ef6",
+    "6075f5ab91acd5d1fb43b21d04b9f942680957ef"
+   ],
+   "subject": "Merge pull request #1130 from dragon1086/fix/btc-pretransport-unknown-20261026",
+   "prs": [
+    1130
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "310e0004a021a6c9981ec154fbdd0909f3419543",
+   "date": "2026-10-26T07:50:09+09:00",
+   "parents": [
+    "631a9df9e0d9ac14accc6b26aed7bfd301841b82"
+   ],
+   "subject": "docs: record BTC initial-plan evidence and recovery boundaries",
+   "prs": [
+    1131
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "9d345d7d6bd6b9fd54d3ad1eef1844a31f22447a",
+   "date": "2026-10-26T10:22:22+09:00",
+   "parents": [
+    "631a9df9e0d9ac14accc6b26aed7bfd301841b82"
+   ],
+   "subject": "fix: recover stalled BTC entry with chained incident isolation",
+   "prs": [
+    1133
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "5e4a0f0aec83ead393a12ff563f8c2c58338ee5d",
+   "date": "2026-10-26T10:42:13+09:00",
+   "parents": [
+    "631a9df9e0d9ac14accc6b26aed7bfd301841b82",
+    "9d345d7d6bd6b9fd54d3ad1eef1844a31f22447a"
+   ],
+   "subject": "Merge pull request #1133 from dragon1086/fix/btc-pending-entry-epoch-20261026",
+   "prs": [
+    1133
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "e1fee9d19b51d373a61a179365a34caf6ed26db9",
+   "date": "2026-10-26T11:04:18+09:00",
+   "parents": [
+    "310e0004a021a6c9981ec154fbdd0909f3419543",
+    "5e4a0f0aec83ead393a12ff563f8c2c58338ee5d"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into docs/btc-initial-plan-followup-20261026",
+   "prs": [
+    1131
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "8b3f436a22d1830056c8c273a0d4862779eb2a47",
+   "date": "2026-10-26T11:04:18+09:00",
+   "parents": [
+    "e1fee9d19b51d373a61a179365a34caf6ed26db9"
+   ],
+   "subject": "docs: record completed BTC entry recovery and timed observation",
+   "prs": [
+    1131
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "1924cbdadac6f6ebe3585dc3eaf2eda29d1e2ed5",
+   "date": "2026-10-26T11:31:56+09:00",
+   "parents": [
+    "5e4a0f0aec83ead393a12ff563f8c2c58338ee5d",
+    "8b3f436a22d1830056c8c273a0d4862779eb2a47"
+   ],
+   "subject": "Merge pull request #1131 from dragon1086/docs/btc-initial-plan-followup-20261026",
+   "prs": [
+    1131
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "e297423b45ce81b1bf202996b535e39846d7088a",
+   "date": "2026-10-26T12:47:31+09:00",
+   "parents": [
+    "1924cbdadac6f6ebe3585dc3eaf2eda29d1e2ed5"
+   ],
+   "subject": "fix: size BTC trend profit taking from structure instead of preset weights",
+   "prs": [
+    1134
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "5d5533857e91e327284322958387c30b26f201d5",
+   "date": "2026-10-26T12:48:35+09:00",
+   "parents": [
+    "e297423b45ce81b1bf202996b535e39846d7088a"
+   ],
+   "subject": "test: pin approved BTC allocation prompt and remove old weight expectation",
+   "prs": [
+    1134
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "a356e9109ccb5b119d77f39ec6db737b21b372f5",
+   "date": "2026-10-26T12:56:54+09:00",
+   "parents": [
+    "5d5533857e91e327284322958387c30b26f201d5"
+   ],
+   "subject": "fix: separate BTC TP weighting from skipping nearer reaction zones",
+   "prs": [
+    1134
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "830602284d70a1d57364002d35914c80804fcf7d",
+   "date": "2026-10-26T13:02:09+09:00",
+   "parents": [
+    "a356e9109ccb5b119d77f39ec6db737b21b372f5"
+   ],
+   "subject": "docs: record controlled BTC TP evidence and reversal tradeoffs",
+   "prs": [
+    1134
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "bdcfa522cf4f0aac68fbc75b9b88fe42a679835a",
+   "date": "2026-10-26T13:02:26+09:00",
+   "parents": [
+    "830602284d70a1d57364002d35914c80804fcf7d"
+   ],
+   "subject": "docs: register BTC TP allocation hypothesis",
+   "prs": [
+    1134
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "3012d0ed4d1ee8096b5c9f8940e5384a772ae8df",
+   "date": "2026-10-26T13:18:15+09:00",
+   "parents": [
+    "1924cbdadac6f6ebe3585dc3eaf2eda29d1e2ed5",
+    "bdcfa522cf4f0aac68fbc75b9b88fe42a679835a"
+   ],
+   "subject": "Merge pull request #1134 from dragon1086/fix/btc-trend-tp-allocation-20261026",
+   "prs": [
+    1134
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "cd95dd3b66d91d021171aace2ec12ffe4b5f1885",
+   "date": "2026-10-26T13:24:12+09:00",
+   "parents": [
+    "3012d0ed4d1ee8096b5c9f8940e5384a772ae8df"
+   ],
+   "subject": "fix: keep historical BTC settlement notices informational",
+   "prs": [
+    1135
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "bbb1f2e3b7c411874fdcb1bd0f5ae484c143a27a",
+   "date": "2026-10-26T13:36:13+09:00",
+   "parents": [
+    "3012d0ed4d1ee8096b5c9f8940e5384a772ae8df"
+   ],
+   "subject": "feat: retain BTC ticker request span and exchange response time",
+   "prs": [
+    1136
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "1b23410d24ab32dc58b12b02b7ee1b7d8ef6822c",
+   "date": "2026-10-26T13:39:21+09:00",
+   "parents": [
+    "3012d0ed4d1ee8096b5c9f8940e5384a772ae8df",
+    "cd95dd3b66d91d021171aace2ec12ffe4b5f1885"
+   ],
+   "subject": "Merge pull request #1135 from dragon1086/fix/btc-historical-notice-severity-20261026",
+   "prs": [
+    1135
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "15f96791e430c19d53098aed8d9b21aea3253dfd",
+   "date": "2026-10-26T13:42:13+09:00",
+   "parents": [
+    "bbb1f2e3b7c411874fdcb1bd0f5ae484c143a27a",
+    "1b23410d24ab32dc58b12b02b7ee1b7d8ef6822c"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into feat/btc-quote-timing-20261026",
+   "prs": [
+    1136
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "68e67232eda48960bc28527b901b3f9d22e294da",
+   "date": "2026-10-26T13:43:07+09:00",
+   "parents": [
+    "15f96791e430c19d53098aed8d9b21aea3253dfd"
+   ],
+   "subject": "docs: record BTC notice deployment and quote timing evidence stage",
+   "prs": [
+    1136
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "146cb16b8204b85c3389a74c1dde17d38d763445",
+   "date": "2026-10-26T13:58:12+09:00",
+   "parents": [
+    "1b23410d24ab32dc58b12b02b7ee1b7d8ef6822c",
+    "68e67232eda48960bc28527b901b3f9d22e294da"
+   ],
+   "subject": "Merge pull request #1136 from dragon1086/feat/btc-quote-timing-20261026",
+   "prs": [
+    1136
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "9bb90b3a1ff1f6c324eb9add3dd6be7d5c345566",
+   "date": "2026-10-26T14:11:49+09:00",
+   "parents": [
+    "146cb16b8204b85c3389a74c1dde17d38d763445"
+   ],
+   "subject": "docs: record BTC quote timing deployment and independent book evidence",
+   "prs": [
+    1137
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "05467eb6b3e2ee70f9d2fa42a1f028504cfcc184",
+   "date": "2026-10-26T14:22:31+09:00",
+   "parents": [
+    "9bb90b3a1ff1f6c324eb9add3dd6be7d5c345566"
+   ],
+   "subject": "docs: verify native historical notice suppression and preserve parser audit",
+   "prs": [
+    1137
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "5192a5c65a34ea52a2311e3b396b4bab104417ff",
+   "date": "2026-10-26T15:07:08+09:00",
+   "parents": [
+    "146cb16b8204b85c3389a74c1dde17d38d763445",
+    "05467eb6b3e2ee70f9d2fa42a1f028504cfcc184"
+   ],
+   "subject": "Merge pull request #1137 from dragon1086/docs/btc-execution-evidence-20261026",
+   "prs": [
+    1137
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "1c3851b06254b3eb876f37ed7e3a70f7c3247111",
+   "date": "2026-10-26T15:11:27+09:00",
+   "parents": [
+    "5192a5c65a34ea52a2311e3b396b4bab104417ff"
+   ],
+   "subject": "fix(chart): skip moving-average lines with no values on short histories",
+   "prs": [
+    1138
+   ],
+   "category": "messages_dashboard",
+   "weight": 1
+  },
+  {
+   "sha": "3017e40ae3d242dc27975e30918404e008d3b0bf",
+   "date": "2026-10-26T15:15:49+09:00",
+   "parents": [
+    "5192a5c65a34ea52a2311e3b396b4bab104417ff"
+   ],
+   "subject": "fix: refresh incident proof before new BTC entry",
+   "prs": [
+    1139
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "6b99cef01ceea4b8b438a201398973f4ca6faf19",
+   "date": "2026-10-26T15:27:16+09:00",
+   "parents": [
+    "5192a5c65a34ea52a2311e3b396b4bab104417ff",
+    "1c3851b06254b3eb876f37ed7e3a70f7c3247111"
+   ],
+   "subject": "Merge pull request #1138 from dragon1086/fix/chart-short-history",
+   "prs": [
+    1138
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "1b85c4ddb968e572ed1284d58fdfbfdc838592b5",
+   "date": "2026-10-26T16:45:57+09:00",
+   "parents": [
+    "3017e40ae3d242dc27975e30918404e008d3b0bf",
+    "6b99cef01ceea4b8b438a201398973f4ca6faf19"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into fix/btc-entry-refresh-20261026",
+   "prs": [
+    1139
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "5214aaafc7d595f5beef1fcf7ce91ebb8dc71852",
+   "date": "2026-10-26T16:57:07+09:00",
+   "parents": [
+    "1b85c4ddb968e572ed1284d58fdfbfdc838592b5"
+   ],
+   "subject": "fix: verify explicit BTC monitor-gap recovery without deleting halts",
+   "prs": [
+    1139
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "3cffb71e19124d97245a850f40be834c0b481896",
+   "date": "2026-10-26T18:51:43+09:00",
+   "parents": [
+    "6b99cef01ceea4b8b438a201398973f4ca6faf19",
+    "5214aaafc7d595f5beef1fcf7ce91ebb8dc71852"
+   ],
+   "subject": "Merge pull request #1139 from dragon1086/fix/btc-entry-refresh-20261026",
+   "prs": [
+    1139
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "d4d5a090114e6eee3ce5e806e8199e4fbf809b1f",
+   "date": "2026-10-26T18:57:28+09:00",
+   "parents": [
+    "3cffb71e19124d97245a850f40be834c0b481896"
+   ],
+   "subject": "docs: record BTC recovery deployment and execution counterexample",
+   "prs": [
+    1140
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "47bb96681cdfc5ca23b7db690d979d2d7bff8838",
+   "date": "2026-10-26T19:13:21+09:00",
+   "parents": [
+    "d4d5a090114e6eee3ce5e806e8199e4fbf809b1f"
+   ],
+   "subject": "docs: distinguish resumed BTC judgment from deadline failures",
+   "prs": [
+    1140
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "b786b6eaec430be5865ed1c2774d50d014503469",
+   "date": "2026-10-26T19:32:56+09:00",
+   "parents": [
+    "3cffb71e19124d97245a850f40be834c0b481896",
+    "47bb96681cdfc5ca23b7db690d979d2d7bff8838"
+   ],
+   "subject": "Merge pull request #1140 from dragon1086/docs/btc-recovery-outcome-20261026",
+   "prs": [
+    1140
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "fcd4e0de3e83417dd39b2045c0b48c6248de67b3",
+   "date": "2026-10-26T19:33:25+09:00",
+   "parents": [
+    "b786b6eaec430be5865ed1c2774d50d014503469"
+   ],
+   "subject": "fix: preserve BTC review input order in persisted tapes",
+   "prs": [
+    1141
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "c65f0b3eb6fe5cd03712a6dd6dff61781c821249",
+   "date": "2026-10-26T19:50:15+09:00",
+   "parents": [
+    "b786b6eaec430be5865ed1c2774d50d014503469",
+    "fcd4e0de3e83417dd39b2045c0b48c6248de67b3"
+   ],
+   "subject": "Merge pull request #1141 from dragon1086/fix/btc-review-tape-order-20261026",
+   "prs": [
+    1141
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "6516a79bdc95c17a4aded69a968206f28293470e",
+   "date": "2026-10-26T20:06:59+09:00",
+   "parents": [
+    "c65f0b3eb6fe5cd03712a6dd6dff61781c821249"
+   ],
+   "subject": "docs: verify native persisted BTC review replay",
+   "prs": [
+    1142
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "11bf2bfac9d48e55ae3ee01d1bc63620cc87b06c",
+   "date": "2026-10-26T20:31:34+09:00",
+   "parents": [
+    "c65f0b3eb6fe5cd03712a6dd6dff61781c821249",
+    "6516a79bdc95c17a4aded69a968206f28293470e"
+   ],
+   "subject": "Merge pull request #1142 from dragon1086/docs/btc-persisted-replay-proof-20261026",
+   "prs": [
+    1142
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "8812d7661eb1ad6856fa0fc56250599e08181879",
+   "date": "2026-10-26T21:01:57+09:00",
+   "parents": [
+    "11bf2bfac9d48e55ae3ee01d1bc63620cc87b06c"
+   ],
+   "subject": "docs: preserve held-apart BTC execution proxy counterexamples",
+   "prs": [
+    1143
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "77928eabc46e37a33c11070d5280ef33210c7daa",
+   "date": "2026-10-26T21:46:35+09:00",
+   "parents": [
+    "11bf2bfac9d48e55ae3ee01d1bc63620cc87b06c",
+    "8812d7661eb1ad6856fa0fc56250599e08181879"
+   ],
+   "subject": "Merge pull request #1143 from dragon1086/docs/btc-execution-proxy-audit-20261026",
+   "prs": [
+    1143
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "9db80d9ac95af43dfda17713b1b9a65f97f0fab8",
+   "date": "2026-10-26T22:29:55+09:00",
+   "parents": [
+    "77928eabc46e37a33c11070d5280ef33210c7daa"
+   ],
+   "subject": "docs: establish BTC historical ledger baseline with policy caveats",
+   "prs": [
+    1145
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "34ef42a49e062750ab5b88e7b9263db4f6334796",
+   "date": "2026-10-26T22:46:58+09:00",
+   "parents": [
+    "77928eabc46e37a33c11070d5280ef33210c7daa"
+   ],
+   "subject": "fix: add explicit goal-aware BTC lifecycle replay profile",
+   "prs": [
+    1146
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "ff93d8d59d9b9f59f26953e530d7156c28b692e0",
+   "date": "2026-10-26T22:50:22+09:00",
+   "parents": [
+    "77928eabc46e37a33c11070d5280ef33210c7daa",
+    "9db80d9ac95af43dfda17713b1b9a65f97f0fab8"
+   ],
+   "subject": "Merge pull request #1145 from dragon1086/docs/btc-historical-baseline-20261026",
+   "prs": [
+    1145
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "2cb2b49c3cf07894936b63ea1cd2eec498395468",
+   "date": "2026-10-26T23:11:11+09:00",
+   "parents": [
+    "34ef42a49e062750ab5b88e7b9263db4f6334796",
+    "ff93d8d59d9b9f59f26953e530d7156c28b692e0"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into HEAD",
+   "prs": [
+    1146
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "0864b26cbab4b8374da64db0082946dbce28d18b",
+   "date": "2026-10-26T23:31:51+09:00",
+   "parents": [
+    "ff93d8d59d9b9f59f26953e530d7156c28b692e0",
+    "2cb2b49c3cf07894936b63ea1cd2eec498395468"
+   ],
+   "subject": "Merge pull request #1146 from dragon1086/fix/btc-goal-aware-replay-20261026",
+   "prs": [
+    1146
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "2b4742a42d6c5fec33b856d92e7cb704a87a676c",
+   "date": "2026-10-26T23:32:07+09:00",
+   "parents": [
+    "0864b26cbab4b8374da64db0082946dbce28d18b"
+   ],
+   "subject": "docs(knowledge): pages 250-251, AAPL 2009 exit and CERN 2009 into cards",
+   "prs": [
+    1147
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "48fb2e0e68b41cad9030959a1dc7facfa31d88fc",
+   "date": "2026-10-26T23:37:29+09:00",
+   "parents": [
+    "2b4742a42d6c5fec33b856d92e7cb704a87a676c"
+   ],
+   "subject": "docs(knowledge): pages 252-253, CERN 2009 exits and GMCR 2009 into cards",
+   "prs": [
+    1147
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "e4e3808025b8f3d45e518eaa9ef66d9a0fb80462",
+   "date": "2026-10-26T23:40:40+09:00",
+   "parents": [
+    "48fb2e0e68b41cad9030959a1dc7facfa31d88fc"
+   ],
+   "subject": "docs(knowledge): pages 254-255, GMCR 2009 into cards (K-PP-14, K-ENTRY-01)",
+   "prs": [
+    1147
+   ],
+   "category": "harness_research",
+   "weight": 1
+  },
+  {
+   "sha": "7e20338479cfffd6525865f5bdf3570dd70fa109",
+   "date": "2026-10-26T23:41:52+09:00",
+   "parents": [
+    "0864b26cbab4b8374da64db0082946dbce28d18b"
+   ],
+   "subject": "fix(reentry): a missed-run virtual position no longer blocks the next real buy",
+   "prs": [
+    1148
+   ],
+   "category": "reentry",
+   "weight": 1
+  },
+  {
+   "sha": "a670c51b6a89753378d3e0dc04463a9ba01bd12c",
+   "date": "2026-10-26T23:48:43+09:00",
+   "parents": [
+    "0864b26cbab4b8374da64db0082946dbce28d18b"
+   ],
+   "subject": "fix: distinguish verified protection tightening from unknown submissions",
+   "prs": [
+    1149
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "ded43e4c86d6fdcf38f0b337083f1383394342be",
+   "date": "2026-10-26T23:57:34+09:00",
+   "parents": [
+    "0864b26cbab4b8374da64db0082946dbce28d18b",
+    "e4e3808025b8f3d45e518eaa9ef66d9a0fb80462"
+   ],
+   "subject": "Merge pull request #1147 from dragon1086/docs/knowledge-p250-20261027",
+   "prs": [
+    1147
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "61b3a3faba2ddb677de57d97c763e75e8060cb1e",
+   "date": "2026-10-27T00:01:57+09:00",
+   "parents": [
+    "7e20338479cfffd6525865f5bdf3570dd70fa109",
+    "ded43e4c86d6fdcf38f0b337083f1383394342be"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into fix/reentry-missed-run-backfill-20261026",
+   "prs": [
+    1148
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "858687a122c3767bf66b754410aa7099ddd2bc1e",
+   "date": "2026-10-27T00:07:41+09:00",
+   "parents": [
+    "0864b26cbab4b8374da64db0082946dbce28d18b"
+   ],
+   "subject": "fix: stabilize process identity in isolated BTC replay audits",
+   "prs": [
+    1150
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "257802ec6d5d64b7316798fbea8b1fae7fc62a5a",
+   "date": "2026-10-27T00:07:56+09:00",
+   "parents": [
+    "ded43e4c86d6fdcf38f0b337083f1383394342be",
+    "a670c51b6a89753378d3e0dc04463a9ba01bd12c"
+   ],
+   "subject": "Merge pull request #1149 from dragon1086/fix/btc-confirmed-protection-pending-20261026",
+   "prs": [
+    1149
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "d07cacc3df69a6fe04ccab6c04b75d73a06dd8cb",
+   "date": "2026-10-27T00:09:56+09:00",
+   "parents": [
+    "858687a122c3767bf66b754410aa7099ddd2bc1e",
+    "257802ec6d5d64b7316798fbea8b1fae7fc62a5a"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into fix/btc-replay-process-identity-20261026",
+   "prs": [
+    1150
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "71cc8f9ca5d64b7055677bcd6aa8a8fae274de43",
+   "date": "2026-10-27T00:18:36+09:00",
+   "parents": [
+    "61b3a3faba2ddb677de57d97c763e75e8060cb1e",
+    "257802ec6d5d64b7316798fbea8b1fae7fc62a5a"
+   ],
+   "subject": "Merge remote-tracking branch 'origin/main' into fix/reentry-missed-run-backfill-20261026",
+   "prs": [
+    1148
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "0c15f6cc8726865f40c7fd36249ac412cf0191a8",
+   "date": "2026-10-27T00:35:24+09:00",
+   "parents": [
+    "257802ec6d5d64b7316798fbea8b1fae7fc62a5a",
+    "71cc8f9ca5d64b7055677bcd6aa8a8fae274de43"
+   ],
+   "subject": "Merge pull request #1148 from dragon1086/fix/reentry-missed-run-backfill-20261026",
+   "prs": [
+    1148
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "4e0abe1fb3dc997218c2d291e88da1468921f692",
+   "date": "2026-10-27T00:42:36+09:00",
+   "parents": [
+    "0c15f6cc8726865f40c7fd36249ac412cf0191a8",
+    "d07cacc3df69a6fe04ccab6c04b75d73a06dd8cb"
+   ],
+   "subject": "Merge pull request #1150 from dragon1086/fix/btc-replay-process-identity-20261026",
+   "prs": [
+    1150
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "603317d8e15672cafa046fb1ae5d232cb2d7a2e7",
+   "date": "2026-10-27T01:40:49+09:00",
+   "parents": [
+    "4e0abe1fb3dc997218c2d291e88da1468921f692"
+   ],
+   "subject": "fix: cache source parsing without caching BTC parity verdicts",
+   "prs": [
+    1151
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "cf6fe78a7c9450c8620551d63035f453276600ea",
+   "date": "2026-10-27T02:03:02+09:00",
+   "parents": [
+    "4e0abe1fb3dc997218c2d291e88da1468921f692",
+    "603317d8e15672cafa046fb1ae5d232cb2d7a2e7"
+   ],
+   "subject": "Merge pull request #1151 from dragon1086/fix/btc-parity-source-cache-20261027",
+   "prs": [
+    1151
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "7733389947a3b651553b466cbb1dd03bce41fa86",
+   "date": "2026-10-27T02:44:48+09:00",
+   "parents": [
+    "cf6fe78a7c9450c8620551d63035f453276600ea"
+   ],
+   "subject": "docs: retain BTC research execution lessons and verified rollout state",
+   "prs": [
+    1152
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "7a2eb8c8f8c6ca12ae4d0c1977437b7e00997322",
+   "date": "2026-10-27T03:29:10+09:00",
+   "parents": [
+    "cf6fe78a7c9450c8620551d63035f453276600ea",
+    "7733389947a3b651553b466cbb1dd03bce41fa86"
+   ],
+   "subject": "Merge pull request #1152 from dragon1086/docs/btc-research-workflow-20261027",
+   "prs": [
+    1152
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "f016fe8f2f869ef0afa50cb306d2f4386ba2f0bb",
+   "date": "2026-10-27T04:30:45+09:00",
+   "parents": [
+    "7a2eb8c8f8c6ca12ae4d0c1977437b7e00997322"
+   ],
+   "subject": "fix: reuse verified flat account observation for BTC wait",
+   "prs": [
+    1153
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "6076e24098b3e3f50a73d434e57a70bb2171a18f",
+   "date": "2026-10-27T04:40:34+09:00",
+   "parents": [
+    "7a2eb8c8f8c6ca12ae4d0c1977437b7e00997322"
+   ],
+   "subject": "docs: prevent reopening active BTC research call guards",
+   "prs": [
+    1154
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "c6e28ac29d8dee6bbbd89b0e3fb373bf63f00f5b",
+   "date": "2026-10-27T04:41:22+09:00",
+   "parents": [
+    "7a2eb8c8f8c6ca12ae4d0c1977437b7e00997322",
+    "f016fe8f2f869ef0afa50cb306d2f4386ba2f0bb"
+   ],
+   "subject": "Merge pull request #1153 from dragon1086/fix/btc-flat-wait-observation-20261027",
+   "prs": [
+    1153
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "28557fee46f3520d3265e1a95c9398676c6564ab",
+   "date": "2026-10-27T04:53:54+09:00",
+   "parents": [
+    "c6e28ac29d8dee6bbbd89b0e3fb373bf63f00f5b",
+    "6076e24098b3e3f50a73d434e57a70bb2171a18f"
+   ],
+   "subject": "Merge pull request #1154 from dragon1086/docs/btc-active-ledger-observation-20261027",
+   "prs": [
+    1154
+   ],
+   "category": "merge",
+   "weight": 1
+  },
+  {
+   "sha": "eab2c2ef4d9cc774f033dc91a737bc45515b13ca",
+   "date": "2026-10-27T04:59:15+09:00",
+   "parents": [
+    "28557fee46f3520d3265e1a95c9398676c6564ab"
+   ],
+   "subject": "docs: record BTC deployment and bounded research evidence",
+   "prs": [
+    1155
+   ],
+   "category": "btc",
+   "weight": 1
+  },
+  {
+   "sha": "10ba645445ff4ad825a12589c947e9dc39eee726",
+   "date": "2026-10-27T06:31:13+09:00",
+   "parents": [
+    "28557fee46f3520d3265e1a95c9398676c6564ab",
+    "eab2c2ef4d9cc774f033dc91a737bc45515b13ca"
+   ],
+   "subject": "Merge pull request #1155 from dragon1086/docs/btc-evidence-status-20261027",
+   "prs": [
+    1155
+   ],
+   "category": "merge",
+   "weight": 1
   }
  ],
  "prs": [
@@ -11046,6 +13066,552 @@
    "number": 1105,
    "state": "MERGED",
    "title": "fix(btc): exclude 15m signals from model decisions"
+  },
+  {
+   "additions": 118,
+   "baseRefName": "main",
+   "changedFiles": 6,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "b176afdfc987a63dc5dcc624c1b05bbd0728f281"
+   },
+   "mergedAt": "2026-10-23T16:31:16Z",
+   "number": 1107,
+   "state": "MERGED",
+   "title": "fix(btc): exclude host-only action history from model inputs"
+  },
+  {
+   "additions": 16,
+   "baseRefName": "main",
+   "changedFiles": 2,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "e826638a543c731f5a3f20d0e3f8f75e2c0cdba7"
+   },
+   "mergedAt": "2026-10-23T21:51:23Z",
+   "number": 1108,
+   "state": "MERGED",
+   "title": "fix(watchdog): market of untagged broker lines from the logger name"
+  },
+  {
+   "additions": 420,
+   "baseRefName": "main",
+   "changedFiles": 8,
+   "deletions": 10,
+   "mergeCommit": {
+    "oid": "8d24bdb645ba44d9ccf374136bd13b2ff132948a"
+   },
+   "mergedAt": "2026-10-24T10:02:31Z",
+   "number": 1109,
+   "state": "MERGED",
+   "title": "feat(btc): compare entry progress and preserve last closed thesis context"
+  },
+  {
+   "additions": 235,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 7,
+   "mergeCommit": {
+    "oid": "0e7ab6d7002833571ca677fe86291a0c89c2e739"
+   },
+   "mergedAt": "2026-10-24T13:30:20Z",
+   "number": 1112,
+   "state": "MERGED",
+   "title": "fix(btc): reserve policy-price risk before initial sizing"
+  },
+  {
+   "additions": 3122,
+   "baseRefName": "main",
+   "changedFiles": 39,
+   "deletions": 57,
+   "mergeCommit": {
+    "oid": "98065d3353981c13ba9022964ab85535bcd4da9a"
+   },
+   "mergedAt": "2026-10-24T15:08:26Z",
+   "number": 1110,
+   "state": "MERGED",
+   "title": "feat(btc): add explicit immediate partial reduction with durable reconciliation"
+  },
+  {
+   "additions": 409,
+   "baseRefName": "main",
+   "changedFiles": 10,
+   "deletions": 17,
+   "mergeCommit": {
+    "oid": "af1bca706b84d4bd2fa664104e83318527b5eab3"
+   },
+   "mergedAt": "2026-10-24T17:06:51Z",
+   "number": 1113,
+   "state": "MERGED",
+   "title": "fix(btc): supply verified flat-review fee evidence and whole-plan payoff"
+  },
+  {
+   "additions": 780,
+   "baseRefName": "main",
+   "changedFiles": 10,
+   "deletions": 11,
+   "mergeCommit": {
+    "oid": "dfb023d00c3ebca22e22fb35a8625c1d0c895b2a"
+   },
+   "mergedAt": "2026-10-24T23:40:17Z",
+   "number": 1114,
+   "state": "MERGED",
+   "title": "fix(btc): preserve definitive restore rejection and expose execution stalls"
+  },
+  {
+   "additions": 1433,
+   "baseRefName": "main",
+   "changedFiles": 17,
+   "deletions": 16,
+   "mergeCommit": {
+    "oid": "3ace965ecf1de5123356dcc12684ed2e9bd26fc8"
+   },
+   "mergedAt": "2026-10-25T03:02:10Z",
+   "number": 1116,
+   "state": "MERGED",
+   "title": "BTC M0: bounded management recovery preserving unresolved orders"
+  },
+  {
+   "additions": 238,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "2f395f4d5088aa372a30a0a8e422aad041024b04"
+   },
+   "mergedAt": "2026-10-25T03:42:50Z",
+   "number": 1117,
+   "state": "MERGED",
+   "title": "BTC M0: remove duplicate terminal reads from management reviews"
+  },
+  {
+   "additions": 102,
+   "baseRefName": "main",
+   "changedFiles": 7,
+   "deletions": 11,
+   "mergeCommit": {
+    "oid": "8be96d5cf3b7361d984fad5fbee46e5e9da0540c"
+   },
+   "mergedAt": "2026-10-25T05:43:09Z",
+   "number": 1118,
+   "state": "MERGED",
+   "title": "fix(btc): preserve raw proposal and renewal intent audit bindings"
+  },
+  {
+   "additions": 1504,
+   "baseRefName": "main",
+   "changedFiles": 18,
+   "deletions": 36,
+   "mergeCommit": {
+    "oid": "b456acaae2b14cbf0b78735041a4f47bde65f92f"
+   },
+   "mergedAt": "2026-10-25T07:55:30Z",
+   "number": 1120,
+   "state": "MERGED",
+   "title": "feat(btc): gated incident epoch recovery (inactive)"
+  },
+  {
+   "additions": 129,
+   "baseRefName": "main",
+   "changedFiles": 4,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "2581811c189f9c84d7d3e2d553335537b92d59cb"
+   },
+   "mergedAt": "2026-10-25T09:06:25Z",
+   "number": 1121,
+   "state": "MERGED",
+   "title": "fix(btc): eliminate inactive per-child evidence scans"
+  },
+  {
+   "additions": 29,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "a2a8ca0d5cdeac034076cc84ab226ac81cbe2b53"
+   },
+   "mergedAt": "2026-10-25T10:35:38Z",
+   "number": 1122,
+   "state": "MERGED",
+   "title": "fix(btc): accept verified idle deployment during incident recovery"
+  },
+  {
+   "additions": 82,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "53931d3225fe0b6b9ad123cb999561f1183d7ce7"
+   },
+   "mergedAt": "2026-10-25T12:03:15Z",
+   "number": 1123,
+   "state": "MERGED",
+   "title": "fix(btc): verify funding separately during incident cutover"
+  },
+  {
+   "additions": 18,
+   "baseRefName": "main",
+   "changedFiles": 2,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "486a4e380b1a756f1dff4622122a93f36b893ba0"
+   },
+   "mergedAt": "2026-10-25T13:23:04Z",
+   "number": 1124,
+   "state": "MERGED",
+   "title": "docs: preserve user corrections in shared PRISM harness"
+  },
+  {
+   "additions": 449,
+   "baseRefName": "main",
+   "changedFiles": 13,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "e3ccec24f046abcf7d0d4e6f41bebd5e91f4f6e0"
+   },
+   "mergedAt": "2026-10-25T15:37:28Z",
+   "number": 1127,
+   "state": "MERGED",
+   "title": "docs: knowledge-intake harness and O'Neil-disciple book cards"
+  },
+  {
+   "additions": 134,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "3eef8f4c9f685a058eed02ef3180c1197287c2b1"
+   },
+   "mergedAt": "2026-10-25T15:56:53Z",
+   "number": 1128,
+   "state": "MERGED",
+   "title": "fix(btc): separate resting-limit and taker spread matching in replay"
+  },
+  {
+   "additions": 30,
+   "baseRefName": "main",
+   "changedFiles": 2,
+   "deletions": 20,
+   "mergeCommit": {
+    "oid": "0c29205d259fb8c62fc272b556e5db3e208a9ef6"
+   },
+   "mergedAt": "2026-10-25T16:08:08Z",
+   "number": 1129,
+   "state": "MERGED",
+   "title": "docs(knowledge): K-SELL-06, K-GAP-01, K-SELL-05 results (rejected)"
+  },
+  {
+   "additions": 216,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 8,
+   "mergeCommit": {
+    "oid": "631a9df9e0d9ac14accc6b26aed7bfd301841b82"
+   },
+   "mergedAt": "2026-10-25T22:39:33Z",
+   "number": 1130,
+   "state": "MERGED",
+   "title": "fix: prevent BTC pretransport guards leaving unknown orders"
+  },
+  {
+   "additions": 377,
+   "baseRefName": "main",
+   "changedFiles": 6,
+   "deletions": 110,
+   "mergeCommit": {
+    "oid": "5e4a0f0aec83ead393a12ff563f8c2c58338ee5d"
+   },
+   "mergedAt": "2026-10-26T01:42:13Z",
+   "number": 1133,
+   "state": "MERGED",
+   "title": "fix: recover current BTC UNKNOWN entry without rewriting history"
+  },
+  {
+   "additions": 151,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "1924cbdadac6f6ebe3585dc3eaf2eda29d1e2ed5"
+   },
+   "mergedAt": "2026-10-26T02:31:56Z",
+   "number": 1131,
+   "state": "MERGED",
+   "title": "docs: record BTC initial-plan comparison and pending recovery"
+  },
+  {
+   "additions": 68,
+   "baseRefName": "main",
+   "changedFiles": 8,
+   "deletions": 5,
+   "mergeCommit": {
+    "oid": "3012d0ed4d1ee8096b5c9f8940e5384a772ae8df"
+   },
+   "mergedAt": "2026-10-26T04:18:15Z",
+   "number": 1134,
+   "state": "MERGED",
+   "title": "fix: tune BTC trend TP allocation without preset early-exit weights"
+  },
+  {
+   "additions": 70,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 8,
+   "mergeCommit": {
+    "oid": "1b23410d24ab32dc58b12b02b7ee1b7d8ef6822c"
+   },
+   "mergedAt": "2026-10-26T04:39:21Z",
+   "number": 1135,
+   "state": "MERGED",
+   "title": "fix: stop repeated warnings for preserved BTC historical settlements"
+  },
+  {
+   "additions": 92,
+   "baseRefName": "main",
+   "changedFiles": 6,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "146cb16b8204b85c3389a74c1dde17d38d763445"
+   },
+   "mergedAt": "2026-10-26T04:58:12Z",
+   "number": 1136,
+   "state": "MERGED",
+   "title": "feat: retain BTC quote timing evidence without extra requests"
+  },
+  {
+   "additions": 43,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "5192a5c65a34ea52a2311e3b396b4bab104417ff"
+   },
+   "mergedAt": "2026-10-26T06:07:09Z",
+   "number": 1137,
+   "state": "MERGED",
+   "title": "docs: record BTC timing deployment and bounded orderbook diagnostic"
+  },
+  {
+   "additions": 21,
+   "baseRefName": "main",
+   "changedFiles": 2,
+   "deletions": 6,
+   "mergeCommit": {
+    "oid": "6b99cef01ceea4b8b438a201398973f4ca6faf19"
+   },
+   "mergedAt": "2026-10-26T06:27:16Z",
+   "number": 1138,
+   "state": "MERGED",
+   "title": "fix(chart): skip moving-average lines with no values on short histories"
+  },
+  {
+   "additions": 222,
+   "baseRefName": "main",
+   "changedFiles": 8,
+   "deletions": 7,
+   "mergeCommit": {
+    "oid": "3cffb71e19124d97245a850f40be834c0b481896"
+   },
+   "mergedAt": "2026-10-26T09:51:43Z",
+   "number": 1139,
+   "state": "MERGED",
+   "title": "fix: refresh BTC entry proof and verify explicit monitor-gap recovery"
+  },
+  {
+   "additions": 24,
+   "baseRefName": "main",
+   "changedFiles": 4,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "b786b6eaec430be5865ed1c2774d50d014503469"
+   },
+   "mergedAt": "2026-10-26T10:32:57Z",
+   "number": 1140,
+   "state": "MERGED",
+   "title": "docs: record BTC recovery deployment and execution counterexample"
+  },
+  {
+   "additions": 55,
+   "baseRefName": "main",
+   "changedFiles": 4,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "c65f0b3eb6fe5cd03712a6dd6dff61781c821249"
+   },
+   "mergedAt": "2026-10-26T10:50:16Z",
+   "number": 1141,
+   "state": "MERGED",
+   "title": "fix: preserve BTC review input order in persisted tapes"
+  },
+  {
+   "additions": 10,
+   "baseRefName": "main",
+   "changedFiles": 2,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "11bf2bfac9d48e55ae3ee01d1bc63620cc87b06c"
+   },
+   "mergedAt": "2026-10-26T11:31:34Z",
+   "number": 1142,
+   "state": "MERGED",
+   "title": "docs: verify native persisted BTC review replay"
+  },
+  {
+   "additions": 17,
+   "baseRefName": "main",
+   "changedFiles": 1,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "77928eabc46e37a33c11070d5280ef33210c7daa"
+   },
+   "mergedAt": "2026-10-26T12:46:36Z",
+   "number": 1143,
+   "state": "MERGED",
+   "title": "docs: preserve BTC execution proxy counterexamples"
+  },
+  {
+   "additions": 52,
+   "baseRefName": "main",
+   "changedFiles": 1,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "ff93d8d59d9b9f59f26953e530d7156c28b692e0"
+   },
+   "mergedAt": "2026-10-26T13:50:22Z",
+   "number": 1145,
+   "state": "MERGED",
+   "title": "docs: record BTC historical trade baseline and evidence limits"
+  },
+  {
+   "additions": 138,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "0864b26cbab4b8374da64db0082946dbce28d18b"
+   },
+   "mergedAt": "2026-10-26T14:31:51Z",
+   "number": 1146,
+   "state": "MERGED",
+   "title": "fix: replay BTC holding decisions with explicit goal contracts"
+  },
+  {
+   "additions": 96,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 8,
+   "mergeCommit": {
+    "oid": "ded43e4c86d6fdcf38f0b337083f1383394342be"
+   },
+   "mergedAt": "2026-10-26T14:57:35Z",
+   "number": 1147,
+   "state": "MERGED",
+   "title": "docs(knowledge): book pages 250-255 (AAPL·CERN·GMCR 2009)"
+  },
+  {
+   "additions": 176,
+   "baseRefName": "main",
+   "changedFiles": 5,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "257802ec6d5d64b7316798fbea8b1fae7fc62a5a"
+   },
+   "mergedAt": "2026-10-26T15:07:56Z",
+   "number": 1149,
+   "state": "MERGED",
+   "title": "fix: keep verified SL tightening pending until confirmation"
+  },
+  {
+   "additions": 41,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "0c15f6cc8726865f40c7fd36249ac412cf0191a8"
+   },
+   "mergedAt": "2026-10-26T15:35:25Z",
+   "number": 1148,
+   "state": "MERGED",
+   "title": "fix(reentry): missed-run virtual position no longer blocks the next real buy"
+  },
+  {
+   "additions": 130,
+   "baseRefName": "main",
+   "changedFiles": 6,
+   "deletions": 7,
+   "mergeCommit": {
+    "oid": "4e0abe1fb3dc997218c2d291e88da1468921f692"
+   },
+   "mergedAt": "2026-10-26T15:42:37Z",
+   "number": 1150,
+   "state": "MERGED",
+   "title": "fix: make isolated BTC replay audits reproducible across processes"
+  },
+  {
+   "additions": 75,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "cf6fe78a7c9450c8620551d63035f453276600ea"
+   },
+   "mergedAt": "2026-10-26T17:03:03Z",
+   "number": 1151,
+   "state": "MERGED",
+   "title": "fix: reuse BTC source parsing while rechecking live policy state"
+  },
+  {
+   "additions": 40,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 2,
+   "mergeCommit": {
+    "oid": "7a2eb8c8f8c6ca12ae4d0c1977437b7e00997322"
+   },
+   "mergedAt": "2026-10-26T18:29:10Z",
+   "number": 1152,
+   "state": "MERGED",
+   "title": "docs: make BTC research workflow reusable and preserve verified outcomes"
+  },
+  {
+   "additions": 207,
+   "baseRefName": "main",
+   "changedFiles": 3,
+   "deletions": 6,
+   "mergeCommit": {
+    "oid": "c6e28ac29d8dee6bbbd89b0e3fb373bf63f00f5b"
+   },
+   "mergedAt": "2026-10-26T19:41:22Z",
+   "number": 1153,
+   "state": "MERGED",
+   "title": "fix: avoid duplicate account capture for verified flat BTC WAIT"
+  },
+  {
+   "additions": 1,
+   "baseRefName": "main",
+   "changedFiles": 1,
+   "deletions": 0,
+   "mergeCommit": {
+    "oid": "28557fee46f3520d3265e1a95c9398676c6564ab"
+   },
+   "mergedAt": "2026-10-26T19:53:54Z",
+   "number": 1154,
+   "state": "MERGED",
+   "title": "docs: inspect active BTC call ledgers without reopening guards"
+  },
+  {
+   "additions": 54,
+   "baseRefName": "main",
+   "changedFiles": 4,
+   "deletions": 1,
+   "mergeCommit": {
+    "oid": "10ba645445ff4ad825a12589c947e9dc39eee726"
+   },
+   "mergedAt": "2026-10-26T21:31:14Z",
+   "number": 1155,
+   "state": "MERGED",
+   "title": "docs: record BTC deployment, rejected experiment and open-trade evidence"
   }
  ]
 }
