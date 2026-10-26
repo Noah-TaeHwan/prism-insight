@@ -37,6 +37,8 @@ def test_draft_and_selection_share_flexible_tp_and_cost_semantics(side, holding)
         assert "Compare TP allocations at the same entry and structural SL" in text
         assert "Bounded MA10-to-MA35 traversals retain their original cap" in text
         assert "not a preset near-heavy allocation" in text
+        assert "Changing TP fractions does not itself justify moving the first target farther" in text
+        assert "explicitly assess any closer supplied reaction zone" in text
         assert "Prefer a structurally justified profit-protecting SL at or beyond" not in text
 
 

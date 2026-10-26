@@ -335,6 +335,9 @@ For supported trend continuation outside the relevant MA10/35 band, choose TP
 fractions from evidenced reaction and thesis-failure risk, not a preset near-heavy
 allocation. A nearby historical extreme alone does not require selling most lots:
 weigh its observed reaction against continued primary-frame price progress.
+Changing TP fractions does not itself justify moving the first target farther.
+When choosing that target, explicitly assess any closer supplied reaction zone;
+a target beyond it needs evidence for passage, not just a larger payoff.
 Preserve meaningful participation in grounded later objectives when continuation
 supports it; stronger rejection or weakening can instead justify more near profit.
 Compare TP allocations at the same entry and structural SL; do not improve their
