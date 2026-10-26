@@ -406,6 +406,10 @@ class ScenarioRuntime:
                 state["active"] = None
                 state["version"] += 1
         self._save(state)
+        if (state["active"] is None and result.get("protection_confirmed") is True
+                and result.get("protection_status") == "verified_flat_no_exposure"
+                and isinstance(result.get("observation"), dict)):
+            return result["observation"].get("account_version")
 
     def _context(self, state, *, observed_at=None):
         ctx = dict(self.broker.context())
@@ -851,7 +855,7 @@ class ScenarioRuntime:
             stage = "post_model_reconcile"
             with _post_model_mutation_lock(self.conn):
                 state = self.state()
-                self._reconcile(state)
+                verified_flat_version = self._reconcile(state)
                 fresh = self._context(state)
                 contract_exit = self._entry_contract_exit(state, fresh, slot)
                 if contract_exit is not None:
@@ -914,11 +918,28 @@ class ScenarioRuntime:
                     if review_policy_binding(research_mode=self.research_review_mode) != review_bindings:
                         raise ValueError("review_policy_changed")
                     commit_at = self.clock()
-                    self._reconcile(state, observed_at=commit_at)
-                    commit_context = self._context(state, observed_at=commit_at)
-                    contract_exit = self._entry_contract_exit(state, commit_context, slot)
-                    if contract_exit is not None:
-                        return contract_exit
+                    reuse_flat = (
+                        validated["action"] == "WAIT" and not probe and state["active"] is None
+                        and not validated.get("cancel_entry_ids") and not validated.get("pending_renewal")
+                        and verified_flat_version == fresh["account_version"]
+                        and fresh.get("unknown_intents") is False
+                        and fresh.get("new_risk_blocked") is False
+                        and not fresh.get("management_quarantine")
+                        and fresh.get("positions") == [] and fresh.get("pending_entries") == []
+                        and fresh.get("target_status") in ([], {})
+                        and fresh.get("accounting_status") == "confirmed"
+                        and 0 <= commit_at - fresh["account_captured_at"] <= 10)
+                    if reuse_flat:
+                        # A flat WAIT creates no authority; retain the real capture time.
+                        if self.state() != state:
+                            return {"status": "stale_proposal"}
+                        commit_context = dict(fresh)
+                    else:
+                        self._reconcile(state, observed_at=commit_at)
+                        commit_context = self._context(state, observed_at=commit_at)
+                        contract_exit = self._entry_contract_exit(state, commit_context, slot)
+                        if contract_exit is not None:
+                            return contract_exit
                     # Broker REST capture occurs after observation started.
                     # Never stamp validation before the captured account itself.
                     commit_at = self.clock()
@@ -937,9 +958,13 @@ class ScenarioRuntime:
                     # observation is validated under the mutation lock; this is
                     # NOT a promise that exchange facts cannot change afterward.
                     # Executor capture/preflight remains mandatory before orders.
+                    if reuse_flat and self.state() != state:
+                        return {"status": "stale_proposal"}
                     post_validation_at = self.clock()
                     self._assert_calculated_review_time(review_envelope,ctx,commit_context,payload,
                                                         observed_at=post_validation_at)
+                    if reuse_flat and post_validation_at - commit_context["account_captured_at"] > 10:
+                        return {"status": "stale_proposal"}
                     commit_at = post_validation_at
                     validated = final_guard["validated"]
                     fresh = commit_context
