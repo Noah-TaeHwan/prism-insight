@@ -387,3 +387,45 @@ def test_legacy_replay_refuses_duplicate_or_partial_multiphase_record(bodies):
                      [(kind, json.dumps(body)) for kind, body in bodies])
     with pytest.raises(TapeMismatch, match="multi_phase"):
         _single_pass_audit_rows(conn, 1)
+
+
+@pytest.mark.parametrize('storage', ['runtime', 'economic'])
+@pytest.mark.parametrize('empty', [False, True])
+def test_persisted_review_replays_order_sensitive_recovery_projection(tmp_path, storage, empty):
+    from analysis.scenario_review_tape import replay_review
+    from analysis.scenario_calculated_replay import EconomicTape
+    from live.scenario_calculated_review import research_review
+    original = {}
+    r, broker, calls = runtime(tmp_path, empty=empty,
+        tape_change=lambda tape: original.update(deepcopy(tape)))
+    keys = [f'timeframes.30m.observed_feature_{i:03d}' for i in reversed(range(100))]
+    broker.ctx['recovery'] = dict(
+        baseline={key: 100 for key in keys}, current={key: 101 for key in keys},
+        changed_evidence={key: dict(before=100, now=101) for key in keys})
+    outcome = r.tick()
+    assert outcome['status'] == ('wait' if empty else 'intent_pending'), outcome
+    projected = json.loads(calls[0]['user_prompt'])['contract_context']['recovery']['changed_evidence']
+    assert projected['$recovery_changes'] == 'baseline-current-v1'
+    assert projected['key_order'] != sorted(projected['key_order'])
+    if storage == 'runtime':
+        saved = json.loads(r.conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()[0])
+    else:
+        path = tmp_path / 'economic.jsonl'
+        recorded = EconomicTape(path, 'record', {'purpose': 'ordered review persistence'})
+        recorded.begin(1000)
+        recorded.current['decision'] = {'envelope': original}
+        recorded.finish(outcome)
+        recorded.close()
+        frozen = EconomicTape(path, 'frozen', recorded.contract)
+        saved = frozen.rows[0]['envelope']
+    before = deepcopy((calls, broker.executed))
+    inputs = saved['inputs']
+    assert replay_review(saved, research_review, inputs['snapshot'], inputs['context'],
+                         inputs['contract'], bindings=inputs['bindings']) == original['outcome']
+    assert (calls, broker.executed) == before
+    from backtest.scenario_tape import TapeMismatch
+    lossy = json.loads(json.dumps(saved, sort_keys=True))
+    inputs = lossy['inputs']
+    with pytest.raises(TapeMismatch, match='replay_mismatch'):
+        replay_review(lossy, research_review, inputs['snapshot'], inputs['context'],
+                      inputs['contract'], bindings=inputs['bindings'])
