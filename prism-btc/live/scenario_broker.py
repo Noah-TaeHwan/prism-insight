@@ -28,6 +28,10 @@ class BrokerNotReady(ValueError):
     """Sanitized fail-closed reason, without transport payload or credentials."""
 
 
+class BrokerProtectionPending(BrokerNotReady):
+    """Tightening acknowledged; prior native protection remains verified."""
+
+
 class BrokerCancellationPending(BrokerNotReady):
     """Exact cancellation ACK saved; terminal order evidence is still pending."""
 

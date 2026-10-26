@@ -602,6 +602,18 @@ class ScenarioExecution:
             tpslMode="Full",stopLoss=text_number(desired),slTriggerBy="MarkPrice",slOrderType="Market")
         fresh = self.capture_account()
         if not self._verify_protection(fresh,desired,side):
+            approved = self._active() or {}
+            if (actual > 0 and desired != actual and approved.get("side") == side
+                    and decimal(approved.get("hard_stop", 0)) > 0
+                    and observed.get("legacy_fenced") is False and fresh.get("legacy_fenced") is False
+                    and 0 < decimal(fresh["position"]["size"]) <= decimal(observed["position"]["size"])
+                    and self._verify_protection(observed, approved["hard_stop"], side)
+                    and self._verify_protection(fresh, actual, side)):
+                from live.scenario_broker import BrokerProtectionPending
+                self._save("native_tightening_pending", dict(previous_stop=text_number(actual),
+                    requested_stop=text_number(desired), previous_protection_confirmed=True,
+                    requested_protection_confirmed=False, captured_at=fresh["captured_at"]))
+                raise BrokerProtectionPending("native_tightening_not_confirmed")
             self._fail("native_protection_not_confirmed")
         return fresh
 
