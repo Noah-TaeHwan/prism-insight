@@ -394,7 +394,7 @@ def _check_execution_stalled(conn, mode: str, now: datetime) -> dict | None:
         current_pending = set(pending(conn, ('PENDING',)))
         if not current_pending:
             if excluded:
-                return dict(level='warn', code='historical_unsettled_excluded', msg=(
+                return dict(level='info', code='historical_unsettled_excluded', msg=(
                     f'과거 미정산 사건 {len(excluded)}건을 별도 보존하고 성과 통계에서 제외합니다. 새 관측 구간과 정산 완료를 혼동하지 않습니다.'))
             return None
         unknown_rows = conn.execute("SELECT c.intent_id,c.created_at FROM llm_scenario_children c JOIN llm_scenario_intents i "
@@ -597,16 +597,19 @@ _CODE_TAG = {
 
 
 def _build_alert_message(issues: list[dict], mode: str, now: datetime | None = None) -> str:
-    """이슈 리스트 → 운영자용 경보 Markdown. alert/warn 모두 포함."""
+    """Render severity faithfully, including retained informational notices."""
     has_alert = any(i["level"] == "alert" for i in issues)
-    head = "🚨 *BTC 자동매매 이상감지*" if has_alert else "⚠️ *BTC 자동매매 점검 경고*"
+    has_warning = any(i["level"] not in ("alert", "info") for i in issues)
+    head = ("🚨 *BTC 자동매매 이상감지*" if has_alert else
+            "⚠️ *BTC 자동매매 점검 경고*" if has_warning else "ℹ️ *BTC 자동매매 점검 안내*")
     lines = [head, f"_모드: {mode}_", f"점검 시각: {_kst_time(_now(now))}", ""]
     for i in issues:
-        mark = "🔴" if i["level"] == "alert" else "🟡"
+        mark = {"alert": "🔴", "info": "ℹ️"}.get(i["level"], "🟡")
         tag = _CODE_TAG.get(i["code"], i["code"])
         lines.append(f"{mark} [{tag}] {i['msg']}")
     lines.append("")
-    lines.append("_확인 필요_")
+    if has_alert or has_warning:
+        lines.append("_확인 필요_")
     return "\n".join(lines)
 
 
@@ -642,6 +645,7 @@ def notify_health(conn, mode: str = "demo", send: bool = True,
     """건강 점검 후 이슈가 있으면 텔레그램 경보(정상이면 조용).
 
     - 이슈 있음 → 운영자용 경보 메시지 전송 (send=True 일 때).
+    - 정보만 있음 → 이력 보존, daily=True일 때만 안내 전송.
     - 이슈 없음 → 전송 안 함. 단 daily=True 면 "정상 가동 중" 1줄 전송.
     - 점검 결과는 btc_events(kind='health') 로도 기록 (alert→error, 아니면 info).
     - 모든 전송 실패 흡수, 예외 비전파. 반환은 {"issues", "sent", "level"} (디버그용).
@@ -649,8 +653,9 @@ def notify_health(conn, mode: str = "demo", send: bool = True,
     now = _now(now)
     issues = run_healthcheck(conn, mode, now=now, key_expiry=daily)
     has_alert = any(i["level"] == "alert" for i in issues)
+    has_warning = any(i["level"] not in ("alert", "info") for i in issues)
     result = {"issues": len(issues), "sent": False,
-              "level": "alert" if has_alert else ("warn" if issues else "ok")}
+              "level": "alert" if has_alert else "warn" if has_warning else "info" if issues else "ok"}
 
     # 이력 기록 (감사용) — 실패 흡수.
     try:
@@ -666,7 +671,7 @@ def notify_health(conn, mode: str = "demo", send: bool = True,
     if not send:
         return result
 
-    if issues:
+    if has_alert or has_warning or (daily and issues):
         message = _build_alert_message(issues, mode, now=now)
         result["sent"] = _dispatch(message)
     elif daily:
