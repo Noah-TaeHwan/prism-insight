@@ -195,6 +195,50 @@ def test_exit_cancel_latency_is_not_submission_failure_and_replays_exactly(tmp_p
     assert frozen["execution_metadata"]["actual_model_calls"] == 0
 
 
+@pytest.mark.parametrize("cancel_ack", ["exact", "timeout", "missing_identity"])
+def test_management_adjust_cancel_waits_for_exact_ack_and_replays(tmp_path, monkeypatch, cancel_ack):
+    from backtest.scenario_exchange import ScenarioExchange
+    original = ScenarioExchange.cancel_order
+    def cancel(self, **params):
+        response = original(self, **params)
+        if cancel_ack == "timeout":
+            raise TimeoutError("unknown cancellation")
+        if cancel_ack == "missing_identity":
+            return dict(retCode=0, result={})
+        return response
+    monkeypatch.setattr(ScenarioExchange, "cancel_order", cancel)
+    bundle, market = inputs(1200000)
+    wall = [0.]
+    def generate(**request):
+        wall[0] += 1
+        ctx = json.loads(request["user_prompt"])["contract_context"]
+        if not ctx.get("scenario_id") and ctx["now"] < bundle["start_ms"] / 1000 + 300:
+            result = wire(ctx, "OPEN")
+        elif ctx.get("scenario_id") and ctx.get("positions") and ctx["now"] < bundle["start_ms"] / 1000 + 600:
+            result = wire(ctx, "ADJUST")
+            result.update(side="LONG", hard_stop=98, chase=dict(max_bps=0, max_reprices=0),
+                take_profits=[dict(id="tp", price=120, fraction=.5)])
+        else:
+            result = wire(ctx, "WAIT")
+        result["expires_at"] = ctx["now"] + 1200
+        return SimpleNamespace(text=json.dumps(result))
+    with network_boundary("frozen") as blocked:
+        fresh = run_replay(bundle, market, tmp_path / "fresh", mode="fixture", tape_path=tmp_path / "tape",
+            policy_profile="single-pass-economic-v4", model_generator=generate, clock_monotonic=lambda: wall[0])
+        frozen = run_replay(bundle, market, tmp_path / "frozen", mode="frozen", tape_path=tmp_path / "tape",
+            policy_profile="single-pass-economic-v4")
+    assert not blocked
+    outcomes = [json.loads(line).get("outcome", {}) for line in (tmp_path / "tape").read_text().splitlines()]
+    expected = "awaiting_cancellation" if cancel_ack == "exact" else "submission_unknown"
+    assert any(row.get("reason") == expected for row in outcomes)
+    assert fresh["execution_status"] == ("COMPLETE" if cancel_ack == "exact" else "STOPPED")
+    assert fresh["result_hash"] == frozen["result_hash"]
+    assert frozen["execution_metadata"]["actual_model_calls"] == 0
+    with sqlite3.connect(tmp_path / "fresh" / "replay.sqlite") as conn:
+        assert conn.execute("SELECT count(*) FROM llm_scenario_children WHERE kind='entry'").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM llm_scenario_children WHERE kind='native_sl' AND status='LIVE'").fetchone()[0] == 1
+
+
 @pytest.mark.parametrize("profile,fail_at", [("single-pass-economic-v4",1),
     ("calculated-economic-v4",1),("calculated-economic-v4",2)])
 def test_first_transport_failure_stops_new_calls_and_frozen_drains_identically(tmp_path,profile,fail_at):
