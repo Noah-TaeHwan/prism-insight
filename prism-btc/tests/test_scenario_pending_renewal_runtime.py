@@ -532,3 +532,48 @@ def test_zero_fill_metadata_retains_exact_host_offer(tmp_path):
         absolute_expires_at=lease['anchor']['hard_deadline'])
     assert context['pending_renewal_offer'] == offer(r.conn, state, context,
                                                    b.children(state['active']['scenario_id']), e.now)
+
+
+@pytest.mark.parametrize('corrupt', [False, True])
+def test_pending_renewal_reads_compressed_selected_tape(tmp_path, monkeypatch, corrupt):
+    import gzip
+    from live.scenario_review_storage import MAGIC
+    r, b, e, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    original = b._renew_pending
+
+    def compressed(payload, ident):
+        slot = r.conn.execute('SELECT slot FROM llm_scenario_decisions WHERE json_extract(proposal, "$.action_id")=?', (ident,)).fetchone()[0]
+        body = r.conn.execute('SELECT body FROM llm_scenario_review_tapes WHERE slot=?', (slot,)).fetchone()[0]
+        value = MAGIC + (b'broken' if corrupt else gzip.compress(body.encode(), mtime=0))
+        r.conn.execute('UPDATE llm_scenario_review_tapes SET body=? WHERE slot=?', (value, slot))
+        r.conn.commit()
+        return original(payload, ident)
+
+    monkeypatch.setattr(b, '_renew_pending', compressed)
+    e.now += 301
+    r.tick()
+    lease = load(r.conn, r.state()['active'])
+    assert lease['revision'] == (0 if corrupt else 1)
+    status = json.loads(r.conn.execute('SELECT body FROM llm_scenario_pending_renewals').fetchone()[0])['status']
+    assert status == ('REJECTED' if corrupt else 'APPLIED')
+
+
+def test_runtime_durable_event_comparison_reads_compressed_events(tmp_path, monkeypatch):
+    import gzip
+    from live.scenario_review_storage import MAGIC
+    r, b, e, _, _ = renewal_runtime(tmp_path)
+    original = r._record_calculated_review
+
+    def compressed(slot, event, *, commit=True):
+        original(slot, event, commit=commit)
+        seq, body = r.conn.execute('SELECT sequence,body FROM llm_scenario_review_events WHERE slot=? ORDER BY sequence DESC LIMIT 1', (slot,)).fetchone()
+        r.conn.execute('UPDATE llm_scenario_review_events SET body=? WHERE slot=? AND sequence=?',
+                       (MAGIC + gzip.compress(body.encode(), mtime=0), slot, seq))
+        if commit:
+            r.conn.commit()
+
+    monkeypatch.setattr(r, '_record_calculated_review', compressed)
+    result = r.tick()
+    assert result['status'] == 'intent_pending', result
+    assert r.conn.execute("SELECT COUNT(*) FROM llm_scenario_review_events WHERE typeof(body)='blob'").fetchone()[0] > 0

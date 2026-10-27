@@ -44,7 +44,8 @@ def review_policy_binding(*, research_mode="legacy"):
                       scenario_review_guard, scenario_llm, scenario_oauth, scenario_contract,
                       scenario_model_input, scenario_preview, scenario_runtime,
                       scenario_entry_contract, scenario_position_flow, scenario_pending_renewal, scenario_entry_goal,
-                      scenario_entry_display, scenario_analysis_frames, scenario_explanation, scenario_fee_projection)
+                      scenario_entry_display, scenario_analysis_frames, scenario_explanation, scenario_fee_projection,
+                      scenario_review_storage)
     from core import scenario_limit_prices, llm_scenario, scenario_stop_policy, scenario_convergence
     from core import scenario_pending_renewal as pending_renewal_core
     from engine import scenario_ma_context, scenario_snapshot
@@ -70,6 +71,7 @@ def review_policy_binding(*, research_mode="legacy"):
         'engine/scenario_ma_context.py': scenario_ma_context,
         'engine/scenario_snapshot.py': scenario_snapshot,
         'live/scenario_runtime.py': scenario_runtime,
+        'live/scenario_review_storage.py': scenario_review_storage,
         'live/scenario_entry_contract.py': scenario_entry_contract,
         'live/scenario_entry_goal.py': scenario_entry_goal,
         'live/scenario_entry_display.py': scenario_entry_display,

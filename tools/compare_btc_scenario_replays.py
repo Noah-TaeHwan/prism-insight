@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import sqlite3
+import sys
 from collections import Counter
 from decimal import Decimal
 from datetime import datetime
@@ -250,8 +251,12 @@ def verify_economic_rejections(directory, report):
     if report["contract"].get("policy_profile") not in profiles:
         require("economic_rejections" not in report, "unexpected_rejection_protocol")
         return
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from observability.review_storage import review_text
     with sqlite3.connect((directory / "replay.sqlite").resolve().as_uri() + "?mode=ro", uri=True) as conn:
-        events = [(slot, json.loads(body)) for slot, body in conn.execute(
+        events = [(slot, json.loads(review_text(body))) for slot, body in conn.execute(
             "SELECT slot,body FROM llm_scenario_review_events ORDER BY slot,sequence")]
         decisions = {slot: (proposal, context) for slot, proposal, context in conn.execute(
             "SELECT slot,proposal,context FROM llm_scenario_decisions")}

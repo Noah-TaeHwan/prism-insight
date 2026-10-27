@@ -870,7 +870,8 @@ class ScenarioRuntime:
                         # Preserve the failed tape; no request/generator was reached.
                         raise ScenarioModelError("input_size")
                     raise ValueError("review_tape_incomplete")
-                recorded_events = [json.loads(row[0]) for row in self.conn.execute(
+                from live.scenario_review_storage import review_text
+                recorded_events = [json.loads(review_text(row[0])) for row in self.conn.execute(
                     "SELECT body FROM llm_scenario_review_events WHERE slot=? ORDER BY sequence", (slot,))]
                 expected_events = [operation["event"] for operation in review_envelope["operations"]
                                    if operation["kind"] == "record"]

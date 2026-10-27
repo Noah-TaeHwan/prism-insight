@@ -6,7 +6,8 @@ from live.scenario_provenance import review_policy_binding
 
 def test_review_binding_does_not_dispatch_module_names(monkeypatch):
     before = review_policy_binding()  # Warm ordinary dependencies first.
-    assert len(before['source_sha256']) == 30
+    assert len(before['source_sha256']) == 31
+    assert 'live/scenario_review_storage.py' in before['source_sha256']
     assert 'live/scenario_oauth.py' in before['source_sha256']
     assert 'live/scenario_incident_epoch.py' in before['source_sha256']
     assert 'live/scenario_management_quarantine.py' in before['source_sha256']
