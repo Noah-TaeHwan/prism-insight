@@ -5,8 +5,10 @@ must establish scheduler/worker quiescence before calling it; the local mutex
 cannot fence an unmodified process already inside its transport.
 """
 import json
+import logging
 import math
 import os
+from contextlib import suppress
 from pathlib import Path
 
 from live.scenario_management_quarantine import digest, _append, _events, ENDPOINT
@@ -201,6 +203,9 @@ def monitor(broker, *, refresh=False):
         return cached
     started = broker.clock()
     broker._incident_observation = None
+    from live.scenario_broker import _MONITOR_CALL_TIMING
+    timing = dict(calls=[], dropped=0, measurement_failures=0)
+    token = _MONITOR_CALL_TIMING.set(timing)
     try:
         observed_bodies = []
         all_cursors = _events(broker.conn, FINANCE_CURSOR)
@@ -258,6 +263,17 @@ def monitor(broker, *, refresh=False):
         reason = str(exc) if isinstance(exc, ValueError) and str(exc).startswith('incident_epoch_') else 'observation_failed'
         record_late(broker, dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP',
                                 error_type=type(exc).__name__, reason=reason))
+        if reason in {'incident_epoch_monitor_child_lookup_deadline',
+                      'incident_epoch_monitor_finance_deadline',
+                      'incident_epoch_monitor_account_deadline'}:
+            # The durable halt must survive logging failures.
+            with suppress(Exception):
+                started_ms = (int(started * 1000) if type(started) in (int, float)
+                              and math.isfinite(started) else None)
+                logging.getLogger(__name__).warning('incident_monitor_call_timing started_ms=%s reason=%s calls=%s',
+                    started_ms, reason, json.dumps(timing, separators=(',', ':'), allow_nan=False))
+    finally:
+        _MONITOR_CALL_TIMING.reset(token)
     return broker._incident_observation
 
 
