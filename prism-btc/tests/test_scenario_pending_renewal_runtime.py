@@ -581,6 +581,7 @@ def test_runtime_durable_event_comparison_reads_compressed_events(tmp_path, monk
 
 
 def test_new_review_tape_is_compressed_and_preserves_complete_envelope(tmp_path):
+    from backtest.scenario_tape import digest
     from live.scenario_review_storage import MAGIC, review_text
     r, _, _, _, _ = renewal_runtime(tmp_path)
     assert r.tick()['status'] == 'intent_pending'
@@ -588,3 +589,4 @@ def test_new_review_tape_is_compressed_and_preserves_complete_envelope(tmp_path)
     assert isinstance(stored, bytes) and stored.startswith(MAGIC)
     envelope = json.loads(review_text(stored))
     assert envelope['outcome']['status'] == 'COMPLETE' and envelope['executable'] is False
+    assert envelope['sha256'] == digest({k: v for k, v in envelope.items() if k != 'sha256'})
