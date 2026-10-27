@@ -85,7 +85,7 @@ def test_unknown_submission_survives_restart_without_resubmit(setup):
 
 @pytest.mark.parametrize("action", ["EXIT", "ADJUST"])
 @pytest.mark.parametrize("known_pending", [True, False])
-def test_only_acknowledged_exit_cancellation_is_pending_not_unknown(setup, action, known_pending):
+def test_acknowledged_management_cancellation_is_pending_not_unknown(setup, action, known_pending):
     from live.scenario_broker import BrokerCancellationPending, BrokerNotReady
     r,b,now,_=setup
     assert r.tick()["status"] == "intent_pending"
@@ -99,7 +99,23 @@ def test_only_acknowledged_exit_cancellation_is_pending_not_unknown(setup, actio
     b.execute=execute
     result=r.tick()
     assert result["status"] == "intent_pending"
-    assert result["reason"] == ("awaiting_cancellation" if action == "EXIT" and known_pending else "submission_unknown")
+    assert result["reason"] == ("awaiting_cancellation" if known_pending else "submission_unknown")
+    assert r.conn.execute("SELECT status FROM llm_scenario_intents WHERE id='action-2'").fetchone() == ("PENDING",)
+
+
+def test_adjust_with_new_entry_does_not_reclassify_cancellation(setup):
+    from live.scenario_broker import BrokerCancellationPending
+    r, b, now, _ = setup
+    assert r.tick()["status"] == "intent_pending"
+    b.ctx["positions"] = [dict(price=100, quantity=1)]
+    b.evidence = dict(intents=[terminal()])
+    now[0] += 300
+    r.propose = lambda s, c: dict(proposal(s, c), action="ADJUST", action_id="action-2")
+    def execute(payload, ident):
+        raise BrokerCancellationPending("cancel_not_confirmed")
+    b.execute = execute
+    result = r.tick()
+    assert result["reason"] == "submission_unknown"
     assert r.conn.execute("SELECT status FROM llm_scenario_intents WHERE id='action-2'").fetchone() == ("PENDING",)
 
 
