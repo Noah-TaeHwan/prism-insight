@@ -301,6 +301,8 @@ class Driver:
                 self.events.append((start,previous,previous_mark,None))
             for offset,key in zip((1,20000,40000,59999),keys):
                 self.events.append((start+offset,float(bar[key]),float(mark[key]),start))
+        if set(self.capacity) != set(range(bundle["start_ms"], self.end, 60000)):
+            raise ValueError('replay_minute_window_incomplete')
         self.events.sort()
 
     def _value(self):

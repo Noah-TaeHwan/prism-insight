@@ -51,3 +51,32 @@ def test_pipeline_stops_before_model_when_previous_minute_is_missing(tmp_path):
                        tape_path=tmp_path/'tape', policy=policy)
     assert calls == []
     assert blocked == []
+
+
+def test_replay_cannot_silently_end_with_missing_last_minute():
+    market = market_with_minutes([60000, 120000], [1., 1.])
+    with pytest.raises(ValueError, match='replay_minute_window_incomplete'):
+        driver(market, start=120000, end=240000)
+
+
+def test_replay_cannot_accept_entirely_missing_window():
+    market = market_with_minutes([60000], [1.])
+    with pytest.raises(ValueError, match='replay_minute_window_incomplete'):
+        driver(market, start=120000, end=180000)
+
+
+def test_pipeline_stops_before_model_when_last_minute_is_missing(tmp_path):
+    bundle, market = inputs()
+    missing = pd.Timestamp(bundle['end_ms'] - 60000, unit='ms', tz='UTC')
+    market.source = market.source.drop(missing)
+    market.mark = market.mark.drop(missing)
+    calls = []
+    def policy(*args):
+        calls.append(args)
+        raise AssertionError('model must not be called')
+    with network_boundary('frozen') as blocked:
+        with pytest.raises(ValueError, match='replay_minute_window_incomplete'):
+            run_replay(bundle, market, tmp_path/'out', mode='fixture',
+                       tape_path=tmp_path/'tape', policy=policy)
+    assert calls == []
+    assert blocked == []
