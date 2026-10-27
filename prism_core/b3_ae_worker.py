@@ -129,7 +129,13 @@ class B3AeWorker:
 
     def _b3_step(self, db, campaign, row, now, boundary):
         """B3 v3-ae ladder: SHADOW virtual ledger only (never a LIVE order since 2026-10-02)."""
-        evidence, current = self._evidence(db, campaign, row, now, boundary.isoformat())
+        try:
+            evidence, current = self._evidence(db, campaign, row, now, boundary.isoformat())
+        except ValueError as error:
+            # A thin stock with no print for 2 minutes is input not ready yet, not a fault (BKH, 2026-10-27).
+            if str(error) != "QUOTE_STALE_OR_FUTURE":
+                raise
+            return dict(campaign_id=campaign["campaign_id"], status="WAIT", reason=[str(error)])
         if evidence["status"] != "OK":
             return dict(campaign_id=campaign["campaign_id"], status="WAIT", reason=evidence["reason_codes"])
         decision = self.store.evaluate(campaign["campaign_id"], evidence["evidence"], now=current,
