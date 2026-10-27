@@ -35,6 +35,8 @@ def _identity(plan, position_id):
 def quote_input(*, plan, position_id, response, now):
     """Bind provider price to its real exchange timestamp, not retrieval time."""
     _validate(plan)
+    if not response:  # fetch_quote returns {} when Yahoo times out or fails; not a wrong symbol
+        raise ValueError("QUOTE_UNAVAILABLE")
     if response.get("symbol") != plan["symbol"] or response.get("currency") != "USD":
         raise ValueError("QUOTE_IDENTITY_OR_CURRENCY")
     price = _num(response["regularMarketPrice"], True)
