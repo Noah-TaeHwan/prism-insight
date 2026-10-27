@@ -65,3 +65,20 @@ def test_new_tape_encoding_round_trips_and_short_records_stay_plain():
     assert isinstance(review_storage('{"large":"' + 'x' * 10000 + '"}'), bytes)
     with pytest.raises(ValueError):
         review_storage('x' * (MAX_BYTES + 1))
+
+def test_compressed_recovery_wire_preserves_replay_and_fails_closed():
+    from analysis.scenario_replay import _single_pass_audit_rows
+    conn = sqlite3.connect(':memory:')
+    conn.execute('CREATE TABLE llm_scenario_recovery_events(slot,kind,body)')
+    original = '{"input_id":"fixture"}'
+    conn.execute('INSERT INTO llm_scenario_recovery_events VALUES(?,?,?)', (1, 'MODEL_REQUEST', original))
+    expected = _runtime_event_hash(conn)
+    packed = MAGIC + gzip.compress(original.encode(), mtime=0)
+    conn.execute('UPDATE llm_scenario_recovery_events SET body=?', (packed,))
+    assert _runtime_event_hash(conn) == expected
+    assert _single_pass_audit_rows(conn, 1) == ((original,), None)
+    conn.execute('UPDATE llm_scenario_recovery_events SET body=?', (MAGIC+b'bad',))
+    with pytest.raises(ValueError):
+        _runtime_event_hash(conn)
+    with pytest.raises(ValueError):
+        _single_pass_audit_rows(conn, 1)

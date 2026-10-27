@@ -209,7 +209,7 @@ def referenced_commits(raw):
                         coverage['missing_evidence_values'] += 1
                     else:
                         try:
-                            if table in ('llm_scenario_review_events', 'llm_scenario_review_tapes'):
+                            if table in ('llm_scenario_review_events', 'llm_scenario_review_tapes', 'llm_scenario_recovery_events'):
                                 value = review_text(value)
                             parsed = json.loads(value)
                         except (TypeError, ValueError):

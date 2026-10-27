@@ -28,6 +28,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from live import tracking
+from live.scenario_review_storage import review_text
 from live.telegram_reporter import _load_env
 from live.ops_alerts import _resolve_ops_destination, _send
 
@@ -253,7 +254,7 @@ def _recovered_input_size_burst(conn, errors, last_error: datetime, now: datetim
                 row = matches[0]
                 if (not valid_time(row['observed_at']) or not stamp <= row['observed_at'] <= health['decision']['at']):
                     return False
-                body = json.loads(row['body'])
+                body = json.loads(review_text(row['body']))
                 if body.get('input_id') != input_id:
                     return False
                 records[kind] = (row['observed_at'], body)

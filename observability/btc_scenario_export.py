@@ -282,6 +282,8 @@ def _model_metadata(body):
 def _anchor_hash(stream, row):
     if row is None:
         return None
+    if stream == 'llm_scenario_recovery_events':
+        return _hash(review_text(row['body']))
     if stream == 'llm_scenario_review_events':
         return _hash(_json([row['slot'], row['sequence'], review_text(row['body'])]))
     if stream == 'llm_scenario_review_tapes':
@@ -494,7 +496,7 @@ def _capture(source, state, identity, stream, row, manifest_cache=None):
     if stream == 'llm_scenario_outbox':
         _notice(state, identity, row, now)
         return
-    if stream in ('llm_scenario_review_events', 'llm_scenario_review_tapes'):
+    if stream in ('llm_scenario_review_events', 'llm_scenario_review_tapes', 'llm_scenario_recovery_events'):
         row = dict(row)
         row['body'] = review_text(row['body'])
     raw = row['body']
@@ -660,7 +662,7 @@ def export_once(db_path, state_path, spool_path, limit=100):
                 state.execute('SAVEPOINT source_row')
                 try:
                     raw_body = (review_text(row['body']) if stream in
-                                ('llm_scenario_review_events', 'llm_scenario_review_tapes') else row['body'])
+                                ('llm_scenario_review_events', 'llm_scenario_review_tapes', 'llm_scenario_recovery_events') else row['body'])
                     if raw_body is not row['body']:
                         row = dict(row)
                         row['body'] = raw_body
