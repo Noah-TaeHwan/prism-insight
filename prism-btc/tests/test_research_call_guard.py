@@ -1,6 +1,8 @@
 """Offline durable call guard checks; no provider or network is imported."""
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -88,6 +90,74 @@ def test_restart_after_reserve_never_resumes(tmp_path):
     with pytest.raises(CallGuardError):
         reserve(reopened, "B")
     assert reopened.snapshot()["reserved_attempts"] == 1
+
+
+def test_readonly_inspection_does_not_stop_inflight_attempt(tmp_path):
+    g = guard(tmp_path)
+    attempt = reserve(g)
+    before = g.ledger.read_bytes()
+    anchors = {p.name: p.read_bytes() for p in g.anchors.iterdir()}
+
+    state = CallGuard.inspect_existing(tmp_path, REGISTRY, 24)
+
+    assert state["inflight"] == attempt
+    assert state["unknown_http_attempts"] == 1
+    assert state["stopped"] is False
+    assert g.ledger.read_bytes() == before
+    assert {p.name: p.read_bytes() for p in g.anchors.iterdir()} == anchors
+    g.finish(attempt, "ok", 1)
+    assert reserve(g, "B") == "attempt-000002"
+
+
+def test_readonly_inspection_from_separate_process_preserves_live_call(tmp_path):
+    g = guard(tmp_path)
+    attempt = reserve(g)
+    before = g.ledger.read_bytes()
+    root = Path(__file__).resolve().parents[2]
+    code = (
+        "import json,sys; sys.path.insert(0,sys.argv[1]); "
+        "from tools.btc_research_call_guard import CallGuard; "
+        "print(json.dumps(CallGuard.inspect_existing(sys.argv[2],sys.argv[3],24)))"
+    )
+    result = subprocess.run([sys.executable, "-c", code, str(root), str(tmp_path), REGISTRY],
+                            check=True, capture_output=True, text=True, timeout=10)
+    state = json.loads(result.stdout)
+    assert state["inflight"] == attempt and state["stopped"] is False
+    assert g.ledger.read_bytes() == before
+    g.finish(attempt, "ok", 1)
+    assert g.snapshot()["actual_http_calls"] == 1
+
+
+def test_readonly_inspection_never_creates_missing_guard(tmp_path):
+    missing = tmp_path / "missing"
+    with pytest.raises(CallGuardError):
+        CallGuard.inspect_existing(missing, REGISTRY, 24)
+    assert not missing.exists()
+
+
+def test_readonly_inspection_does_not_recreate_missing_lock(tmp_path):
+    g = guard(tmp_path)
+    before = g.ledger.read_bytes()
+    lock = tmp_path / "guard.lock"
+    lock.unlink()
+    with pytest.raises(CallGuardError):
+        CallGuard.inspect_existing(tmp_path, REGISTRY, 24)
+    assert not lock.exists()
+    assert g.ledger.read_bytes() == before
+
+
+def test_readonly_inspection_checks_frozen_registry_and_ledger(tmp_path):
+    g = guard(tmp_path)
+    g.finish(reserve(g), "ok", 1)
+    before = g.ledger.read_bytes()
+    with pytest.raises(CallGuardError):
+        CallGuard.inspect_existing(tmp_path, "c" * 64, 24)
+    assert g.ledger.read_bytes() == before
+    g.ledger.write_bytes(before[:-3])
+    corrupt = g.ledger.read_bytes()
+    with pytest.raises(CallGuardError):
+        CallGuard.inspect_existing(tmp_path, REGISTRY, 24)
+    assert g.ledger.read_bytes() == corrupt
 
 
 def test_first_arm_failure_blocks_other_arm_without_http(tmp_path):

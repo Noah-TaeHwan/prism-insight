@@ -204,3 +204,25 @@ class CallGuard:
         with self._locked():
             _, state = self._read()
             return dict(state, registry_sha256=self.registry_sha256, max_calls=self.max_calls)
+
+    @classmethod
+    def inspect_existing(cls, root, registry_sha256, max_calls):
+        """Validate and inspect a live ledger without invoking restart recovery."""
+        if type(max_calls) is not int or max_calls < 1:
+            raise ValueError("max_calls must be a positive integer")
+        guard = object.__new__(cls)
+        guard.root = Path(root)
+        guard.registry_sha256 = _sha(registry_sha256)
+        guard.max_calls = max_calls
+        guard.ledger = guard.root / "attempts.jsonl"
+        guard.anchors = guard.root / "anchors"
+        try:
+            with (guard.root / "guard.lock").open("rb") as stream:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_SH)
+                try:
+                    _, state = guard._read()
+                    return dict(state, registry_sha256=guard.registry_sha256, max_calls=max_calls)
+                finally:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            raise CallGuardError("cannot inspect existing research call ledger") from exc
