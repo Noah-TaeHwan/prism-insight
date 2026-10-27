@@ -46,15 +46,21 @@ _ERROR_TYPES = {"Exception", "ValueError", "RuntimeError", "PermissionError", "T
 
 
 def run_once(conn, broker, *, execute=False, protect_only=False,
-             snapshot=collect_snapshot, proposal=propose, calculated_review=False, entry_contract_enabled=False):
+             snapshot=collect_snapshot, proposal=propose, calculated_review=False, entry_contract_enabled=False,
+             convergence_entry_enabled=False):
     with run_capture(conn):
         return _run_once(conn, broker, execute=execute, protect_only=protect_only,
                          snapshot=snapshot, proposal=proposal, calculated_review=calculated_review,
-                         entry_contract_enabled=entry_contract_enabled)
+                         entry_contract_enabled=entry_contract_enabled, convergence_entry_enabled=convergence_entry_enabled)
 
 
 def _run_once(conn, broker, *, execute=False, protect_only=False,
-              snapshot=collect_snapshot, proposal=propose, calculated_review=False, entry_contract_enabled=False):
+              snapshot=collect_snapshot, proposal=propose, calculated_review=False, entry_contract_enabled=False,
+             convergence_entry_enabled=False):
+    if type(convergence_entry_enabled) is not bool:
+        raise ValueError('convergence_entry_flag_must_be_bool')
+    if convergence_entry_enabled:
+        broker.convergence_entry_enabled = True
     if type(entry_contract_enabled) is not bool:
         raise ValueError("entry_contract_flag_must_be_bool")
     if entry_contract_enabled and (not execute or protect_only):
@@ -104,6 +110,7 @@ def _run_once(conn, broker, *, execute=False, protect_only=False,
         entry_contract_enabled=entry_contract_enabled,
         entry_goal_enabled=entry_contract_enabled and calculated_review,
         pending_renewal_enabled=entry_contract_enabled and calculated_review,
+        convergence_entry_enabled=convergence_entry_enabled,
         calculated_review_propose=operational_calculated_propose if calculated_review else None,
         research_review_mode=CALCULATED_REVIEW_MODE if calculated_review else "legacy")
     return runtime.tick()
@@ -275,7 +282,8 @@ def main():
             return 1
         failure_stage="broker_init"
         from live.scenario_broker import ScenarioDemoBroker
-        broker=ScenarioDemoBroker(conn,expected_main_uid=main_uid,execution_enabled=True)
+        broker=ScenarioDemoBroker(conn,expected_main_uid=main_uid,execution_enabled=True,
+                                  convergence_entry_enabled=True)
         if args.activate:
             failure_stage="activation"
             from live.scenario_control import begin_transition,activate,flat_handoff_probe
@@ -305,7 +313,8 @@ def main():
         failure_stage="run"
         result=run_once(conn,broker,execute=args.execute,protect_only=args.protect_only,
                         snapshot=snapshot,proposal=operational_propose,
-                        calculated_review=args.calculated_review, entry_contract_enabled=args.entry_contract)
+                        calculated_review=args.calculated_review, entry_contract_enabled=args.entry_contract,
+                        convergence_entry_enabled=True)
         pending_observation = (result.get('status') == 'intent_pending' or
             (result.get('status') == 'blocked' and result.get('reason') in {
                 'quarantine_release_required', 'flat_quarantined_unsettled'}))

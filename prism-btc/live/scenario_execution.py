@@ -466,6 +466,8 @@ class ScenarioExecution:
         if kind=="entry" and batch and batch[0] in {"ABORTED","INTERRUPTED"}:
             self._fail("unsubmitted_children_abandoned")
         def before_send():
+            if kind == 'entry':
+                self._check_entry_convergence(payload)
             # Persist only after local guards pass, but always before transport.
             self.conn.execute("INSERT INTO llm_scenario_children VALUES(?,?,?,?,?,?,'UNKNOWN',NULL,NULL,?)",
                 (link,intent_id,payload["scenario_id"],kind,local_id,encoded(request),self.clock()))
@@ -739,8 +741,28 @@ class ScenarioExecution:
             return  # Never gate EXIT/cancel/SL-only protection on optional goal history.
         validate_goal_plan(payload, self._registered_goal(payload, active))
 
+    def _check_entry_convergence(self, payload):
+        if not getattr(self, 'convergence_entry_enabled', False):
+            return
+        from core.scenario_convergence import entry_convergence, require_entry_convergence
+        rows = self.conn.execute(
+            "SELECT snapshot,context FROM llm_scenario_decisions WHERE json_extract(proposal,'$.action_id')=?",
+            (payload.get('action_id'),)).fetchall()
+        if len(rows) != 1 or not all(rows[0]):
+            self._fail('entry_convergence_decision_missing')
+        snapshot, context = map(json.loads, rows[0])
+        if context.get('input_id') != payload.get('input_id'):
+            self._fail('entry_convergence_input_mismatch')
+        fact = entry_convergence(snapshot)
+        if 'entry_convergence' in context and context['entry_convergence'] != fact:
+            self._fail('entry_convergence_evidence_changed')
+        # Recheck the bound decision; existing expiry/pretransport guards govern dispatch.
+        require_entry_convergence(dict(entry_convergence=fact, now=context.get('now')))
+
     def _preflight(self, payload, observed, instrument, children, *, stop_revision=False, pending_renewal=False):
         self._validate_registered_goal(payload)
+        if payload.get('entries'):
+            self._check_entry_convergence(payload)
         from core.llm_scenario import risk_snapshot
         stop = decimal(payload["hard_stop"])
         self._aligned(stop,instrument["tick"])
@@ -852,6 +874,7 @@ class ScenarioExecution:
         if previous:
             return previous
         try:
+            self._check_entry_convergence(payload)
             now = self.clock()
             state, active = self._recovery_state(), self._active()
             grant = payload['pending_renewal']

@@ -23,7 +23,7 @@ _REQUIRED_STABLE = (
     "accounting_status", "protection_ok", "legacy_fenced",
 )
 _OPTIONAL_STABLE = (
-    'management_quarantine',
+    'entry_convergence', 'management_quarantine',
     'management_quarantine_block',
     "side", "scenario_risk_fraction", "seen_action_ids", "current_plan", "stop_policy",
     "execution_price_policy", "conditional_entry_version",
@@ -98,6 +98,10 @@ def guard_review(snapshot, original_context, response_contract, envelope, fresh_
     if original.get('entry_contract_version') == 2:
         goal_context = deepcopy(original)
         prepare_goal_source(snapshot, goal_context)
+    if 'entry_convergence' in original:
+        from core.scenario_convergence import entry_convergence
+        if original['entry_convergence'] != entry_convergence(snapshot):
+            raise ValueError('review_convergence_context_changed')
     now = _number(fresh.get("now"))
     last_review_time = max(operation["value"] for operation in envelope["operations"]
                            if operation["kind"] == "clock")

@@ -51,6 +51,10 @@ class ScenarioValidationError(ValueError):
     pass
 
 
+class EntryConvergenceRejection(ScenarioValidationError):
+    """Known entry-policy restriction, never order authorization."""
+
+
 class EconomicProposalRejection(ScenarioValidationError):
     """Known pre-authority economic infeasibility, not a malformed proposal."""
 
@@ -267,6 +271,12 @@ the caller must first reconcile cancellations before dropping pending risk.
         cancellations = p.get("cancel_entry_ids", [])
         if not isinstance(cancellations, list) or any(not isinstance(x, str) for x in cancellations) or len(set(cancellations)) != len(cancellations):
             raise ScenarioValidationError("invalid cancellation ids")
+        if entries or renewal is not None:
+            from core.scenario_convergence import require_entry_convergence
+            try:
+                require_entry_convergence(context)
+            except ValueError as exc:
+                raise EntryConvergenceRejection(str(exc)) from exc
         pending_rows = _rows(context["pending_entries"], "pending_entries")
         pending_ids = {_text(row.get("id"), "pending.id") for row in pending_rows}
         if len(pending_ids) != len(pending_rows):

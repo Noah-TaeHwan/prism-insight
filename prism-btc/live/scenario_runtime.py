@@ -23,7 +23,7 @@ from live import scenario_management_quarantine as quarantine
 from live import scenario_incident_epoch as incident_epoch
 from contextlib import ExitStack, contextmanager
 
-from core.llm_scenario import update_circuit_breaker
+from core.llm_scenario import EntryConvergenceRejection, update_circuit_breaker
 from core.scenario_limit_prices import validate_execution_prices
 from live.shared_entry_coordinator import database_path, mutation_lock
 from live.entry_reservations import LockBusy
@@ -145,11 +145,16 @@ class ScenarioRuntime:
                  recovery_enabled=False, automatic_normalization_enabled=False,
                  calculated_review_enabled=False, calculated_review_propose=None,
                  research_review_mode="legacy", entry_contract_enabled=False, pending_renewal_enabled=False,
-                 entry_goal_enabled=False):
+                 entry_goal_enabled=False, convergence_entry_enabled=False):
         if type(entry_goal_enabled) is not bool or (entry_goal_enabled and
                 (not entry_contract_enabled or not calculated_review_enabled)):
             raise ValueError('entry_goal_requires_calculated_contract')
         self.entry_goal_enabled = entry_goal_enabled
+        if type(convergence_entry_enabled) is not bool:
+            raise ValueError('convergence_entry_flag_must_be_bool')
+        self.convergence_entry_enabled = convergence_entry_enabled
+        if convergence_entry_enabled:
+            broker.convergence_entry_enabled = True
         if entry_goal_enabled and research_review_mode not in {
                 'legacy', 'allocation-calculated', 'action-allocation-calculated-v1', 'economic-reject-calculated-v1'}:
             raise ValueError('entry_goal_requires_two_phase_review')
@@ -191,6 +196,8 @@ class ScenarioRuntime:
                 CREATE TABLE IF NOT EXISTS llm_scenario_decisions (
                     slot INTEGER PRIMARY KEY, snapshot TEXT, context TEXT,
                     proposal TEXT, outcome TEXT);
+                CREATE INDEX IF NOT EXISTS llm_scenario_decisions_action_id
+                    ON llm_scenario_decisions(json_extract(proposal, '$.action_id'));
                 CREATE TABLE IF NOT EXISTS llm_scenario_intents (
                     id TEXT PRIMARY KEY, scenario_id TEXT NOT NULL,
                     payload TEXT NOT NULL, status TEXT NOT NULL, evidence TEXT);
@@ -417,7 +424,7 @@ class ScenarioRuntime:
         for key in ('pending_wait_policy_version', 'pending_renewal_version', 'pending_renewal_offer', 'pending_wait',
                     'entry_contract_version', 'registered_entry_contract', 'entry_contract_status',
                     'entry_contract_failure_rule', 'entry_contract_observation', 'previous_thesis_assessment',
-                    'entry_goal_source', 'entry_goal_untrusted', 'entry_goal_decision_slot', 'immediate_reduce_version',
+                    'entry_convergence', 'entry_goal_source', 'entry_goal_untrusted', 'entry_goal_decision_slot', 'immediate_reduce_version',
                     'explanation_contract_version', 'explanation_source'):
             ctx.pop(key, None)
         if ('immediate_reduce_v1' in self.broker.capabilities
@@ -691,6 +698,35 @@ class ScenarioRuntime:
         return dict(status="intent_pending", reason="awaiting_exact_evidence", model_called=False,
                     **({'management_quarantine': ctx['management_quarantine']} if ctx.get('management_quarantine') else {}))
 
+    def _cancel_converging_entries(self, state, ctx, slot):
+        """Host cancellation only; never fabricate a model judgment or a fill."""
+        from live.scenario_contract import identity_fields
+        if not state.get('active'):
+            return dict(status='blocked', reason='convergence_pending_owner_missing', model_called=False)
+        payload = dict(identity_fields(ctx), action='WAIT', confidence=0,
+            expires_at=self.clock()+90, entries=[], take_profits=[], partial_stops=[],
+            cancel_entry_ids=[row['id'] for row in ctx['pending_entries']], leverage=10,
+            rationale='1시간·30분 확정 MA 간격이 모두 수렴해 미체결 진입을 취소합니다.')
+        validated = validate_execution_prices(payload, dict(ctx, now=self.clock()))
+        identity = validated['action_id']
+        self.conn.execute('UPDATE llm_scenario_decisions SET proposal=? WHERE slot=?', (_json(payload), slot))
+        self.conn.execute("INSERT INTO llm_scenario_intents VALUES(?,?,?,'PENDING',NULL)",
+                          (identity, validated['scenario_id'], _json(validated)))
+        state['active']['revision'] = validated['revision']
+        state['version'] += 1
+        self._save(state)
+        from live.scenario_provenance import record_hashed
+        record_hashed('intent_committed', dict(payload=validated, source='HOST_ENTRY_CONVERGENCE',
+            entry_convergence=ctx['entry_convergence']), scenario_id=validated['scenario_id'],
+            intent_id=identity, decision_slot=slot)
+        try:
+            self.broker.execute(validated, identity)
+        except Exception as exc:
+            from live.scenario_broker import BrokerCancellationPending
+            return dict(status='intent_pending', reason='awaiting_cancellation' if isinstance(
+                exc, BrokerCancellationPending) else 'submission_unknown', model_called=False)
+        return dict(status='intent_pending', reason='awaiting_exact_evidence', model_called=False)
+
     def _tick(self, claimed):
         """One synchronous tick; callers may run independent protection separately."""
         slot = int(self.clock() // 300)
@@ -764,6 +800,9 @@ class ScenarioRuntime:
                         outcome["lock_wait_seconds"] = snapshot_lock["lock_wait_seconds"]
                     return outcome
                 ctx["now"] = now
+                if self.convergence_entry_enabled:
+                    from core.scenario_convergence import entry_convergence
+                    ctx['entry_convergence'] = entry_convergence(snap)
                 if (self.calculated_review_enabled and 'single' not in self.research_review_mode
                         and ctx.get('scenario_id') is not None and ctx.get('positions')):
                     from live.scenario_explanation import prepare_source
@@ -784,6 +823,9 @@ class ScenarioRuntime:
                 self.conn.execute("UPDATE llm_scenario_decisions SET snapshot=?, context=? WHERE slot=?",
                                   (_json(snap), _json(ctx), slot))
                 self.conn.commit()
+                if (self.convergence_entry_enabled and ctx['entry_convergence']['status'] == 'BLOCKED'
+                        and ctx.get('pending_entries')):
+                    return self._cancel_converging_entries(current, ctx, slot)
             stage = "proposal_call"
             from live.scenario_provenance import record_hashed
             record_hashed("decision_input", {"snapshot": snap, "context": ctx, "input_id": input_id},
@@ -857,6 +899,8 @@ class ScenarioRuntime:
                 state = self.state()
                 verified_flat_version = self._reconcile(state)
                 fresh = self._context(state)
+                if self.convergence_entry_enabled:
+                    fresh['entry_convergence'] = entry_convergence(snap)
                 contract_exit = self._entry_contract_exit(state, fresh, slot)
                 if contract_exit is not None:
                     return contract_exit
@@ -937,6 +981,8 @@ class ScenarioRuntime:
                     else:
                         self._reconcile(state, observed_at=commit_at)
                         commit_context = self._context(state, observed_at=commit_at)
+                        if self.convergence_entry_enabled:
+                            commit_context['entry_convergence'] = entry_convergence(snap)
                         contract_exit = self._entry_contract_exit(state, commit_context, slot)
                         if contract_exit is not None:
                             return contract_exit
@@ -965,6 +1011,12 @@ class ScenarioRuntime:
                                                         observed_at=post_validation_at)
                     if reuse_flat and post_validation_at - commit_context["account_captured_at"] > 10:
                         return {"status": "stale_proposal"}
+                    if self.convergence_entry_enabled and (payload.get('entries') or payload.get('pending_renewal')):
+                        from core.scenario_convergence import require_entry_convergence
+                        try:
+                            require_entry_convergence(dict(commit_context, now=post_validation_at))
+                        except ValueError as exc:
+                            raise EntryConvergenceRejection(str(exc)) from exc
                     commit_at = post_validation_at
                     validated = final_guard["validated"]
                     fresh = commit_context
@@ -1107,6 +1159,10 @@ class ScenarioRuntime:
                 return {"status": "intent_pending", "reason": "awaiting_exact_evidence",
                         "review_update_receipt": receipt,
                         **({'management_quarantine': fresh['management_quarantine']} if fresh.get('management_quarantine') else {})}
+        except EntryConvergenceRejection as exc:
+            self.conn.rollback()
+            return dict(status='stale_proposal' if stage == 'validation' else 'blocked',
+                        reason=str(exc), failure_stage=stage)
         except ScenarioModelError as exc:
             self.conn.rollback()
             # Fixed codes only: never expose a response, account or transport error.
