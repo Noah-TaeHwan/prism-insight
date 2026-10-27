@@ -10,6 +10,7 @@ import math
 from decimal import Decimal
 from copy import deepcopy
 from core.scenario_stop_policy import validate_stop_revision
+from core.scenario_convergence import require_entry_convergence
 
 LEVERAGE = 10
 RISK_FRACTION = 0.02
@@ -272,7 +273,6 @@ the caller must first reconcile cancellations before dropping pending risk.
         if not isinstance(cancellations, list) or any(not isinstance(x, str) for x in cancellations) or len(set(cancellations)) != len(cancellations):
             raise ScenarioValidationError("invalid cancellation ids")
         if entries or renewal is not None:
-            from core.scenario_convergence import require_entry_convergence
             try:
                 require_entry_convergence(context)
             except ValueError as exc:
