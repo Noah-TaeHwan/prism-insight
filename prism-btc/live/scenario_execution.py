@@ -20,6 +20,7 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 from live.scenario_pending_renewal import initialize as initialize_pending_leases
 from live.scenario_entry_goal import GoalConsistencyRejection, stored_goal, validate_goal_plan
+from live.scenario_review_storage import review_text
 
 
 TERMINAL = frozenset({"Filled", "Cancelled", "Rejected", "Deactivated", "PartiallyFilledCanceled"})
@@ -889,7 +890,7 @@ class ScenarioExecution:
             decision_slot, context_body, proposal_body = decisions[0]
             original_context, decision = json.loads(context_body), json.loads(proposal_body)
             tape = self.conn.execute('SELECT body FROM llm_scenario_review_tapes WHERE slot=?', (decision_slot,)).fetchone()
-            outcome = json.loads(tape[0]).get('outcome', {}) if tape else {}
+            outcome = json.loads(review_text(tape[0])).get('outcome', {}) if tape else {}
             reviewed = outcome.get('result', {})
             selected = reviewed.get('selected', {})
             if (outcome.get('status') != 'COMPLETE' or reviewed.get('calls') != 2

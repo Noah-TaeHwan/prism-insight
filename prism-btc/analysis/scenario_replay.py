@@ -90,14 +90,20 @@ RUNTIME_EVENT_QUERIES = {
 
 
 def _runtime_event_hash(conn):
+    from live.scenario_review_storage import review_text
     event_tables = {}
     for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'llm_scenario%' ORDER BY name"):
         # Schema completeness is part of the hash contract, not optional coverage.
         if name not in RUNTIME_EVENT_QUERIES:
             raise TapeMismatch("unknown_runtime_event_table")
         cursor = conn.execute(RUNTIME_EVENT_QUERIES[name])
-        event_tables[name] = dict(columns=[field[0] for field in cursor.description],
-                                 rows=cursor.fetchall())
+        columns = [field[0] for field in cursor.description]
+        rows = cursor.fetchall()
+        if name in ('llm_scenario_review_events', 'llm_scenario_review_tapes'):
+            index = columns.index('body')
+            rows = [tuple(review_text(value) if i == index else value
+                          for i, value in enumerate(row)) for row in rows]
+        event_tables[name] = dict(columns=columns, rows=rows)
     return digest(event_tables)
 
 
@@ -716,7 +722,8 @@ def _run_replay(bundle,market,output,*,mode,tape_path,path="OHLC",cost_multiplie
             if stopped:
                 report["readiness"]["insufficiency_reasons"].append("STOPPED_TECHNICAL_FAILURE")
         if policy_profile in REJECTION_PROFILES:
-            events = [(slot, json.loads(body)) for slot, body in conn.execute(
+            from live.scenario_review_storage import review_text
+            events = [(slot, json.loads(review_text(body))) for slot, body in conn.execute(
                 "SELECT slot,body FROM llm_scenario_review_events ORDER BY slot,sequence")]
             rejected_slots = set()
             candidates = {}
