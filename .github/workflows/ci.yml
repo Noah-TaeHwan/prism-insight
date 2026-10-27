@@ -306,6 +306,7 @@ jobs:
             prism-btc/tests/test_scenario_oauth.py \
             prism-btc/tests/test_scenario_preview.py \
             prism-btc/tests/test_scenario_runtime.py \
+            prism-btc/tests/test_scenario_safety_detail.py \
             prism-btc/tests/test_scenario_limit_prices.py \
             prism-btc/tests/test_scenario_limit_price_execution.py \
             prism-btc/tests/test_scenario_runner.py \
@@ -316,6 +317,7 @@ jobs:
             prism-btc/tests/test_scenario_model_input.py \
             prism-btc/tests/test_scenario_model_input_gaps.py \
             prism-btc/tests/test_scenario_calculated_review.py \
+            prism-btc/tests/test_scenario_calculated_replay.py \
             prism-btc/tests/test_scenario_review_guard.py \
             prism-btc/tests/test_scenario_risk_allocation.py \
             prism-btc/tests/test_scenario_allocation_chase.py \
