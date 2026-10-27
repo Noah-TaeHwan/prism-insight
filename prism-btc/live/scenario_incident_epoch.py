@@ -212,7 +212,7 @@ def monitor(broker, *, refresh=False):
             children = broker.children(value['scenario_id'])
             child = next(c for c in children if c['link_id'] == value['approval']['unknown_link_id'])
             broker._query_child(child)
-            require(0 <= broker.clock()-started <= 10, 'monitor_deadline')
+            require(0 <= broker.clock()-started <= 10, 'monitor_child_lookup_deadline')
             cursors = [r for r in all_cursors if r['body']['epoch_id'] == value['epoch_id']]
             previous = cursors[-1] if cursors else None
             if previous:
@@ -235,7 +235,7 @@ def monitor(broker, *, refresh=False):
             fresh = {kind: [row for row in rows if digest(row) not in baseline] for kind, rows in finance.items()}
             if any(fresh.values()):
                 record_late(broker, dict(financial_sources=fresh, scenario_id=value['scenario_id']))
-            require(0 <= broker.clock()-started <= 10, 'monitor_deadline')
+            require(0 <= broker.clock()-started <= 10, 'monitor_finance_deadline')
             body = dict(epoch_id=value['epoch_id'], start_ms=start_ms, previous_end_ms=through,
                         end_ms=end_ms, source_sha256=digest(finance))
             _append(broker.conn, FINANCE_CURSOR, dict(body=body, sha256=digest(body)), broker.clock())
@@ -251,7 +251,7 @@ def monitor(broker, *, refresh=False):
                     and position.get('symbol') == 'BTCUSDT' and position.get('positionIdx') == 0), 'foreign_position')
             for order in source.get('orders', {}).get('result', {}).get('list', []):
                 require(order.get('orderId') in owned_ids, 'foreign_order')
-        require(0 <= broker.clock()-started <= 10, 'monitor_deadline')
+        require(0 <= broker.clock()-started <= 10, 'monitor_account_deadline')
         broker._incident_observation = dict(epoch_id=receipt(broker.conn)['epoch_id'], started_at=started,
                                             source_sha256=digest(observed_bodies))
     except Exception as exc:
