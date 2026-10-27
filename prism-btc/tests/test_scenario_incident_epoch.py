@@ -986,3 +986,40 @@ def test_corrupt_monitor_release_cannot_hide_halt(flat_incident):
     policy.release_monitor_gap(broker,expected_halts_sha256=digest(policy._events(broker.conn,policy.HALT)))
     broker.conn.execute("UPDATE llm_scenario_broker_evidence SET body='{}' WHERE kind=?",(policy.MONITOR_RELEASE,));broker.conn.commit()
     with pytest.raises(ValueError):policy.halted(broker.conn)
+
+
+@pytest.mark.parametrize('stage', ['child_lookup', 'finance', 'account'])
+def test_monitor_deadline_records_only_safe_stage_and_keeps_halt(flat_incident, monkeypatch, stage):
+    i = flat_incident
+    transition(i)
+    broker = restarted(i)
+    if stage == 'child_lookup':
+        original = broker._query_child
+        def delayed(*args, **kwargs):
+            result = original(*args, **kwargs)
+            i['now'][0] += 11
+            return result
+        monkeypatch.setattr(broker, '_query_child', delayed)
+    else:
+        name = 'historical_finance' if stage == 'finance' else 'account_sources'
+        original = getattr(policy, name)
+        def delayed(*args, **kwargs):
+            result = original(*args, **kwargs)
+            i['now'][0] += 11
+            return result
+        monkeypatch.setattr(policy, name, delayed)
+    assert policy.monitor(broker, refresh=True) is None
+    assert policy.halted(broker.conn)
+    evidence = policy._events(broker.conn, policy.HALT)[-1]['evidence']
+    assert evidence == dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP',
+                            error_type='ValueError', reason='incident_epoch_monitor_' + stage + '_deadline')
+    assert i['exchange'].writes == []
+    if stage == 'child_lookup':
+        monkeypatch.setattr(broker, '_query_child', original)
+    else:
+        monkeypatch.setattr(policy, name, original)
+    before = copy.deepcopy(policy._events(broker.conn, policy.HALT))
+    policy.release_monitor_gap(broker, expected_halts_sha256=digest(before))
+    assert not policy.halted(broker.conn)
+    assert policy._events(broker.conn, policy.HALT) == before
+    assert i['exchange'].writes == []
