@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import time
+from contextvars import ContextVar
 
 from core.scenario_limit_prices import POLICY_VERSION, observed_quotes
 
@@ -22,6 +23,15 @@ from live.exchange_snapshot import read_complete
 from live.liquidation_guard import capture as capture_liquidation
 from live.shared_entry_coordinator import database_path, mutation_lock
 from live.scenario_execution import ScenarioExecution, decimal
+
+
+_MONITOR_CALL_TIMING = ContextVar('btc_incident_monitor_call_timing', default=None)
+_MONITOR_METHODS = frozenset({
+    'get_api_key_information', 'get_open_orders', 'get_order_history',
+    'get_executions', 'get_transaction_log', 'get_positions',
+    'get_wallet_balance', 'get_account_info', 'get_risk_limit', 'get_tickers',
+    'get_funding_rate_history', 'get_instruments_info',
+})
 
 
 class BrokerNotReady(ValueError):
@@ -143,17 +153,47 @@ class ScenarioDemoBroker(ScenarioExecution):
                 self.execution_blockers=()
 
     def _call(self, method, **params):
-        if getattr(self.session, "endpoint", None) != "https://api-demo.bybit.com":
-            raise BrokerNotReady("demo_endpoint_changed")
-        if not method.startswith("get_"):
-            raise BrokerNotReady("execution_not_implemented")
+        trace = _MONITOR_CALL_TIMING.get()
+        started = None
+        if trace is not None:
+            try:
+                started = time.perf_counter_ns()
+            except Exception:
+                try:
+                    trace['measurement_failures'] += 1
+                except Exception:
+                    pass  # Timing must not change broker evidence.
+        ok = False
         try:
-            response = getattr(self.session, method)(**params)
-        except Exception:
-            raise BrokerNotReady("broker_transport_unknown") from None
-        if not isinstance(response, dict) or response.get("retCode") != 0:
-            raise BrokerNotReady("broker_query_failed")
-        return response
+            if getattr(self.session, "endpoint", None) != "https://api-demo.bybit.com":
+                raise BrokerNotReady("demo_endpoint_changed")
+            if not method.startswith("get_"):
+                raise BrokerNotReady("execution_not_implemented")
+            try:
+                response = getattr(self.session, method)(**params)
+            except Exception:
+                raise BrokerNotReady("broker_transport_unknown") from None
+            if not isinstance(response, dict) or response.get("retCode") != 0:
+                raise BrokerNotReady("broker_query_failed")
+            ok = True
+            return response
+        finally:
+            if trace is not None and started is not None:
+                try:
+                    if len(trace['calls']) < 64:
+                        elapsed = time.perf_counter_ns() - started
+                        if elapsed < 0:
+                            trace['measurement_failures'] += 1
+                        else:
+                            trace['calls'].append(dict(method=method if method in _MONITOR_METHODS else 'other',
+                                                       elapsed_ms=round(elapsed / 1_000_000, 3), ok=ok))
+                    else:
+                        trace['dropped'] += 1
+                except Exception:
+                    try:
+                        trace['measurement_failures'] += 1
+                    except Exception:
+                        pass  # Diagnostics never affect the broker result.
 
     def _identity(self):
         identity = self._call("get_api_key_information").get("result", {}).get("userID")
