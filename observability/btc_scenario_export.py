@@ -17,6 +17,7 @@ import sqlite3
 import time
 
 from .events import build_event
+from .review_storage import review_text
 
 STREAMS = ('llm_scenario_audit_events', 'llm_scenario_recovery_events',
            'llm_scenario_broker_evidence', 'llm_scenario_outbox', 'llm_scenario_review_events',
@@ -282,9 +283,9 @@ def _anchor_hash(stream, row):
     if row is None:
         return None
     if stream == 'llm_scenario_review_events':
-        return _hash(_json([row['slot'], row['sequence'], row['body']]))
+        return _hash(_json([row['slot'], row['sequence'], review_text(row['body'])]))
     if stream == 'llm_scenario_review_tapes':
-        return _hash(_json([row['slot'], row['body']]))
+        return _hash(_json([row['slot'], review_text(row['body'])]))
     return _hash(row['body'])
 
 
@@ -493,6 +494,9 @@ def _capture(source, state, identity, stream, row, manifest_cache=None):
     if stream == 'llm_scenario_outbox':
         _notice(state, identity, row, now)
         return
+    if stream in ('llm_scenario_review_events', 'llm_scenario_review_tapes'):
+        row = dict(row)
+        row['body'] = review_text(row['body'])
     raw = row['body']
     body = json.loads(raw)
     if not isinstance(body, dict):
@@ -653,13 +657,19 @@ def export_once(db_path, state_path, spool_path, limit=100):
                 if state.execute('SELECT COUNT(*) FROM outbox').fetchone()[0] >= 1000:
                     counts['backlog'] = True
                     break
-                size = len(row['body'].encode())
-                if counts['source_bytes'] + size > 4 * 1024 * 1024:
-                    counts['backlog'] = True
-                    counts['source_errors'].append({'stream': stream, 'error_type': 'SOURCE_BYTE_BUDGET'})
-                    break
                 state.execute('SAVEPOINT source_row')
                 try:
+                    raw_body = (review_text(row['body']) if stream in
+                                ('llm_scenario_review_events', 'llm_scenario_review_tapes') else row['body'])
+                    if raw_body is not row['body']:
+                        row = dict(row)
+                        row['body'] = raw_body
+                    size = len(raw_body.encode())
+                    if counts['source_bytes'] + size > 4 * 1024 * 1024:
+                        state.execute('RELEASE source_row')
+                        counts['backlog'] = True
+                        counts['source_errors'].append({'stream': stream, 'error_type': 'SOURCE_BYTE_BUDGET'})
+                        break
                     _capture(source, state, identity, stream, row, manifest_cache)
                     _query(state, 'update_cursor', parameters=(row['source_rowid'], stream))
                     _query(state, 'update_anchor', parameters=(_anchor_hash(stream, row), stream))

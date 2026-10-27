@@ -218,3 +218,86 @@ def test_early_unknown_review_can_join_later_exact_audit_without_rewriting_histo
     for key in ('source_identity','decision_slot','input_id_ref'):
         assert early['attributes'][key]==late['attributes'][key]
     assert review_events(lane)==[early]
+
+
+def test_compressed_review_events_keep_original_hash_and_cursor(lane):
+    import gzip
+    from observability.review_storage import MAGIC
+    create_review(lane[0])
+    export.export_once(*lane)
+    original = json.dumps(dict(kind='MODEL_ERROR', reason='x' * 1024))
+    packed = MAGIC + gzip.compress(original.encode(), compresslevel=1, mtime=0)
+    with sqlite3.connect(lane[0]) as conn:
+        conn.execute('INSERT INTO llm_scenario_review_events VALUES(?,?,?)', (100, 1, packed))
+    assert export.export_once(*lane)['captured'] == 1
+    event = review_events(lane)[-1]
+    assert event['attributes']['body_sha256'] == export._hash(original)
+    assert export.export_once(*lane)['status'] != 'UNAVAILABLE'
+
+
+def test_bad_compressed_review_keeps_cursor(lane):
+    from observability.review_storage import MAGIC
+    create_review(lane[0])
+    export.export_once(*lane)
+    with sqlite3.connect(lane[0]) as conn:
+        conn.execute('INSERT INTO llm_scenario_review_events VALUES(?,?,?)', (100, 1, MAGIC + b'broken'))
+    result = export.export_once(*lane)
+    assert result['status'] == 'DEGRADED' and result['captured'] == 0
+    with sqlite3.connect(lane[1]) as conn:
+        assert conn.execute("SELECT seq FROM cursors WHERE stream='llm_scenario_review_events'").fetchone()[0] == 0
+
+
+def test_compressed_tape_preserves_seal_hash_and_anchor(lane):
+    import gzip
+    from observability.review_storage import MAGIC
+    inputs = dict(context=dict(input_id='private'), bindings={})
+    body = dict(version=1, inputs=inputs, inputs_sha256=tape_digest(inputs), calls=0,
+                operations=[], outcome=dict(status='COMPLETE', result={}))
+    body['sha256'] = tape_digest(body)
+    original = json.dumps(body)
+    with sqlite3.connect(lane[0]) as conn:
+        conn.execute('CREATE TABLE llm_scenario_review_tapes(slot INTEGER PRIMARY KEY,body TEXT)')
+        conn.execute('INSERT INTO llm_scenario_review_tapes VALUES(?,?)',
+                     (100, MAGIC + gzip.compress(original.encode(), mtime=0)))
+    export.export_once(*lane)
+    assert export.export_once(*lane)['captured'] == 1
+    result = [e for e in events(lane[2]) if e['event_type'] == 'btc.research.review_tape'][-1]
+    assert result['attributes']['tape_hash_status'] == 'MATCH'
+    assert result['attributes']['body_sha256'] == export._hash(original)
+    assert export.export_once(*lane)['status'] != 'UNAVAILABLE'
+
+
+def test_compressed_source_budget_counts_decompressed_bytes(lane):
+    import gzip
+    from observability.review_storage import MAGIC
+    create_review(lane[0])
+    export.export_once(*lane)
+    original = json.dumps(dict(kind='MODEL_RAW', raw='x' * (4 * 1024 * 1024)))
+    with sqlite3.connect(lane[0]) as conn:
+        conn.execute('INSERT INTO llm_scenario_review_events VALUES(?,?,?)',
+                     (100, 1, MAGIC + gzip.compress(original.encode(), mtime=0)))
+    result = export.export_once(*lane)
+    assert result['status'] == 'DEGRADED' and result['captured'] == 0
+    assert result['source_errors'][0]['error_type'] == 'SOURCE_BYTE_BUDGET'
+
+
+def test_compressed_decode_rejects_truncation_trailing_and_size():
+    import gzip
+    from observability.review_storage import MAGIC, MAX_BYTES, review_text
+    for body in (MAGIC + b'bad', MAGIC + gzip.compress(b'{}')[:-1],
+                 MAGIC + gzip.compress(b'{}') + b'junk',
+                 MAGIC + gzip.compress(b'x' * (MAX_BYTES + 1))):
+        with pytest.raises(ValueError):
+            review_text(body)
+    assert review_text('legacy') == 'legacy'
+    assert review_text(b'legacy') == 'legacy'
+
+
+@pytest.mark.parametrize('stream', ['llm_scenario_review_events', 'llm_scenario_review_tapes'])
+def test_compressed_and_legacy_rows_share_export_anchor(stream):
+    import gzip
+    from observability.review_storage import MAGIC
+    original = json.dumps(dict(kind='MODEL_ERROR', reason='private'))
+    row = dict(slot=100, sequence=1, body=original)
+    packed = dict(row, body=MAGIC + gzip.compress(original.encode(), mtime=0))
+    assert export._anchor_hash(stream, row) == export._anchor_hash(stream, packed)
