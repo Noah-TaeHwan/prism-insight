@@ -324,3 +324,16 @@ def test_runtime_halt_proof_is_conservative_without_market_call(tmp_path, fault)
     assert (result.get('verified_flat_halt') is True) is (fault is None)
     assert not b.executed
     c.close()
+
+
+def test_submission_unknown_is_preserved_as_error_even_without_decision_slot(tmp_path):
+    from live import tracking
+    from live.scenario_runner import record_health
+    c = tracking.get_connection(tmp_path/'unknown.db')
+    tracking.ensure_schema(c)
+    record_health(c, {'status': 'intent_pending', 'reason': 'submission_unknown'}, loop='decision')
+    record_health(c, {'status': 'intent_pending', 'reason': 'awaiting_cancellation'}, loop='decision')
+    record_health(c, {'status': 'wait'}, loop='decision')
+    errors = c.execute("SELECT message FROM btc_events WHERE mode='demo' AND level='error'").fetchall()
+    assert [row[0] for row in errors] == ['scenario tick: submission_unknown']
+    c.close()
