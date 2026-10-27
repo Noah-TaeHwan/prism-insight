@@ -285,7 +285,15 @@ class Driver:
             start=when.value//1_000_000
             if not bundle["start_ms"]<=start<self.end:continue
             mark=market.mark.loc[when]
-            cap=int(float(market.source.iloc[i-1].volume)*.01/.001) if i else 0
+            if not i or market.source.index[i-1].value//1_000_000 != start-60000:
+                raise ValueError('replay_previous_minute_volume_missing')
+            try:
+                previous_volume = float(market.source.iloc[i-1].volume)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError('replay_previous_minute_volume_invalid') from None
+            if not math.isfinite(previous_volume) or previous_volume < 0:
+                raise ValueError('replay_previous_minute_volume_invalid')
+            cap=int(previous_volume*.01/.001)
             self.capacity[start]=cap
             if start in funding_times:
                 previous=float(market.source.iloc[i-1].close) if i else float(bar.open)
