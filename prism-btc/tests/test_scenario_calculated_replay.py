@@ -546,6 +546,7 @@ def test_observing_post_record_stop_crossing_never_consumes_permit(tmp_path,monk
         assert conn.execute("SELECT count(*) FROM llm_scenario_recovery_events WHERE kind='PERMIT_CONSUMED'").fetchone()[0]==0
         outcome=json.loads(conn.execute("SELECT outcome FROM llm_scenario_decisions WHERE slot=?",(stop_minute//300000,)).fetchone()[0])
         assert outcome["failure_code"]=="fresh_safety_rejection"
+        assert outcome["failure_detail"]=="stop_crossed_market"
 
 
 def test_profiles_preserve_legacy_contract_schema():
