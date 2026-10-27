@@ -302,6 +302,7 @@ jobs:
             prism-btc/tests/test_scenario_entry_contract_wire.py \
             prism-btc/tests/test_scenario_entry_contract_provenance.py \
             prism-btc/tests/test_scenario_contraction_entry_prompt.py \
+            prism-btc/tests/test_convergence_entry_policy.py \
             prism-btc/tests/test_scenario_oauth.py \
             prism-btc/tests/test_scenario_preview.py \
             prism-btc/tests/test_scenario_runtime.py \
