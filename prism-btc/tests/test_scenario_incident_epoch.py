@@ -1,6 +1,7 @@
 """Actual broker/runtime incident recovery; no network or production state."""
 import copy
 import json
+import logging
 import os
 import sqlite3
 
@@ -989,10 +990,11 @@ def test_corrupt_monitor_release_cannot_hide_halt(flat_incident):
 
 
 @pytest.mark.parametrize('stage', ['child_lookup', 'finance', 'account'])
-def test_monitor_deadline_records_only_safe_stage_and_keeps_halt(flat_incident, monkeypatch, stage):
+def test_monitor_deadline_records_only_safe_stage_and_keeps_halt(flat_incident, monkeypatch, caplog, stage):
     i = flat_incident
     transition(i)
     broker = restarted(i)
+    caplog.set_level(logging.WARNING, logger=policy.__name__)
     if stage == 'child_lookup':
         original = broker._query_child
         def delayed(*args, **kwargs):
@@ -1013,6 +1015,21 @@ def test_monitor_deadline_records_only_safe_stage_and_keeps_halt(flat_incident, 
     evidence = policy._events(broker.conn, policy.HALT)[-1]['evidence']
     assert evidence == dict(status='HISTORICAL_MONITOR_OR_COVERAGE_GAP',
                             error_type='ValueError', reason='incident_epoch_monitor_' + stage + '_deadline')
+    messages = [r.getMessage() for r in caplog.records if r.name == policy.__name__
+                and r.getMessage().startswith('incident_monitor_call_timing ')]
+    assert len(messages) == 1
+    assert f"started_ms={int((i['now'][0] - 11) * 1000)}" in messages[0]
+    timing = json.loads(messages[0].split(' calls=', 1)[1])
+    assert set(timing) == {'calls', 'dropped', 'measurement_failures'}
+    assert timing['dropped'] == timing['measurement_failures'] == 0
+    assert timing['calls'] and len(timing['calls']) <= 64
+    for call in timing['calls']:
+        assert set(call) == {'method', 'elapsed_ms', 'ok'}
+        assert call['method'].startswith('get_') or call['method'] == 'other'
+        assert isinstance(call['elapsed_ms'], (int, float)) and call['elapsed_ms'] >= 0
+        assert type(call['ok']) is bool
+    from live.scenario_broker import _MONITOR_CALL_TIMING
+    assert _MONITOR_CALL_TIMING.get() is None
     assert i['exchange'].writes == []
     if stage == 'child_lookup':
         monkeypatch.setattr(broker, '_query_child', original)
@@ -1023,3 +1040,43 @@ def test_monitor_deadline_records_only_safe_stage_and_keeps_halt(flat_incident, 
     assert not policy.halted(broker.conn)
     assert policy._events(broker.conn, policy.HALT) == before
     assert i['exchange'].writes == []
+
+
+def test_monitor_timing_logging_failure_cannot_clear_halt(flat_incident, monkeypatch):
+    i = flat_incident
+    transition(i)
+    broker = restarted(i)
+    original = policy.account_sources
+
+    def delayed(*args, **kwargs):
+        result = original(*args, **kwargs)
+        i['now'][0] += 11
+        return result
+
+    monkeypatch.setattr(policy, 'account_sources', delayed)
+    monkeypatch.setattr(policy.logging.getLogger(policy.__name__), 'warning',
+                        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError('logger failed')))
+    assert policy.monitor(broker, refresh=True) is None
+    assert policy.halted(broker.conn)
+    assert policy._events(broker.conn, policy.HALT)[-1]['evidence']['reason'] == 'incident_epoch_monitor_account_deadline'
+    assert i['exchange'].writes == []
+    from live.scenario_broker import _MONITOR_CALL_TIMING
+    assert _MONITOR_CALL_TIMING.get() is None
+
+
+def test_successful_monitor_restores_outer_trace_without_warning(flat_incident, caplog):
+    i = flat_incident
+    transition(i)
+    broker = restarted(i)
+    from live.scenario_broker import _MONITOR_CALL_TIMING
+    outer = {'calls': [], 'dropped': 0}
+    token = _MONITOR_CALL_TIMING.set(outer)
+    caplog.clear()
+    try:
+        assert policy.monitor(broker, refresh=True) is not None
+        assert _MONITOR_CALL_TIMING.get() is outer
+        assert outer == {'calls': [], 'dropped': 0}
+        assert not any('incident_monitor_call_timing' in r.getMessage() for r in caplog.records)
+        assert i['exchange'].writes == []
+    finally:
+        _MONITOR_CALL_TIMING.reset(token)
