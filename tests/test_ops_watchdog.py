@@ -101,7 +101,10 @@ def test_untagged_broker_lines_take_the_market_from_the_logger():
 def test_known_non_failures_are_ignored():
     now = datetime(2026, 10, 21, 3, 0, tzinfo=KST)
     lines = ["2026-10-21 03:00:00,000 - yfinance - ERROR - $SVA: possibly delisted; no price data found",
-             "2026-10-21 03:00:01,000 - x - ERROR - Actual purchase failed: Micro-split budget below one share"]
+             "2026-10-21 03:00:01,000 - x - ERROR - Actual purchase failed: Micro-split budget below one share",
+             '2026-10-27 23:20:41,787 - yfinance - ERROR - HTTP Error 404: {"quoteSummary":{"result":null,"error":'
+             '{"code":"Not Found","description":"Quote not found for symbol: LC"}}}',
+             "2026-10-27 15:44:09,062 - aiohttp.server - ERROR - Error handling request from 127.0.0.1"]
     assert W.scan_lines(_job("us_morning"), lines, now)[1] == []
 
 
