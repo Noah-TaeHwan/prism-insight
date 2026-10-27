@@ -333,6 +333,32 @@ def test_zero_cap_excluded_only_on_published_nontrading_evidence(monkeypatch):
     assert bundle.cap_df.attrs["precision_krw"] == 100000000
 
 
+@pytest.mark.parametrize("active", [1, 4])
+def test_trading_zero_cap_issue_is_dropped_unless_master_looks_broken(monkeypatch, active):
+    import cores.kis_market_snapshot as module
+    monkeypatch.setattr(module, "_today_kst", lambda: "20260911")
+    odd = [f"03268{i}" for i in range(active)]
+    index = ["005930", *odd]
+    frame = pd.DataFrame({"Open": 10, "High": 12, "Low": 9, "Close": 11, "Volume": 100, "Amount": 1100},
+                         index=index)
+    master = KisMasterData(
+        {code: code for code in index}, pd.DataFrame({"시가총액": [1000000] + [0] * active}, index=index),
+        {}, "20260911", {}, {}, {code: 100 for code in index},
+    )
+    build = lambda: build_kis_snapshot_bundle(
+        "20260911", master_fetcher=lambda: master,
+        snapshot_fetcher=lambda codes: frame.loc[codes], history_fetcher=lambda codes, date: frame.loc[codes],
+    )
+    if active > 3:
+        with pytest.raises(KisSnapshotError, match="Active stock has zero"):
+            build()
+        return
+    bundle = build()
+    assert bundle.snapshot.index.tolist() == ["005930"]
+    assert bundle.snapshot.attrs["unknown_cap_excluded"] == odd
+    assert bundle.snapshot.attrs["nontrading_zero_cap_excluded"] == []
+
+
 def test_zero_cap_issue_reactivation_during_cold_history_fails(monkeypatch):
     import cores.kis_market_snapshot as module
     monkeypatch.setattr(module, "_today_kst", lambda: "20260911")
