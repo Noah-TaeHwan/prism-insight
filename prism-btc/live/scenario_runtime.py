@@ -1140,8 +1140,9 @@ class ScenarioRuntime:
                     cancellation_only_wait = (validated["action"] == "WAIT"
                         and bool(validated.get("cancel_entry_ids"))
                         and not validated.get("entries") and not validated.get("pending_renewal"))
+                    management_adjust = validated["action"] == "ADJUST" and not validated.get("entries")
                     reason = ("awaiting_cancellation" if (validated["action"] in {"EXIT", "REDUCE"}
-                              or cancellation_only_wait) and isinstance(exc, BrokerCancellationPending)
+                              or cancellation_only_wait or management_adjust) and isinstance(exc, BrokerCancellationPending)
                               else "submission_unknown")
                     if (validated['action'] == 'ADJUST' and not validated.get('entries')
                             and isinstance(exc, BrokerProtectionPending)):
