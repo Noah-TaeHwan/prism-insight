@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import time
+from contextlib import suppress
 from contextvars import ContextVar
 
 from core.scenario_limit_prices import POLICY_VERSION, observed_quotes
@@ -159,10 +160,9 @@ class ScenarioDemoBroker(ScenarioExecution):
             try:
                 started = time.perf_counter_ns()
             except Exception:
-                try:
+                # Diagnostic failures cannot alter broker evidence.
+                with suppress(Exception):
                     trace['measurement_failures'] += 1
-                except Exception:
-                    pass  # Timing must not change broker evidence.
         ok = False
         try:
             if getattr(self.session, "endpoint", None) != "https://api-demo.bybit.com":
@@ -190,10 +190,9 @@ class ScenarioDemoBroker(ScenarioExecution):
                     else:
                         trace['dropped'] += 1
                 except Exception:
-                    try:
+                    # The counter is optional if the diagnostic state is damaged.
+                    with suppress(Exception):
                         trace['measurement_failures'] += 1
-                    except Exception:
-                        pass  # Diagnostics never affect the broker result.
 
     def _identity(self):
         identity = self._call("get_api_key_information").get("result", {}).get("userID")

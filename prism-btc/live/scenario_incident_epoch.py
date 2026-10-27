@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+from contextlib import suppress
 from pathlib import Path
 
 from live.scenario_management_quarantine import digest, _append, _events, ENDPOINT
@@ -265,13 +266,12 @@ def monitor(broker, *, refresh=False):
         if reason in {'incident_epoch_monitor_child_lookup_deadline',
                       'incident_epoch_monitor_finance_deadline',
                       'incident_epoch_monitor_account_deadline'}:
-            try:
+            # The durable halt must survive logging failures.
+            with suppress(Exception):
                 started_ms = (int(started * 1000) if type(started) in (int, float)
                               and math.isfinite(started) else None)
                 logging.getLogger(__name__).warning('incident_monitor_call_timing started_ms=%s reason=%s calls=%s',
                     started_ms, reason, json.dumps(timing, separators=(',', ':'), allow_nan=False))
-            except Exception:
-                pass  # A logging failure cannot change the safety decision.
     finally:
         _MONITOR_CALL_TIMING.reset(token)
     return broker._incident_observation
