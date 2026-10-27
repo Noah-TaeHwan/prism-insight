@@ -194,3 +194,20 @@ def test_economic_replay_effects_once_then_guard_replay_is_pure():
     assert replay_review(envelope,research_review,snapshot,ctx,contract,
         bindings={"source":"pinned-source"})==result
     assert (events,boundaries)==before
+
+
+def test_sanitized_oauth_timeout_category_replays_without_leaking_transport():
+    from live.scenario_oauth import ScenarioOAuthTimeout
+    def review(snapshot, ctx, contract, *, generate, record, clock):
+        try:
+            generate()
+        except Exception as exc:
+            record({'kind': 'MODEL_ERROR', 'category': type(exc).__name__})
+            raise ValueError('research_model_call_failed') from None
+    def generate():
+        raise ScenarioOAuthTimeout('scenario_oauth_failed') from None
+    tape = record_review(review, {}, {}, {}, generate=generate, record=lambda e: None, clock=lambda: 1)
+    assert tape['outcome']['status'] == 'FAILED'
+    assert any(op.get('error') == {'type': 'ScenarioOAuthTimeout', 'message': 'scenario_oauth_failed'}
+               for op in tape['operations'])
+    assert replay_review(tape, review, {}, {}, {}) == tape['outcome']
