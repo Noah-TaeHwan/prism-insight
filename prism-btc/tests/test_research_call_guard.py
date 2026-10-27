@@ -1,6 +1,8 @@
 """Offline durable call guard checks; no provider or network is imported."""
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -105,6 +107,25 @@ def test_readonly_inspection_does_not_stop_inflight_attempt(tmp_path):
     assert {p.name: p.read_bytes() for p in g.anchors.iterdir()} == anchors
     g.finish(attempt, "ok", 1)
     assert reserve(g, "B") == "attempt-000002"
+
+
+def test_readonly_inspection_from_separate_process_preserves_live_call(tmp_path):
+    g = guard(tmp_path)
+    attempt = reserve(g)
+    before = g.ledger.read_bytes()
+    root = Path(__file__).resolve().parents[2]
+    code = (
+        "import json,sys; sys.path.insert(0,sys.argv[1]); "
+        "from tools.btc_research_call_guard import CallGuard; "
+        "print(json.dumps(CallGuard.inspect_existing(sys.argv[2],sys.argv[3],24)))"
+    )
+    result = subprocess.run([sys.executable, "-c", code, str(root), str(tmp_path), REGISTRY],
+                            check=True, capture_output=True, text=True, timeout=10)
+    state = json.loads(result.stdout)
+    assert state["inflight"] == attempt and state["stopped"] is False
+    assert g.ledger.read_bytes() == before
+    g.finish(attempt, "ok", 1)
+    assert g.snapshot()["actual_http_calls"] == 1
 
 
 def test_readonly_inspection_never_creates_missing_guard(tmp_path):
