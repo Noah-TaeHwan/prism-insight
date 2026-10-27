@@ -132,8 +132,9 @@ class B3AeWorker:
         try:
             evidence, current = self._evidence(db, campaign, row, now, boundary.isoformat())
         except ValueError as error:
-            # A thin stock with no print for 2 minutes is input not ready yet, not a fault (BKH, 2026-10-27).
-            if str(error) != "QUOTE_STALE_OR_FUTURE":
+            # A thin stock with no print for 2 minutes (BKH, 2026-10-27) or one Yahoo miss (IOVA, 10/28)
+            # is input not ready yet, not a fault.
+            if str(error) not in ("QUOTE_STALE_OR_FUTURE", "QUOTE_UNAVAILABLE"):
                 raise
             return dict(campaign_id=campaign["campaign_id"], status="WAIT", reason=[str(error)])
         if evidence["status"] != "OK":
