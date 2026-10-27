@@ -96,7 +96,12 @@ def main():
         print(json.dumps(result, sort_keys=True, default=str), flush=True)
         if args.once:
             return 2 if result["status"] == "ERROR" else 0
-        time.sleep(args.interval)
+        try:
+            time.sleep(args.interval)
+        except KeyboardInterrupt:
+            # systemd stops the unit with SIGINT; between ticks that is a clean stop, not a crash.
+            # A stop during a tick still raises, so an interrupted step stays visible.
+            return 0
 
 
 if __name__ == "__main__":
