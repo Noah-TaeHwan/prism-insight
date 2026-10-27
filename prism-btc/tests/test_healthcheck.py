@@ -894,3 +894,14 @@ def test_unrecognized_severity_is_not_silently_downgraded(monkeypatch, captured)
     result = healthcheck.notify_health(_healthy_conn(), 'demo', now=_NOW)
     assert result['level'] == 'warn' and result['sent']
     assert '점검 경고' in captured[0] and '확인 필요' in captured[0]
+
+def test_recovered_burst_reads_compressed_wire_and_rejects_corruption():
+    import gzip
+    from live.scenario_review_storage import MAGIC
+    conn = _recovered_input_size_conn()
+    for row in conn.execute('SELECT rowid,body FROM llm_scenario_recovery_events').fetchall():
+        conn.execute('UPDATE llm_scenario_recovery_events SET body=? WHERE rowid=?',
+                     (MAGIC + gzip.compress(row['body'].encode(), mtime=0), row['rowid']))
+    assert healthcheck._check_error_burst(conn, 'demo', _NOW) is None
+    conn.execute('UPDATE llm_scenario_recovery_events SET body=? WHERE rowid=(SELECT min(rowid) FROM llm_scenario_recovery_events)', (MAGIC+b'bad',))
+    assert healthcheck._check_error_burst(conn, 'demo', _NOW) is not None

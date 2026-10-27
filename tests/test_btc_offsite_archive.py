@@ -345,3 +345,17 @@ def test_archive_revision_scan_handles_compressed_review_and_corruption(tmp_path
     child = subprocess.run([os.sys.executable, '-I', '-c', script, str(raw)], cwd=tmp_path,
                            capture_output=True, text=True, timeout=15, check=True)
     assert child.stdout.strip() == 'a' * 40
+
+def test_archive_scans_compressed_recovery_wire_and_marks_corruption(tmp_path):
+    import gzip
+    from observability.review_storage import MAGIC
+    raw = tmp_path / 'recovery.sqlite'
+    original = json.dumps({'source_commit': 'b' * 40})
+    with sqlite3.connect(raw) as db:
+        db.execute('CREATE TABLE llm_scenario_recovery_events(body TEXT)')
+        db.execute('INSERT INTO llm_scenario_recovery_events VALUES(?)',
+                   (MAGIC+gzip.compress(original.encode(), mtime=0),))
+        db.execute('INSERT INTO llm_scenario_recovery_events VALUES(?)', (MAGIC+b'bad',))
+    commits, coverage = archive.referenced_commits(raw)
+    assert commits == ['b' * 40]
+    assert coverage['malformed_evidence_rows'] == 1

@@ -247,3 +247,17 @@ def test_stream_query_text_is_fixed_for_exact_four_sources():
         assert len(statements) == 3 and all(type(s) is str for s in statements)
         assert statements[1].endswith('WHERE rowid=?')
         assert statements[2].endswith('WHERE rowid>? ORDER BY rowid LIMIT ?')
+
+def test_compressed_recovery_anchor_and_corruption(lane):
+    import gzip
+    from observability.review_storage import MAGIC
+    export.export_once(*lane)
+    add(lane[0], 1, 'MODEL_REQUEST', {'user_prompt': 'do not expose'})
+    with sqlite3.connect(lane[0]) as c:
+        body = c.execute('SELECT body FROM llm_scenario_recovery_events').fetchone()[0]
+        c.execute('UPDATE llm_scenario_recovery_events SET body=?', (MAGIC+gzip.compress(body.encode(), mtime=0),))
+    assert export.export_once(*lane)['captured'] == 1
+    assert export.export_once(*lane)['status'] != 'UNAVAILABLE'
+    with sqlite3.connect(lane[0]) as c:
+        c.execute('UPDATE llm_scenario_recovery_events SET body=?', (MAGIC+b'bad',))
+    assert export.export_once(*lane)['status'] == 'UNAVAILABLE'

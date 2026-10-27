@@ -99,7 +99,7 @@ def _runtime_event_hash(conn):
         cursor = conn.execute(RUNTIME_EVENT_QUERIES[name])
         columns = [field[0] for field in cursor.description]
         rows = cursor.fetchall()
-        if name in ('llm_scenario_review_events', 'llm_scenario_review_tapes'):
+        if name in ('llm_scenario_review_events', 'llm_scenario_review_tapes', 'llm_scenario_recovery_events') and 'body' in columns:
             index = columns.index('body')
             rows = [tuple(review_text(value) if i == index else value
                           for i, value in enumerate(row)) for row in rows]
@@ -357,7 +357,9 @@ class Driver:
 
 
 def _single_pass_audit_rows(conn, slot):
+    from live.scenario_review_storage import review_text
     rows = conn.execute("SELECT kind,body FROM llm_scenario_recovery_events WHERE slot=? AND kind IN ('MODEL_REQUEST','MODEL_RAW') ORDER BY rowid", (slot,)).fetchall()
+    rows = [(kind, review_text(body)) for kind, body in rows]
     groups = {kind: [body for row_kind, body in rows if row_kind == kind]
               for kind in ('MODEL_REQUEST', 'MODEL_RAW')}
     if (any(len(group) > 1 for group in groups.values())
