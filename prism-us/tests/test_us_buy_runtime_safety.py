@@ -328,6 +328,34 @@ def test_broker_strict_quote_rejects_base_without_changing_default(monkeypatch, 
     assert (quote["current_price"] if quote else None) == expected
 
 
+@pytest.mark.parametrize("message,calls,expected", [("EGW00201", 2, 101), ("other", 1, None)])
+def test_price_query_retries_only_the_rate_limit(monkeypatch, message, calls, expected):
+    original_open = builtins.open
+    def fake_open(path, *args, **kwargs):
+        if str(path).endswith("kis_devlp.yaml"):
+            return io.StringIO("{}")
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", fake_open)
+    monkeypatch.setitem(sys.modules, "kis_auth", MagicMock())
+    old_path = list(sys.path)
+    try:
+        trading = base._load_module("us_rate_limit_quote_tests", base.PRISM_US_DIR / "trading/us_stock_trading.py")
+    finally:
+        sys.path[:] = old_path
+    monkeypatch.setattr(trading.time, "sleep", lambda _: None)
+    refused = MagicMock()
+    refused.isOK.return_value = False
+    refused.getErrorMessage.return_value = message
+    ok = MagicMock()
+    ok.isOK.return_value = True
+    ok.getBody.return_value = types.SimpleNamespace(output={"last": "101", "base": "100"})
+    trader = trading.USStockTrading.__new__(trading.USStockTrading)
+    trader._request = MagicMock(side_effect=[refused, ok])
+    quote = trader.get_current_price("HALO", "NASD")
+    assert (quote["current_price"] if quote else None) == expected
+    assert trader._request.call_count == calls
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("market_open,reserved_available", [(True, True), (False, True), (False, False)])
 async def test_internal_refetch_cannot_replace_validated_order_limit(monkeypatch, market_open, reserved_available):
