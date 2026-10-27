@@ -159,7 +159,8 @@ def test_worker_waits_or_skips(env, restore_gates, kwargs, second, expected):
     assert (rows[0]["status"] if rows else None) == expected
 
 
-@pytest.mark.parametrize("detail, status", [("QUOTE_STALE_OR_FUTURE", "WAIT"), ("QUOTE_TIME_MISSING", "ERROR")])
+@pytest.mark.parametrize("detail, status", [("QUOTE_STALE_OR_FUTURE", "WAIT"), ("QUOTE_UNAVAILABLE", "WAIT"),
+                                           ("QUOTE_IDENTITY_OR_CURRENCY", "ERROR"), ("QUOTE_TIME_MISSING", "ERROR")])
 def test_stale_quote_waits_but_other_quote_faults_stay_errors(env, restore_gates, detail, status):
     _, db = env
     _open()
@@ -268,6 +269,8 @@ def test_us_quote_printed_during_the_fetch_is_not_a_future_quote(monkeypatch):
     plan = dict(symbol="BKH", source_decision_ref="d", setup=dict(price_basis_ref="p"))
     quote = b3_ae_worker.us_providers()["quote"](plan, "legacy:US:1", before.isoformat())
     assert quote["price"] == "79.15" and quote["observed_at"] == printed.isoformat()
+    with pytest.raises(ValueError, match="QUOTE_UNAVAILABLE"):  # an empty provider answer is not a wrong symbol
+        oneil_runtime_inputs.quote_input(plan=plan, position_id="legacy:US:1", response={}, now=b3_ae_worker.utc_now())
     with pytest.raises(ValueError, match="QUOTE_STALE_OR_FUTURE"):  # a stale quote still fails closed
         clock[0] = before + timedelta(seconds=200)
         oneil_runtime_inputs.quote_input(plan=plan, position_id="legacy:US:1",
