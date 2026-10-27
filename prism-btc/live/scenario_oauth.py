@@ -11,12 +11,16 @@ import os
 import re
 import time
 from types import SimpleNamespace
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 MAX_BYTES = 1_048_576
 MIN_RETRY_SECONDS = 5
+
+
+class ScenarioOAuthTimeout(ValueError):
+    """Safe timeout category for sealed review evidence."""
 
 
 def _unique_object(pairs):
@@ -147,5 +151,9 @@ def generate_scenario(*, system_prompt, user_prompt, model, reasoning_effort,
         if not texts:
             raise ValueError("model_text_missing")
         return SimpleNamespace(text="".join(texts))
+    except (TimeoutError, URLError) as exc:
+        if isinstance(exc, TimeoutError) or isinstance(getattr(exc, 'reason', None), TimeoutError):
+            raise ScenarioOAuthTimeout("scenario_oauth_failed") from None
+        raise ValueError("scenario_oauth_failed") from None
     except Exception:
         raise ValueError("scenario_oauth_failed") from None
