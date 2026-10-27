@@ -1,3 +1,4 @@
+from live.scenario_review_storage import review_text
 """Fake-model full runtime proof of raw explanation and compiled plan boundaries."""
 from copy import deepcopy
 import json
@@ -109,7 +110,7 @@ def run_pipeline(tmp_path,action='WAIT',side='LONG',missing=False,failed=False,a
     else:
         outcome=r.tick()
     recorded=conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()
-    tape=json.loads(recorded[0]) if recorded else None
+    tape=json.loads(review_text(recorded[0])) if recorded else None
     return r,broker,outcome,tape,requests,old_plan
 
 

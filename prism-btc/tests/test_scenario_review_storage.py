@@ -54,3 +54,14 @@ def test_comparator_reads_compressed_event_without_changing_hash(tmp_path):
                   'policy': 'preauthority-economic-reject-v1', 'rejected_ticks': 0,
                   'rejected_candidates': 0, 'codes': {}, 'durable_events_sha256': digest([(10, event)])}}
     verify_economic_rejections(tmp_path, report)
+
+
+def test_new_tape_encoding_round_trips_and_short_records_stay_plain():
+    from live.scenario_review_storage import review_storage
+    for original in ('{}', '{"large":"' + 'x' * 10000 + '"}'):
+        encoded = review_storage(original)
+        assert review_text(encoded) == export_text(encoded) == original
+    assert isinstance(review_storage('{}'), str)
+    assert isinstance(review_storage('{"large":"' + 'x' * 10000 + '"}'), bytes)
+    with pytest.raises(ValueError):
+        review_storage('x' * (MAX_BYTES + 1))

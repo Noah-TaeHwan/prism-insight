@@ -1,3 +1,4 @@
+from live.scenario_review_storage import review_text
 """Full fake-exchange runtime path; captured requests never contact a model."""
 from copy import deepcopy
 import json
@@ -310,7 +311,7 @@ def test_two_trade_alternatives_plus_renewal_are_lossless_and_decline_is_availab
     assert r.tick()['status'] == 'intent_pending'
     e.now += 301
     outcome = r.tick()
-    assert outcome['status'] == 'intent_pending', (outcome, [json.loads(row[0])['outcome']
+    assert outcome['status'] == 'intent_pending', (outcome, [json.loads(review_text(row[0]))['outcome']
         for row in r.conn.execute('SELECT body FROM llm_scenario_review_tapes')])
     projected = json.loads(calls[-1]['user_prompt'])
     restored = restore_model_input(projected)
@@ -545,7 +546,7 @@ def test_pending_renewal_reads_compressed_selected_tape(tmp_path, monkeypatch, c
     def compressed(payload, ident):
         slot = r.conn.execute('SELECT slot FROM llm_scenario_decisions WHERE json_extract(proposal, "$.action_id")=?', (ident,)).fetchone()[0]
         body = r.conn.execute('SELECT body FROM llm_scenario_review_tapes WHERE slot=?', (slot,)).fetchone()[0]
-        value = MAGIC + (b'broken' if corrupt else gzip.compress(body.encode(), mtime=0))
+        value = MAGIC + (b'broken' if corrupt else gzip.compress(review_text(body).encode(), mtime=0))
         r.conn.execute('UPDATE llm_scenario_review_tapes SET body=? WHERE slot=?', (value, slot))
         r.conn.commit()
         return original(payload, ident)
@@ -569,7 +570,7 @@ def test_runtime_durable_event_comparison_reads_compressed_events(tmp_path, monk
         original(slot, event, commit=commit)
         seq, body = r.conn.execute('SELECT sequence,body FROM llm_scenario_review_events WHERE slot=? ORDER BY sequence DESC LIMIT 1', (slot,)).fetchone()
         r.conn.execute('UPDATE llm_scenario_review_events SET body=? WHERE slot=? AND sequence=?',
-                       (MAGIC + gzip.compress(body.encode(), mtime=0), slot, seq))
+                       (MAGIC + gzip.compress(review_text(body).encode(), mtime=0), slot, seq))
         if commit:
             r.conn.commit()
 
@@ -577,3 +578,37 @@ def test_runtime_durable_event_comparison_reads_compressed_events(tmp_path, monk
     result = r.tick()
     assert result['status'] == 'intent_pending', result
     assert r.conn.execute("SELECT COUNT(*) FROM llm_scenario_review_events WHERE typeof(body)='blob'").fetchone()[0] > 0
+
+
+def test_new_review_tape_is_compressed_and_preserves_complete_envelope(tmp_path):
+    from backtest.scenario_tape import digest
+    from live.scenario_review_storage import MAGIC, review_text
+    r, _, _, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    stored = r.conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()[0]
+    assert isinstance(stored, bytes) and stored.startswith(MAGIC)
+    envelope = json.loads(review_text(stored))
+    assert envelope['outcome']['status'] == 'COMPLETE' and envelope['executable'] is False
+    assert envelope['sha256'] == digest({k: v for k, v in envelope.items() if k != 'sha256'})
+
+
+def test_runtime_compressed_tape_exports_with_matching_original_seal(tmp_path):
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from observability import btc_scenario_export
+    from live.scenario_review_storage import review_text
+    r, _, _, _, _ = renewal_runtime(tmp_path)
+    assert r.tick()['status'] == 'intent_pending'
+    db = Path(r.conn.execute('PRAGMA database_list').fetchone()[2])
+    stored = r.conn.execute('SELECT body FROM llm_scenario_review_tapes').fetchone()[0]
+    original = review_text(stored)
+    state, spool = tmp_path / 'export-state.sqlite', tmp_path / 'export.jsonl'
+    btc_scenario_export.export_once(db, state, spool)
+    btc_scenario_export.export_once(db, state, spool)
+    rows = [json.loads(line) for line in spool.read_text().splitlines() if line.strip()]
+    exported = [row for row in rows if row.get('event_type') == 'btc.research.review_tape']
+    assert len(exported) == 1
+    assert exported[0]['attributes']['tape_hash_status'] == 'MATCH'
+    assert exported[0]['attributes']['body_sha256'] == btc_scenario_export._hash(original)
+    r.conn.close()
