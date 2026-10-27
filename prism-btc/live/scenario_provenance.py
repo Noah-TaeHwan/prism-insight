@@ -41,7 +41,7 @@ def review_policy_binding(*, research_mode="legacy"):
     from analysis import scenario_review_tape
     from backtest import scenario_tape
     from live import (scenario_calculated_review, scenario_review_adapter,
-                      scenario_review_guard, scenario_llm, scenario_contract,
+                      scenario_review_guard, scenario_llm, scenario_oauth, scenario_contract,
                       scenario_model_input, scenario_preview, scenario_runtime,
                       scenario_entry_contract, scenario_position_flow, scenario_pending_renewal, scenario_entry_goal,
                       scenario_entry_display, scenario_analysis_frames, scenario_explanation, scenario_fee_projection)
@@ -57,6 +57,7 @@ def review_policy_binding(*, research_mode="legacy"):
         'live/scenario_review_adapter.py': scenario_review_adapter,
         'live/scenario_review_guard.py': scenario_review_guard,
         'live/scenario_llm.py': scenario_llm,
+        'live/scenario_oauth.py': scenario_oauth,
         'live/scenario_contract.py': scenario_contract,
         'live/scenario_model_input.py': scenario_model_input,
         'live/scenario_preview.py': scenario_preview,
