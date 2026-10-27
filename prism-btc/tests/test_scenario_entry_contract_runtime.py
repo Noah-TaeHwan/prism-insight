@@ -217,6 +217,19 @@ def test_runtime_host_exit_actual_adapter_and_restart_no_second_post(tmp_path, e
             side="LONG", first_fill_at=1800000001., observed_at=now[0], current_mark=94))
         result = r.tick()
         assert result["status"] == ("wait" if index == 1 else "intent_pending")
+    if exit_error == "timeout":
+        from live import tracking
+        from live.scenario_runner import observe_pending_market, record_health
+        assert result['reason'] == 'submission_unknown'
+        row = r.conn.execute('SELECT outcome FROM llm_scenario_decisions WHERE slot=?',
+                             (int(now[0]//300),)).fetchone()
+        assert row is None or row[0] is None
+        tracking.ensure_schema(r.conn)
+        result = observe_pending_market(result, lambda: dict(valid=True, as_of_ms=now[0]*1000),
+                                        clock=lambda: now[0])
+        record_health(r.conn, result, loop='decision', clock=lambda: now[0])
+        assert r.conn.execute("SELECT count(*) FROM btc_events WHERE mode='demo' AND level='error' "
+                              "AND message='scenario tick: submission_unknown'").fetchone()[0] == 1
     assert len(calls) == 2  # OPEN + first confirming sample; failure bypasses model.
     assert posts[-1]["action"] == "EXIT" and posts[-1]["cancel_entry_ids"] == ["pending"]
     assert r.state()["active"]["entry_contract"] == registered
