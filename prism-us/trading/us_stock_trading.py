@@ -122,6 +122,9 @@ def _resolve_sell_quantity(holding_quantity: int, quantity: int = None) -> int:
     return min(q, holding_quantity)
 
 
+_RATE_LIMIT_CODE = "EGW00201"   # KIS per-second request limit
+_RATE_LIMIT_WAITS = (0.5, 1.0)
+
 # Exchange code mapping (for trading/portfolio APIs using OVRS_EXCG_CD)
 EXCHANGE_CODES = {
     "NASDAQ": "NASD",
@@ -422,6 +425,13 @@ class USStockTrading:
 
         try:
             res = self._request(api_url, tr_id, params)
+            # Exit loops in separate processes share KIS's per-second quota (HALO skipped, 2026-10-27).
+            for wait in _RATE_LIMIT_WAITS:
+                if res.isOK() or _RATE_LIMIT_CODE not in str(res.getErrorMessage()):
+                    break
+                logger.info(f"[{ticker}] Price query rate-limited; retrying in {wait:.1f}s")
+                time.sleep(wait)
+                res = self._request(api_url, tr_id, params)
 
             if res.isOK():
                 data = res.getBody().output
