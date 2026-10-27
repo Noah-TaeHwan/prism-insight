@@ -159,6 +159,22 @@ def test_worker_waits_or_skips(env, restore_gates, kwargs, second, expected):
     assert (rows[0]["status"] if rows else None) == expected
 
 
+@pytest.mark.parametrize("detail, status", [("QUOTE_STALE_OR_FUTURE", "WAIT"), ("QUOTE_TIME_MISSING", "ERROR")])
+def test_stale_quote_waits_but_other_quote_faults_stay_errors(env, restore_gates, detail, status):
+    _, db = env
+    _open()
+    store = B3AeShadowStore(capture.store_path())
+    now = datetime(2026, 10, 6, 10, 0, 30, tzinfo=SEOUL).astimezone(timezone.utc)
+    worker = _worker(db, store, now)
+
+    def quote(*_):
+        raise ValueError(detail)
+    worker.providers["quote"] = quote
+    row = worker.once()["rows"][0]
+    assert row["status"] == status
+    assert (row.get("reason") or [row.get("detail")]) == [detail]
+
+
 def test_exit_hook_and_reconcile_close_with_the_original_exit(env, restore_gates):
     _, db = env
     state = _open()
