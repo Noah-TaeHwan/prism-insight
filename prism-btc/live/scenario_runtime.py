@@ -37,6 +37,19 @@ REQUIRED_CAPABILITIES = frozenset({"exact_fills", "atomic_protection",
     "exact_settlement", "idempotent_intents", "fresh_risk_context"})
 
 
+def _fresh_safety_detail(code):
+    """Return a fixed category without preserving exception text or context values."""
+    if not isinstance(code, str):
+        return None
+    if code.startswith('review_guard_context_changed:'):
+        return 'context_changed'
+    return {
+        'review_guard_effective_plan_changed': 'effective_plan_changed',
+        'review_guard_stale_account': 'stale_account',
+        'stop_crossed_market': 'stop_crossed_market',
+    }.get(code)
+
+
 @contextmanager
 def _snapshot_mutation_lock(conn, diagnostics):
     """Wait only for OS-lock acquisition, never retry input persistence work."""
@@ -1216,11 +1229,12 @@ class ScenarioRuntime:
             if self.calculated_review_enabled:
                 from backtest.scenario_tape import TapeMismatch
                 review_code = str(exc)
+                review_detail = _fresh_safety_detail(review_code)
                 if isinstance(exc, TapeMismatch):
                     outcome["failure_code"] = "review_tape_failure"
-                elif review_code.startswith("review_guard_context_changed:") or review_code in {
-                        "review_guard_effective_plan_changed", "review_guard_stale_account", "stop_crossed_market"}:
+                elif review_detail is not None:
                     outcome["failure_code"] = "fresh_safety_rejection"
+                    outcome["failure_detail"] = review_detail
                 elif review_code in {"review_final_deadline", "review_guard_stale_input",
                         "review_guard_stale_review_clock", "review_guard_invalid_time"}:
                     outcome["failure_code"] = "review_deadline_failure"
