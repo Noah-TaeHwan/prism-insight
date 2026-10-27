@@ -338,3 +338,10 @@ def test_archive_revision_scan_handles_compressed_review_and_corruption(tmp_path
     assert commits == ['a' * 40]
     assert coverage['malformed_evidence_rows'] == 1
     assert archive.review_text(MAGIC + gzip.compress(original.encode(), mtime=0)) == original
+    source = Path(archive.__file__).read_text()
+    script = ("import sys; ns={'__name__':'offsite_receiver'}; "
+              "exec(compile(%r, '<archive>', 'exec'), ns); "
+              "print(ns['referenced_commits'](ns['Path'](sys.argv[1]))[0][0])" % source)
+    child = subprocess.run([os.sys.executable, '-I', '-c', script, str(raw)], cwd=tmp_path,
+                           capture_output=True, text=True, timeout=15, check=True)
+    assert child.stdout.strip() == 'a' * 40
