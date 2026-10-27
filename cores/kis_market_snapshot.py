@@ -57,6 +57,7 @@ def _today_kst() -> str:
 _URL = "/uapi/domestic-stock/v1/quotations/intstock-multprice"
 _TR_ID = "FHKST11300006"
 _CHUNK_SIZE = 30
+_UNKNOWN_CAP_LIMIT = 3
 _KOSPI_WIDTHS = [
     2, 1, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 9, 5, 5, 1, 1,
@@ -523,6 +524,7 @@ def build_kis_snapshot_bundle(
     if cap["시가총액"].isna().any() or (cap["시가총액"] < 0).any():
         raise KisSnapshotError("KIS master previous-cap coverage incomplete")
     zero_cap = cap.index[cap["시가총액"] == 0].tolist()
+    unknown_cap = []
     if zero_cap:
         # A published zero-cap, zero-activity issue (e.g. a suspended SPAC)
         # cannot pass ANY existing liquidity trigger. Verify it is nontrading
@@ -530,10 +532,16 @@ def build_kis_snapshot_bundle(
         probe = snapshot_fetcher(codes)
         if set(probe.index) != set(codes):
             raise KisSnapshotError("KIS current snapshot coverage incomplete")
-        if (any(master.previous_volumes.get(code) != 0 for code in zero_cap)
-                or (probe.loc[zero_cap, ["Volume", "Amount"]] != 0).any().any()):
+        unknown_cap = [code for code in zero_cap
+                       if master.previous_volumes.get(code) != 0
+                       or (probe.loc[code, ["Volume", "Amount"]] != 0).any()]
+        # A trading issue published with cap 0 has an unknown cap, so it cannot pass any
+        # trigger's 5000억 floor: drop it rather than stop the batch (032685, 2026-10-27).
+        # More than a handful means a broken master, not one odd row.
+        if len(unknown_cap) > _UNKNOWN_CAP_LIMIT:
             raise KisSnapshotError("Active stock has zero KIS master market cap")
-        codes = [code for code in codes if code not in zero_cap]
+        zero_cap = [code for code in zero_cap if code not in unknown_cap]
+        codes = [code for code in codes if code not in zero_cap and code not in unknown_cap]
         cap = cap.loc[codes].copy()
         if not codes:
             raise KisSnapshotError("No eligible two-session KIS universe")
@@ -624,6 +632,7 @@ def build_kis_snapshot_bundle(
         requested_universe=len(master.names), eligible_coverage=len(codes),
         ipo_excluded=sum(master.listed_dates.get(code) == trade_date for code in master.names),
         nontrading_zero_cap_excluded=zero_cap,
+        unknown_cap_excluded=unknown_cap,
         corporate_action_unverified_excluded=action_unverified,
     )
     return MarketSnapshotBundle(snapshot, previous, cap, prev_date, "kis")
