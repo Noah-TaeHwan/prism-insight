@@ -19,6 +19,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+import zlib
 
 RESERVE = 5 * 1024**3
 CAP = 10 * 1024**3
@@ -35,6 +36,25 @@ EVIDENCE_QUERIES = {
                                'snapshot': 'SELECT snapshot FROM llm_scenario_decisions'},
     'llm_scenario_review_tapes': {'body': 'SELECT body FROM llm_scenario_review_tapes'},
 }
+
+
+def review_text(value):
+    """Keep the receiver self-contained while accepting tagged review records."""
+    magic = b'PRISM_REVIEW_GZIP_V1\x00'
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, bytes):
+        raise ValueError('review_body_type_invalid')
+    if not value.startswith(magic):
+        return value.decode('utf-8')
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        raw = decoder.decompress(value[len(magic):], 8_000_001)
+    except zlib.error as exc:
+        raise ValueError('review_body_compression_invalid') from exc
+    if len(raw) > 8_000_000 or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError('review_body_compression_invalid')
+    return raw.decode('utf-8')
 
 
 def run(args, *, cwd=None, timeout=600):
@@ -189,6 +209,8 @@ def referenced_commits(raw):
                         coverage['missing_evidence_values'] += 1
                     else:
                         try:
+                            if table in ('llm_scenario_review_events', 'llm_scenario_review_tapes'):
+                                value = review_text(value)
                             parsed = json.loads(value)
                         except (TypeError, ValueError):
                             parsed = None

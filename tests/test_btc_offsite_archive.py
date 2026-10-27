@@ -321,3 +321,20 @@ def test_git_boundary_uses_fixed_executable_without_shell(monkeypatch, tmp_path)
     assert archive.run(['git', 'rev-parse', 'HEAD'], cwd=tmp_path) == 'ok'
     assert calls[0][0] == ['/usr/bin/git', 'rev-parse', 'HEAD']
     assert calls[0][1]['shell'] is False
+
+
+def test_archive_revision_scan_handles_compressed_review_and_corruption(tmp_path):
+    import gzip
+    from observability.review_storage import MAGIC
+    raw = tmp_path / 'review.sqlite'
+    original = json.dumps({'source_commit': 'a' * 40})
+    with sqlite3.connect(raw) as db:
+        db.execute('CREATE TABLE llm_scenario_review_tapes(body TEXT)')
+        db.execute('CREATE TABLE llm_scenario_review_events(body TEXT)')
+        db.execute('INSERT INTO llm_scenario_review_tapes VALUES(?)',
+                   (MAGIC + gzip.compress(original.encode(), mtime=0),))
+        db.execute('INSERT INTO llm_scenario_review_events VALUES(?)', (MAGIC + b'broken',))
+    commits, coverage = archive.referenced_commits(raw)
+    assert commits == ['a' * 40]
+    assert coverage['malformed_evidence_rows'] == 1
+    assert archive.review_text(MAGIC + gzip.compress(original.encode(), mtime=0)) == original
