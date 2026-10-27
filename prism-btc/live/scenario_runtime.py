@@ -1085,8 +1085,12 @@ class ScenarioRuntime:
                     from live.scenario_broker import BrokerCancellationPending, BrokerNotReady, BrokerProtectionPending
                     self._notice("unknown:"+ident,dict(kind="PENDING",timestamp=self.clock()))
                     self.conn.commit()
-                    reason = ("awaiting_cancellation" if validated["action"] in {"EXIT", "REDUCE"}
-                              and isinstance(exc, BrokerCancellationPending) else "submission_unknown")
+                    cancellation_only_wait = (validated["action"] == "WAIT"
+                        and bool(validated.get("cancel_entry_ids"))
+                        and not validated.get("entries") and not validated.get("pending_renewal"))
+                    reason = ("awaiting_cancellation" if (validated["action"] in {"EXIT", "REDUCE"}
+                              or cancellation_only_wait) and isinstance(exc, BrokerCancellationPending)
+                              else "submission_unknown")
                     if (validated['action'] == 'ADJUST' and not validated.get('entries')
                             and isinstance(exc, BrokerProtectionPending)):
                         reason = "awaiting_protection"
