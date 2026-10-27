@@ -910,6 +910,12 @@ truth of a qualitative judgment; all lifecycle and risk guards still apply.
 """
 
 
+def convergence_entry_instructions(context):
+    if 'entry_convergence' not in context:
+        return ''
+    return '\nHost entry_convergence is a deterministic entry restriction, not trade direction.\nBLOCKED means BOTH confirmed 1h and 30m MA10/35 absolute gaps are narrowing.\nDo not propose OPEN, additional entries or pending renewal when BLOCKED or UNKNOWN.\nSmall allocation, price breakout and a forming-bar change cannot override it.\nWith both confirmed frame facts available, one gap widening or unchanged does not trigger this restriction; in\nparticular 1h narrowing with 30m widening remains eligible for ordinary review,\nnot an automatic entry. Existing holdings keep normal WAIT, protection-only\nADJUST, REDUCE and EXIT authority. Convergence alone never mandates closing holdings.\n'
+
+
 def entry_contract_prompt(context):
     if context.get('entry_contract_version') != 2:
         return ENTRY_CONTRACT_PROMPT
@@ -1078,6 +1084,7 @@ def propose(snapshot: dict, context: dict, response_contract: dict, *,
         system_prompt += entry_contract_prompt(context)
     if flat_entry:
         system_prompt += FLAT_ENTRY_PROMPT
+    system_prompt += convergence_entry_instructions(context)
     system_prompt = immediate_reduce_instructions(system_prompt, context)
     from live.scenario_recovery import record_model_request, record_model_wire, record_model_error
     record_model_request(system_prompt=system_prompt, user_prompt=prompt,

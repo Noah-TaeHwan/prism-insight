@@ -10,7 +10,7 @@ import json
 import math
 import time
 
-from core.llm_scenario import EconomicProposalRejection, ScenarioValidationError, risk_snapshot, validate_scenario
+from core.llm_scenario import EntryConvergenceRejection, EconomicProposalRejection, ScenarioValidationError, risk_snapshot, validate_scenario
 from core.scenario_limit_prices import preview_execution_prices
 from engine.scenario_ma_context import build_ma_structure_context
 from live import scenario_llm
@@ -531,6 +531,11 @@ def calculate_candidate(wire, context, *, candidate_id, original_input_now=None,
             effective_per_entry_risk=_entry_risk_components(effective, context),
             projection=_holding_projection(effective, context) if context.get("scenario_id") is not None
                 else _gross_projection(effective, context), eligible=True)
+    except EntryConvergenceRejection as exc:
+        if strict:
+            raise
+        receipt.update(rejection=str(exc), rejection_type='PREAUTHORITY_ENTRY_POLICY',
+                       entry_policy_evidence=deepcopy(context.get('entry_convergence')))
     except GoalConsistencyRejection as exc:
         if strict:
             raise
@@ -670,7 +675,7 @@ def calculate_allocation_candidate(raw, context, *, candidate_id, original_input
         if receipt["eligible"]:
             validate_allocation_prices(receipt["effective_plan"], allocation, context)
     except (ScenarioValidationError, ValueError) as exc:
-        if context.get('entry_contract_version') == 2 and not isinstance(exc, EconomicProposalRejection):
+        if context.get('entry_contract_version') == 2 and not isinstance(exc, (EconomicProposalRejection, EntryConvergenceRejection)):
             raise
         if "receipt" not in locals():
             receipt = dict(id=candidate_id, raw_allocation_proposal=original,
@@ -745,6 +750,15 @@ def calculate_economic_candidate(raw, context, *, candidate_id, original_input_n
             original_input_now=original_input_now, strict=True, explanation_snapshot=explanation_snapshot)
         receipt.update(calculated)
         validate_allocation_prices(receipt["effective_plan"], allocation, context)
+    except EntryConvergenceRejection as exc:
+        unrestricted = dict(context)
+        unrestricted.pop('entry_convergence', None)
+        try:
+            validate_scenario(core, unrestricted)
+        except EconomicProposalRejection:
+            pass
+        receipt.update(eligible=False, rejection=str(exc), rejection_type='PREAUTHORITY_ENTRY_POLICY',
+                       entry_policy_evidence=deepcopy(context.get('entry_convergence')))
     except GoalConsistencyRejection as exc:
         receipt.update(eligible=False, rejection=str(exc),
             rejection_type='PREAUTHORITY_PLAN_CONSISTENCY', goal_evidence=exc.evidence)
@@ -884,6 +898,7 @@ def research_review(snapshot, context, response_contract, *, generate, record,
         base += scenario_llm.entry_contract_prompt(context)
     if context.get("scenario_id") is None:
         base += scenario_llm.FLAT_ENTRY_PROMPT
+    base += scenario_llm.convergence_entry_instructions(context)
     allocation = research_mode != "legacy"
     if allocation:
         base = allocation_system_prompt(base)

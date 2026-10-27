@@ -112,8 +112,11 @@ class ScenarioDemoBroker(ScenarioExecution):
     capabilities = frozenset()
     execution_blockers = ("explicit_execution_enablement_required",)
 
-    def __init__(self, conn, *, session=None, expected_main_uid, clock=time.time, execution_enabled=False):
+    def __init__(self, conn, *, session=None, expected_main_uid, clock=time.time, execution_enabled=False, convergence_entry_enabled=False):
         database_path(conn)
+        if type(convergence_entry_enabled) is not bool:
+            raise ValueError('convergence_entry_flag_must_be_bool')
+        self.convergence_entry_enabled = convergence_entry_enabled
         if not isinstance(expected_main_uid, str) or not expected_main_uid.isdigit() or int(expected_main_uid) <= 0:
             raise BrokerNotReady("explicit_main_uid_required")
         if session is None:

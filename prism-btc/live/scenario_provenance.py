@@ -45,7 +45,7 @@ def review_policy_binding(*, research_mode="legacy"):
                       scenario_model_input, scenario_preview, scenario_runtime,
                       scenario_entry_contract, scenario_position_flow, scenario_pending_renewal, scenario_entry_goal,
                       scenario_entry_display, scenario_analysis_frames, scenario_explanation, scenario_fee_projection)
-    from core import scenario_limit_prices, llm_scenario, scenario_stop_policy
+    from core import scenario_limit_prices, llm_scenario, scenario_stop_policy, scenario_convergence
     from core import scenario_pending_renewal as pending_renewal_core
     from engine import scenario_ma_context, scenario_snapshot
 
@@ -62,6 +62,7 @@ def review_policy_binding(*, research_mode="legacy"):
         'live/scenario_preview.py': scenario_preview,
         'core/scenario_limit_prices.py': scenario_limit_prices,
         'core/llm_scenario.py': llm_scenario,
+        'core/scenario_convergence.py': scenario_convergence,
         'core/scenario_stop_policy.py': scenario_stop_policy,
         'core/scenario_pending_renewal.py': pending_renewal_core,
         'live/scenario_pending_renewal.py': scenario_pending_renewal,
@@ -193,7 +194,7 @@ def _loaded_parity(name, source, selected=None):
 
 def _manifest():
     root = Path(__file__).resolve().parents[1]
-    policy_files = ['live/scenario_llm.py', 'live/scenario_contract.py',
+    policy_files = ['core/scenario_convergence.py', 'live/scenario_llm.py', 'live/scenario_contract.py',
                     'live/scenario_recovery.py',
                     'live/scenario_review_memory.py',
                     'live/scenario_runner_economics.py',
