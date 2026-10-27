@@ -1,10 +1,14 @@
 import gzip
 import sqlite3
+import sys
+from pathlib import Path
 
 import pytest
 
 from analysis.scenario_replay import _runtime_event_hash
 from live.scenario_review_storage import MAGIC, MAX_BYTES, review_text
+
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 from observability.review_storage import review_text as export_text
 
 
