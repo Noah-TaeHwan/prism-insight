@@ -397,3 +397,27 @@ def test_remote_proxy_not_allowed(monkeypatch,url):
     monkeypatch.setenv('PRISM_BTC_SCENARIO_OAUTH_URL',url)
     with pytest.raises(ValueError,match='local_oauth_proxy_required'):
         call(lambda *a,**kw:pytest.fail('no network'))
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_timeout_type_is_preserved_without_transport_details(wrapped):
+    from urllib.error import URLError
+    error = TimeoutError('sensitive transport details')
+    def open_url(*args, **kwargs):
+        raise URLError(error) if wrapped else error
+    with pytest.raises(ValueError, match='^scenario_oauth_failed$') as exc:
+        generate_scenario(system_prompt='test', user_prompt='test', model='gpt-6-luna',
+            reasoning_effort='high', fast_tier=True, timeout=75, open_url=open_url,
+            response_schema={'type': 'object'})
+    assert type(exc.value).__name__ == 'ScenarioOAuthTimeout'
+    assert exc.value.__cause__ is None
+
+
+def test_other_transport_error_does_not_claim_timeout():
+    from urllib.error import URLError
+    def open_url(*args, **kwargs):
+        raise URLError('sensitive connection failure')
+    with pytest.raises(ValueError, match='^scenario_oauth_failed$') as exc:
+        generate_scenario(system_prompt='test', user_prompt='test', model='gpt-6-luna',
+            reasoning_effort='high', fast_tier=True, timeout=75, open_url=open_url,
+            response_schema={'type': 'object'})
+    assert type(exc.value) is ValueError
