@@ -1,6 +1,7 @@
 """Real-money re-entry/add orders that end in ERROR reach the maintenance chat the same day."""
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 from prism_core import ops_alert
@@ -82,3 +83,21 @@ def test_add_broker_refusal_alerts(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, out, ""))
     runner.live_add_provider("KR")({"symbol": "000660"}, {}, "now")
     assert len(sent) == 1 and "005930: 주문가능금액 부족" in sent[0]
+
+
+def test_worker_stop_between_ticks_exits_cleanly(monkeypatch):
+    # systemd stops the unit with SIGINT; that must not print a traceback the watchdog reads as a crash.
+    spec = importlib.util.spec_from_file_location("run_b3_ae_shadow", ROOT / "tools/run_b3_ae_shadow.py")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    from observability import b3_ae_capture
+    from prism_core import micro_split_live
+    monkeypatch.setattr(b3_ae_capture, "enabled", lambda: False)
+    monkeypatch.setattr(micro_split_live, "live_enabled", lambda market: False)
+    monkeypatch.setattr(runner, "write_health", lambda *a: None)
+    monkeypatch.setattr(sys, "argv", ["run_b3_ae_shadow.py", "--market", "us"])
+
+    def interrupted(_):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(runner.time, "sleep", interrupted)
+    assert runner.main() == 0
